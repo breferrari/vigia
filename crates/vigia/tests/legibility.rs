@@ -418,6 +418,7 @@ fn every_row_kind() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -650,6 +651,7 @@ fn awkward() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -691,6 +693,7 @@ fn empty() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -719,6 +722,7 @@ fn numbered(n: usize, files: usize, listed: usize) -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -949,6 +953,7 @@ fn glancing() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -2412,6 +2417,7 @@ fn a_label_cut_at_the_right_edge_says_so() {
     let view = View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -2550,6 +2556,7 @@ fn a_clipped_content_line_says_it_continues() {
     let view = View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -3590,6 +3597,7 @@ fn overlong(rows: usize) -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,

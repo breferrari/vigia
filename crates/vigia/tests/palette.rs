@@ -80,6 +80,7 @@ fn three_kinds() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -591,6 +592,7 @@ fn graded_heat() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,

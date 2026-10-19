@@ -117,6 +117,7 @@ fn the_collected_view_carries_what_the_walk_hid() {
         landing: false,
         single: false,
         pictures: false,
+        rise: None,
         highlight: false,
     };
 

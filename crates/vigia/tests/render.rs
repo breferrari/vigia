@@ -267,6 +267,7 @@ fn highlighted(kind: LineKind, text: &str, spans: Vec<Span>) -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -349,6 +350,7 @@ fn one_file() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -520,6 +522,7 @@ fn nothing_changed() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -981,6 +984,7 @@ fn ragged_counts() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -1894,6 +1898,7 @@ fn a_file_with_no_line_diff_says_why() {
     let view = View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -1964,6 +1969,7 @@ fn a_path_too_long_to_fit_keeps_the_end_that_names_the_file() {
     let view = View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -1998,6 +2004,7 @@ fn a_hunk_covering_one_line_is_written_git_s_way() {
     let view = View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -2234,6 +2241,7 @@ fn tabs_become_columns_and_control_characters_become_visible() {
     let view = View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -2274,6 +2282,7 @@ fn a_double_width_character_is_never_cut_in_half() {
     let view = View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -2335,6 +2344,7 @@ fn the_gutter_gives_way_before_the_text_does() {
     let view = View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -2414,6 +2424,7 @@ fn hostile_content_never_panics_at_any_pane_size() {
     let view = View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -2809,6 +2820,7 @@ fn glancing() -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -3402,6 +3414,7 @@ fn two_regions_at(current: usize, row: usize) -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
@@ -3801,6 +3814,7 @@ fn a_list_of(files: usize, shown: usize, top: usize) -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,

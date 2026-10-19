@@ -766,6 +766,7 @@ fn collect_resolves_every_degenerate_viewport() {
                                 // Not a sweep dimension, unlike `landing` above.
                                 single: false,
                                 pictures: false,
+                                rise: None,
                                 // This sweep is about where the two regions land, which
                                 // is decided before anything is coloured.
                                 highlight: true,

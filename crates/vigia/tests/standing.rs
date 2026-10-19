@@ -73,6 +73,7 @@ fn viewport() -> Viewport {
         landing: false,
         single: false,
         pictures: false,
+        rise: None,
         highlight: false,
     }
 }

@@ -82,6 +82,7 @@ fn one_file(notes: FileNotes, newest: bool) -> View {
     View {
         hidden: 0,
         whole: Vec::new(),
+        steps: Vec::new(),
         landed: false,
         ended: false,
         recorded: 0,
