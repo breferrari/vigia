@@ -2052,3 +2052,37 @@ fn step_up_span() {
         "the bar clamped the second file's row against the first file's span"
     );
 }
+
+#[test]
+fn box_keeps_end() {
+    let height = body();
+    let end_of = |boxed: bool| {
+        let (scratch, mut app) = noted("scroll-note-box-end", LAST, height * 2);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let mut highlighter = Highlighter::eager();
+        let last = stepped(&mut app, &mut frame, &mut highlighter, Action::Bottom);
+        if boxed {
+            // The removed line, above the line the note hangs under.
+            let anchor = last.anchor_at(2).expect("the removed line takes a note");
+            app.open_box(anchor, None);
+        }
+        stepped(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            Action::DiffTo(vigia::TRACK_SCALE),
+        );
+        app.take_box();
+        let view = app
+            .view(&mut frame, &mut highlighter, &History::new(), split())
+            .expect("view");
+        (view.top, view.rows)
+    };
+    assert_eq!(
+        end_of(true),
+        end_of(false),
+        "a box open at the end of the diff moved where the reader stands once it closed"
+    );
+}

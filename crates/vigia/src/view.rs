@@ -2628,8 +2628,7 @@ impl View {
         // the end moves one row; over wrapped lines alone it moves nothing stored.
         let trims_hung =
             (0..from).any(|at| costs[at].1 > 0) || above > costs.get(from).map_or(0, |c| c.0);
-        let stored =
-            (aiming || (at_bottom && boxed_rows == 0 && trims_hung)) && from < breaks.len();
+        let stored = (aiming || (at_bottom && trims_hung)) && from < breaks.len();
         if stored {
             self.top = Position {
                 under: above.saturating_sub(breaks[from].len()),
