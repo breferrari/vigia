@@ -280,7 +280,7 @@ impl Inks {
         // Unanswered, the palette says which: a light one washes rows light.
         let washed_light = matches!(
             theme.removed_row.bg,
-            Some(ratatui::style::Color::Rgb(r, g, b)) if u16::from(r) + u16::from(g) + u16::from(b) > 382
+            Some(ratatui::style::Color::Rgb(r, g, b)) if crate::Background::of((r, g, b)) == crate::Background::Light
         );
         let canvas = pane.unwrap_or(if light || washed_light {
             (255, 255, 255)
@@ -380,9 +380,7 @@ impl Pictures {
     fn collect(&mut self) {
         while let Ok((key, built)) = self.done.try_recv() {
             self.pending.remove(&key);
-            // A picture that left the screen while it was built is not kept.
-            let shown = self.shown.lock().map_or(true, |shown| shown.contains(&key));
-            if let Some(built) = built.filter(|_| shown) {
+            if let Some(built) = built {
                 self.built.insert(key, Ready(Arc::new(built)));
             }
         }
@@ -422,7 +420,7 @@ impl Pictures {
         self.built.retain(|key, _| shown.contains(key));
         // Before any job is sent, or the worker can skip one as not on screen.
         if let Ok(mut on_screen) = self.shown.lock() {
-            on_screen.clone_from(&shown);
+            *on_screen = shown;
         }
         for (key, file, picture) in hung {
             if self.built.contains_key(&**key) || self.pending.contains(&**key) {
@@ -465,6 +463,10 @@ impl Pictures {
         loop {
             self.collect();
             if self.pending.is_empty() {
+                // A picture that left the screen while it was built is not kept.
+                if let Ok(shown) = self.shown.lock() {
+                    self.built.retain(|key, _| shown.contains(key));
+                }
                 return true;
             }
             if std::time::Instant::now() >= until {
@@ -531,9 +533,10 @@ fn flatten(image: &mut RgbaImage, canvas: (u8, u8, u8)) {
 
 /// Which pixels differ between two images of one size, alpha included.
 fn changed(old: &RgbaImage, new: &RgbaImage) -> Vec<bool> {
+    // Two pixels nobody can see are the same whatever colour they store.
     old.pixels()
         .zip(new.pixels())
-        .map(|(a, b)| a != b)
+        .map(|(a, b)| a != b && (a.0[3] != 0 || b.0[3] != 0))
         .collect()
 }
 
@@ -590,7 +593,7 @@ fn painted(mut image: RgbImage, hit: Option<&[bool]>, paint: Paint, inks: Inks) 
     let canvas = [cr, cg, cb].map(f32::from);
     // Toward the pane and away from it by lightness, hard enough that a light
     // screen does not become a slab beside the changed ink.
-    let toward = if canvas.iter().sum::<f32>() > 382.0 {
+    let toward = if crate::Background::of(inks.canvas) == crate::Background::Light {
         -38.0
     } else {
         38.0
@@ -814,6 +817,17 @@ mod tests {
             changed(&old, &new),
             [true, true, false],
             "a one-step shade or an alpha-only change went uncounted"
+        );
+    }
+
+    #[test]
+    fn invisible_pixels_equal() {
+        let old = RgbaImage::from_pixel(1, 1, image::Rgba([10, 20, 30, 0]));
+        let new = RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 0]));
+        assert_eq!(
+            changed(&old, &new),
+            [false],
+            "a re-encoded transparent pixel counted"
         );
     }
 
