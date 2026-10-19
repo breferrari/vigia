@@ -120,10 +120,15 @@ fn panics_draw_undecoded() {
     pictures::panic_next(Stage::Decode);
     let (said, _) = outcome(&settled(&mut app, &mut pictures, &mut frame));
     assert_eq!(said.as_deref(), Some("could not be decoded"));
-    // A rewrite of the same file is a new picture for the same worker.
-    // A new stamp needs a new time, which some filesystems keep to the second.
-    std::thread::sleep(Duration::from_millis(1100));
+    // A new picture for the same worker. Its stamp reads the file's time,
+    // which some filesystems keep to the second, so the time is set.
     scratch.write("screen.png", png(120, 260, 9));
+    std::fs::File::options()
+        .write(true)
+        .open(scratch.path_of("screen.png"))
+        .expect("open")
+        .set_modified(std::time::SystemTime::now() + Duration::from_secs(10))
+        .expect("set the time");
     frame.advance().expect("advance");
     let (_, panels) = outcome(&settled(&mut app, &mut pictures, &mut frame));
     assert_eq!(
@@ -170,20 +175,9 @@ fn child(which: &str) -> std::process::Command {
 }
 
 #[cfg(unix)]
-fn script() -> pty::Script<'static> {
-    pty::Script {
-        marker: "",
-        answer: None,
-        delay: Duration::ZERO,
-        piped: false,
-        detached: false,
-    }
-}
-
-#[cfg(unix)]
 #[test]
 fn worker_panic_keeps_screen() {
-    let (mut running, mut master) = pty::start(child("worker"), &script());
+    let (mut running, mut master) = pty::start(child("worker"), &pty::Script::default());
     let mut seen = Vec::new();
     pty::read_until(&mut master, &mut seen, "survived", Duration::from_secs(20));
     let status = running
@@ -204,7 +198,7 @@ fn worker_panic_keeps_screen() {
 #[test]
 fn main_panic_restores() {
     use std::os::unix::process::ExitStatusExt;
-    let (mut running, mut master) = pty::start(child("main"), &script());
+    let (mut running, mut master) = pty::start(child("main"), &pty::Script::default());
     let mut seen = Vec::new();
     pty::read_until(
         &mut master,

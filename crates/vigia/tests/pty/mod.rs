@@ -10,6 +10,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// What the terminal does while the child runs.
+#[derive(Default)]
 pub struct Script<'a> {
     /// What the query ends with, which says it has arrived.
     pub marker: &'a str,

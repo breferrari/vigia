@@ -260,7 +260,7 @@ lto = "thin"
 # construction, since neither moves, and the Windows gates that would notice run
 # on a shared runner with slack. Stated rather than papered over.
 codegen-units = 2
-# Unwinds so the picture worker can catch a decoder's panic (#645). The panic
+# Unwinds so the picture worker can catch a decoder's panic. The panic
 # hook still aborts on every other thread, so that behaviour is unchanged.
 panic = "unwind"
 

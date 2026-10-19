@@ -3358,8 +3358,8 @@ fn dist_install_retries() {
 /// The packages in `lock` that could run a picture's decode on a thread of
 /// their own, or in C: a thread pool, or a codec built on a native library.
 fn threaded_codecs(lock: &str) -> Vec<String> {
-    const CODECS: [&str; 10] = [
-        "png", "jpeg", "jpg", "gif", "webp", "tiff", "avif", "heif", "dav1d", "turbo",
+    const CODECS: [&str; 9] = [
+        "png", "jpeg", "gif", "webp", "tiff", "avif", "heif", "dav1d", "turbo",
     ];
     lock.split("[[package]]")
         .filter_map(|block| {
