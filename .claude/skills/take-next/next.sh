@@ -36,7 +36,7 @@ fi
 
 title=$(printf '%s\n' "$ranked" | head -n 1)
 if [ -z "$title" ]; then
-  echo "no eligible milestone: what is left is shelved, exhausted, or nothing. Read which before acting."
+  echo "no eligible milestone: what is left is finished or empty. Read which before acting."
   exit 0
 fi
 printf 'milestone: %s\n' "$title"
