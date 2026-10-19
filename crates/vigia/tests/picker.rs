@@ -20,9 +20,14 @@ fn silent_child() {
     let began = Instant::now();
     let (picker, answer) = vigia::picker(true);
     let waited = began.elapsed();
+    // SAFETY: a zeroed termios is a valid out-parameter for tcgetattr.
+    let mut modes: libc::termios = unsafe { std::mem::zeroed() };
+    // SAFETY: stdin is this child's terminal, and `modes` is owned here.
+    unsafe { libc::tcgetattr(0, &mut modes) };
+    let canon = modes.c_lflag & (libc::ICANON | libc::ECHO) == (libc::ICANON | libc::ECHO);
     let mut tty = std::fs::File::open("/dev/tty").expect("the child has a terminal");
     println!(
-        "asked {:.3} {:?} {answer:?}",
+        "asked {:.3} {:?} {answer:?} canon={canon}",
         waited.as_secs_f64() * 1000.0,
         picker.protocol_type()
     );
@@ -41,6 +46,10 @@ fn silent_terminal_no_reader() {
         line.contains("Halfblocks"),
         "a silent terminal chose a protocol: {line}"
     );
+    assert!(
+        line.contains("canon=true"),
+        "the query left the terminal without line mode or echo: {line}"
+    );
     let waited: f64 = line
         .split("asked ")
         .nth(1)
@@ -48,7 +57,8 @@ fn silent_terminal_no_reader() {
         .and_then(|w| w.parse().ok())
         .unwrap_or(f64::MAX);
     assert!(
-        waited < vigia::PICTURES_WAIT.as_secs_f64() * 1000.0 + 100.0,
+        // The query's wait, then the wait for a late answer to begin.
+        waited < 2.0 * vigia::PICTURES_WAIT.as_secs_f64() * 1000.0 + 100.0,
         "the query waited {waited}ms on a silent terminal: {line}"
     );
 }
@@ -85,6 +95,27 @@ fn asked_line(text: &str) -> &str {
 /// Run the child in a fresh terminal that sends `answer` once the query arrives,
 /// or nothing, then type a byte; everything the terminal showed.
 fn asked_in_pty(answer: Option<&[u8]>) -> String {
+    asked_after(answer, Duration::ZERO)
+}
+
+#[test]
+fn late_answer_drained() {
+    // Past the query's own wait, so only the drain stands between it and the reader.
+    let late = vigia::PICTURES_WAIT + Duration::from_millis(100);
+    let text = asked_after(Some(b"\x1b_Gi=31;OK\x1b\\\x1b[6;20;10t\x1b[0n"), late);
+    assert!(
+        text.contains("got z"),
+        "a late answer reached the reader as keys: {text}"
+    );
+    let line = asked_line(&text);
+    assert!(
+        line.contains("canon=true"),
+        "line mode or echo was lost: {line}"
+    );
+}
+
+/// [`asked_in_pty`] with the answer sent `late` after the query arrives.
+fn asked_after(answer: Option<&[u8]>, late: Duration) -> String {
     let (mut master, slave) = {
         let (mut master, mut slave) = (0, 0);
         // SAFETY: both out-pointers are valid; the rest may be null.
@@ -132,6 +163,7 @@ fn asked_in_pty(answer: Option<&[u8]>) -> String {
     let mut seen = Vec::new();
     if let Some(answer) = answer {
         read_until(&mut master, &mut seen, "[5n", Duration::from_secs(20));
+        std::thread::sleep(late);
         master.write_all(answer).expect("answer the query");
     }
     read_until(&mut master, &mut seen, "asked ", Duration::from_secs(20));

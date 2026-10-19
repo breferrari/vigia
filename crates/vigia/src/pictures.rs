@@ -328,6 +328,8 @@ pub struct Answer {
     pub sixel: bool,
     /// Its cell size in pixels is known.
     pub cell: bool,
+    /// It answered any of the query, so a protocol it did not claim is absent.
+    pub heard: bool,
 }
 
 /// Which protocol draws the pictures: the override, then the answer, then the
@@ -356,7 +358,12 @@ pub fn protocol_of(
     if !answer.cell {
         return Ok(ProtocolType::Halfblocks);
     }
-    Ok(protocol_by_name(&lookup).unwrap_or(ProtocolType::Halfblocks))
+    Ok(match protocol_by_name(&lookup) {
+        // Kitty and Sixel answer for themselves; only iTerm2 images cannot.
+        Some(ProtocolType::Kitty | ProtocolType::Sixel) if answer.heard => ProtocolType::Halfblocks,
+        Some(protocol) => protocol,
+        None => ProtocolType::Halfblocks,
+    })
 }
 
 /// Whether pictures are drawn at all: a half-block is a background, which is
@@ -396,7 +403,8 @@ fn protocol_by_name(lookup: &impl Fn(&str) -> Option<String>) -> Option<Protocol
     {
         return Some(ProtocolType::Kitty);
     }
-    if names(&term, "foot") || set("WT_SESSION") {
+    // Inherited by whatever Windows Terminal starts, so only a bare one counts.
+    if names(&term, "foot") || (program.is_empty() && set("WT_SESSION")) {
         return Some(ProtocolType::Sixel);
     }
     None
@@ -1061,6 +1069,7 @@ mod tests {
         kitty: false,
         sixel: false,
         cell: true,
+        heard: false,
     };
 
     #[test]
@@ -1110,6 +1119,7 @@ mod tests {
             kitty: true,
             sixel: true,
             cell: true,
+            heard: true,
         };
         assert_eq!(protocol_of(kitty, &wezterm), Ok(ProtocolType::Kitty));
         let sixel = Answer {
@@ -1146,6 +1156,32 @@ mod tests {
         ] {
             assert_eq!(protocol_of(KNOWN, env(pairs)), Ok(want), "{pairs:?}");
         }
+    }
+
+    #[test]
+    fn answer_denies_table() {
+        let heard = Answer {
+            heard: true,
+            ..KNOWN
+        };
+        assert_eq!(
+            protocol_of(heard, env(&[("WT_SESSION", "abc")])),
+            Ok(ProtocolType::Halfblocks),
+            "the table drew Sixel for a terminal that answered without it"
+        );
+        assert_eq!(
+            protocol_of(heard, env(&[("TERM_PROGRAM", "WezTerm")])),
+            Ok(ProtocolType::Iterm2),
+            "an answer hid iTerm2 images, which no terminal reports"
+        );
+        assert_eq!(
+            protocol_of(
+                KNOWN,
+                env(&[("WT_SESSION", "abc"), ("TERM_PROGRAM", "vscode")])
+            ),
+            Ok(ProtocolType::Halfblocks),
+            "an inherited WT_SESSION drew Sixel in VS Code"
+        );
     }
 
     #[test]

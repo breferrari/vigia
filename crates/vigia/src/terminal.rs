@@ -407,20 +407,40 @@ pub const PICTURES_WAIT: std::time::Duration = std::time::Duration::from_millis(
 /// nothing would cost a second wait. Windows sends no other query, so it always
 /// asks.
 pub fn picker(answered: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
+    use ratatui::crossterm::terminal::{disable_raw_mode, enable_raw_mode, is_raw_mode_enabled};
     use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
+    let unknown = || (Picker::halfblocks(), crate::pictures::Answer::default());
     if cfg!(unix) && !answered {
-        return (Picker::halfblocks(), crate::pictures::Answer::default());
+        return unknown();
     }
     let options = QueryStdioOptions {
         timeout_ms: PICTURES_WAIT.as_millis() as i32,
         #[cfg(unix)]
         stdio: query_stdio(),
-        #[cfg(unix)]
-        kitty_shared_memory_object: QueryStdioOptions::probe_kitty_smo(),
         ..QueryStdioOptions::default()
     };
-    let picker =
-        Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks());
+    // Raw through crossterm, which restores what it saved: the crate leaves its
+    // own raw mode on when its query times out.
+    let raw = is_raw_mode_enabled().unwrap_or(false);
+    let entered = !raw && enable_raw_mode().is_ok();
+    let began = std::time::Instant::now();
+    let picker = Picker::from_query_stdio_with_options(options);
+    // Only a timeout lasts the whole wait; the rest of a late answer would
+    // reach the event reader as keys.
+    #[cfg(unix)]
+    if began.elapsed() >= PICTURES_WAIT {
+        drain_late();
+    }
+    if entered {
+        let _ = disable_raw_mode();
+    }
+    let Ok(picker) = picker else {
+        return unknown();
+    };
+    let font = picker.font_size();
+    if font.width == 0 || font.height == 0 {
+        return unknown();
+    }
     let caps = picker.capabilities();
     // The terminal's own size in pixels, which the crate's fallback reads too.
     let sized = ratatui::crossterm::terminal::window_size()
@@ -432,8 +452,55 @@ pub fn picker(answered: bool) -> (ratatui_image::picker::Picker, crate::pictures
             || caps
                 .iter()
                 .any(|cap| matches!(cap, Capability::CellSize(Some(_)))),
+        heard: !caps.is_empty(),
     };
     (picker, answer)
+}
+
+/// Whether `reply` holds the device status answer that ends the picture query.
+#[cfg(any(unix, test))]
+fn status_in(reply: &[u8]) -> bool {
+    reply.windows(4).any(|w| w == b"\x1b[0n")
+}
+
+/// Read and drop what is left of a picture answer that came late, up to its
+/// status answer, with [`ask`]'s waits: [`PICTURES_WAIT`] for it to begin and
+/// [`ANSWERING`] to finish.
+#[cfg(unix)]
+fn drain_late() {
+    use std::os::fd::AsFd;
+    let Some((input, _)) = query_stdio() else {
+        return;
+    };
+    let mut reply = Vec::new();
+    let start = std::time::Instant::now();
+    loop {
+        let deadline = start + wait_limit(true, !reply.is_empty(), PICTURES_WAIT);
+        let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) else {
+            return;
+        };
+        let fd = input.as_fd();
+        let mut fds = [rustix::event::PollFd::new(
+            &fd,
+            rustix::event::PollFlags::IN,
+        )];
+        let Ok(timeout) = left.try_into() else {
+            return;
+        };
+        match rustix::event::poll(&mut fds, Some(&timeout)) {
+            Ok(0) => continue,
+            Ok(_) if fds[0].revents().contains(rustix::event::PollFlags::IN) => {}
+            _ => return,
+        }
+        let mut buffer = [0u8; 256];
+        match rustix::io::read(&input, &mut buffer) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => reply.extend_from_slice(&buffer[..read]),
+        }
+        if status_in(&reply) {
+            return;
+        }
+    }
 }
 
 /// The descriptors the picture query reads and writes: the terminal's own when
