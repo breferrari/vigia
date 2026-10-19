@@ -1095,3 +1095,22 @@ fn built_after_pick() {
         "the held picture was not built once the picker was given"
     );
 }
+
+#[test]
+fn kitty_deleted_on_quit() {
+    let (scratch, mut pane) = protocol_pane("pictures-kitty-quit", ProtocolType::Kitty);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let sent = kitty_ids(&pane.draw(&view));
+    assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
+    pane.pictures.retire_all();
+    let deletes = pane.pictures.retired();
+    for id in &sent {
+        assert!(
+            deletes.contains(&format!("a=d,d=I,i={id},q=2")),
+            "image {id} was left in the terminal on quit: {deletes:?}"
+        );
+    }
+}
