@@ -537,8 +537,8 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 | ⬜ | **10. Current Rust** | The code uses what the newest stable Rust offers | 1.2.0 |
 | ⬜ | **11. Off the paint** | Work that grows with a file or a repository moves off drawing the screen | 1.3.0 |
 | ⬜ | **12. Correct at the edges** | Every file, path, terminal, theme and note is drawn and reported right | 1.4.0 |
-| ⬜ | **13. Testable by construction** | Every gesture and table can be tested, and is derived rather than checked by hand | internal |
-| ⬜ | **14. The instruments** | Releases and the project's own tooling hold by mechanism, not by care | internal |
+| ⬜ | **13. Testable by construction** | Every gesture and table can be tested, and cannot drift from the code it describes | internal |
+| ⬜ | **14. The instruments** | Releases and the project's own tooling keep working without anyone having to remember a step | internal |
 
 Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and is written *before* the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked. [`CHANGELOG.md`](CHANGELOG.md) is every released version and what moved in it.
 
