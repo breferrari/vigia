@@ -2,8 +2,8 @@
 
 draft-runs: skip
 
-`ci.yml` skips every job while a pull request is a draft, so a run created before the ready call tested nothing. The line above makes `checks.sh` count only runs created after it.
+`ci.yml` skips every job until a pull request is ready, so the line above makes `checks.sh` count only runs made after `gh pr ready`.
 
 ## 5. Scope the checks
 
-A code diff also runs the doc build CI runs, before `gh pr ready` and before any push after it: `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps`. CI fails the `fmt and docs` leg on a doc warning, such as a public doc that links a private item, and nothing else the scope runs finds one.
+A code diff also runs the doc build in `CONTRIBUTING.md`'s command list, before `gh pr ready` and before any later push. CI fails its `fmt and docs` leg on a doc warning, such as a public doc that links a private item, and no other local check catches one.
