@@ -4,6 +4,10 @@
 
 //! A disposable git repository, built by real `git`.
 
+mod assets;
+#[allow(unused_imports)]
+pub use assets::*;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -1269,45 +1273,4 @@ impl Scratch {
         );
         scratch
     }
-}
-
-/// `image` encoded as `format`. JPEG has no alpha channel to encode.
-pub fn encode_image(image: &image::RgbaImage, format: image::ImageFormat) -> Vec<u8> {
-    let mut bytes = std::io::Cursor::new(Vec::new());
-    match format {
-        image::ImageFormat::Jpeg => image::DynamicImage::ImageRgba8(image.clone())
-            .to_rgb8()
-            .write_to(&mut bytes, format),
-        _ => image.write_to(&mut bytes, format),
-    }
-    .expect("encode the fixture");
-    bytes.into_inner()
-}
-
-/// An image of `width` by `height` in `format`, every pixel from `seed`.
-pub fn encoded(format: image::ImageFormat, width: u32, height: u32, seed: u8) -> Vec<u8> {
-    let image = image::RgbaImage::from_fn(width, height, |x, y| {
-        image::Rgba([seed, (x % 256) as u8, (y % 256) as u8, 255])
-    });
-    encode_image(&image, format)
-}
-
-/// A phone-sized screenshot as a PNG, its colours from `accent`.
-pub fn screen_png(accent: u8) -> Vec<u8> {
-    let image = image::RgbaImage::from_fn(1170, 2532, |x, y| {
-        image::Rgba([accent, (x % 251) as u8, (y % 241) as u8, 255])
-    });
-    encode_image(&image, image::ImageFormat::Png)
-}
-
-/// An icon-shaped SVG: a gradient circle and a stroked path, its colours
-/// moved by `seed`.
-pub fn icon_svg(seed: u8) -> String {
-    format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#{seed:02x}0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#g)"/><path d="M7 12l3 3 7-7" stroke="#fff" stroke-width="2" fill="none"/></svg>"##
-    )
-}
-
-pub fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
-    encoded(image::ImageFormat::Png, width, height, seed)
 }

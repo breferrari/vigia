@@ -5,7 +5,7 @@ mod support;
 use std::io::Cursor;
 
 use image::{ImageFormat, RgbaImage};
-use support::{Scratch, changes_sorted, encoded, png};
+use support::{Scratch, changes_sorted, encoded, lfs_pointer, png};
 use vigia_core::{FileDiff, Format, ImageSide, Origin, Picture};
 
 /// The diff of the one change at `rela`.
@@ -277,24 +277,12 @@ fn staged_image_line() {
     );
 }
 
-/// The text of an LFS pointer to `content`, under an oid made from `seed`. The
-/// pane reads the object at the oid's path and never hashes it, so any 64 hex
-/// digits serve.
-fn pointer(content: &[u8], seed: u8) -> (String, String) {
-    let oid = format!("{seed:02x}").repeat(32);
-    let text = format!(
-        "version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {}\n",
-        content.len()
-    );
-    (oid, text)
-}
-
 /// A repository whose `a.png` is stored as an LFS pointer to `old`, with `new`
 /// in the worktree. No `git-lfs` is needed: the pointer is committed as text,
 /// and the attribute and filter are set after.
 fn lfs_repo(name: &str, old: &[u8], new: &[u8]) -> (Scratch, String) {
     let scratch = Scratch::new(name);
-    let (oid, text) = pointer(old, 0xab);
+    let (oid, text) = lfs_pointer(old, 0xab);
     scratch.write("a.png", &text);
     scratch.commit_all("initial");
     scratch.write(

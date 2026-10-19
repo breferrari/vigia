@@ -11,7 +11,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui_image::picker::{Picker, ProtocolType};
-use support::{Scratch, png};
+use support::{Scratch, animated_gif, png};
 use vigia::pictures::{Inks, Kind, Pictures};
 use vigia::{Action, App, Glyphs, Pointing, Row, Theme, View, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, Standing};
@@ -340,19 +340,7 @@ fn changed_count_line() {
 #[test]
 fn gif_first_frame() {
     let first = screen_like(40, 40, [40, 90, 200]);
-    let gif = |second: &RgbaImage| {
-        let mut bytes = Vec::new();
-        {
-            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
-            encoder
-                .encode_frames(vec![
-                    image::Frame::new(first.clone()),
-                    image::Frame::new(second.clone()),
-                ])
-                .expect("encode");
-        }
-        bytes
-    };
+    let gif = |second: &RgbaImage| animated_gif(&[first.clone(), second.clone()]);
     let scratch = changed(
         "pictures-gif",
         "spinner.gif",
