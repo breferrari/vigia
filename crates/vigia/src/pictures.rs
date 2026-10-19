@@ -449,6 +449,8 @@ pub struct Pictures {
     tmux: bool,
     /// Where the picker goes, until it has been given.
     picker: Option<mpsc::Sender<Picker>>,
+    /// How many images this cache's worker has decoded.
+    decoded: Arc<AtomicU64>,
 }
 
 /// A Kitty image id no other picture, nor another pane on the same terminal,
@@ -470,20 +472,16 @@ fn kitty_id() -> u32 {
     }
 }
 
-/// Pictures decoded since the process started, on any thread.
-static DECODES: AtomicU64 = AtomicU64::new(0);
-/// Of those, the ones decoded anywhere but the worker, which is a paint paying
-/// for one.
+std::thread_local! {
+    /// Decodes on this thread since its worker last handed them to its cache.
+    static DECODED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+/// Pictures decoded anywhere but a worker, which is a paint paying for one.
 static OFF_WORKER: AtomicU64 = AtomicU64::new(0);
 /// The worker thread's name, which is how a decode knows where it runs.
 const WORKER: &str = "vigia-pictures";
 
 pub use vigia_core::{Stage, panic_next};
-
-/// How many images have been decoded so far.
-pub fn decodes() -> u64 {
-    DECODES.load(Ordering::Relaxed)
-}
 
 /// How many images have been decoded on a thread that is not the worker.
 pub fn decodes_off_worker() -> u64 {
@@ -517,6 +515,8 @@ impl Pictures {
         let (picked, picker) = mpsc::channel::<Picker>();
         let shown = Arc::new(Mutex::new(HashSet::new()));
         let still = Arc::clone(&shown);
+        let decoded = Arc::new(AtomicU64::new(0));
+        let counted = Arc::clone(&decoded);
         // Detached: it ends when the cache, and with it the sender, is dropped.
         let _ = std::thread::Builder::new()
             .name(WORKER.to_owned())
@@ -536,6 +536,9 @@ impl Pictures {
                     let built = wanted.then(|| {
                         vigia_core::caught(|| build(&job, inks, &picker)).unwrap_or_else(undecoded)
                     });
+                    // Before the send, so a caller that has the picture sees
+                    // what it cost.
+                    counted.fetch_add(DECODED.take(), Ordering::Relaxed);
                     vigia_core::armed(Stage::Worker);
                     if outbox.send((job.key, built)).is_err() {
                         break;
@@ -552,7 +555,14 @@ impl Pictures {
             retired: Vec::new(),
             tmux: false,
             picker: Some(picked),
+            decoded,
         }
+    }
+
+    /// How many images this cache's worker has decoded, every picture it has
+    /// handed back counted.
+    pub fn decodes(&self) -> u64 {
+        self.decoded.load(Ordering::Relaxed)
     }
 
     /// Say how pictures are encoded, which starts the held jobs. Once only.
@@ -1104,8 +1114,9 @@ type Decoded = (RgbaImage, Option<Vec<u8>>);
 fn read_counted(source: &Source) -> Option<Vec<u8>> {
     let bytes = source.read()?;
     vigia_core::armed(Stage::Decode);
-    DECODES.fetch_add(1, Ordering::Relaxed);
-    if std::thread::current().name() != Some(WORKER) {
+    if std::thread::current().name() == Some(WORKER) {
+        DECODED.set(DECODED.get() + 1);
+    } else {
         OFF_WORKER.fetch_add(1, Ordering::Relaxed);
     }
     Some(bytes)

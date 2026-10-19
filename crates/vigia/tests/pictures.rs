@@ -12,7 +12,7 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui_image::picker::{Picker, ProtocolType};
 use support::{Scratch, png};
-use vigia::pictures::{self, Inks, Kind, Pictures};
+use vigia::pictures::{Inks, Kind, Pictures};
 use vigia::{Action, App, Glyphs, Pointing, Row, Theme, View, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, Standing};
 
@@ -802,7 +802,7 @@ fn worker_skips_hidden() {
             let _ = held.lock().map(|held| held.recv());
         }),
     );
-    let decoded = pictures::decodes();
+    let decoded = pane.pictures.decodes();
     let queued = pane.view(&mut frame);
     let shown = queued
         .rows
@@ -815,7 +815,7 @@ fn worker_skips_hidden() {
         "the fixture did not put every picture on screen"
     );
     let started = std::time::Instant::now();
-    while pictures::decodes() - decoded < 2 {
+    while pane.pictures.decodes() - decoded < 2 {
         assert!(
             started.elapsed() < Duration::from_secs(60),
             "the first picture was never built"
@@ -831,7 +831,7 @@ fn worker_skips_hidden() {
     );
 
     assert_eq!(
-        pictures::decodes() - decoded,
+        pane.pictures.decodes() - decoded,
         2,
         "pictures nobody could see were decoded"
     );
