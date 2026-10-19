@@ -1127,6 +1127,34 @@ const PDF_LONG_SIDE: f32 = 1024.0;
 const PDF_BUDGET: f64 = 1.4 * 1024.0 * 1024.0 * 1024.0;
 /// The most objects one page's resources are read through to fingerprint it.
 const PDF_OBJECTS: usize = 10_000;
+/// The most content stream one document may decode, every page counted,
+/// before it is refused. A short file can list one stream many times.
+const PDF_DECODED: usize = 256 * 1024 * 1024;
+
+/// Each content stream of `page`, decoded one at a time, with `budget`
+/// spent on each; `None` once the budget is spent.
+fn page_contents<'a>(
+    page: &hayro::hayro_syntax::page::Page<'a>,
+    budget: &mut usize,
+    mut each: impl FnMut(&[u8]),
+) -> Option<()> {
+    use hayro::hayro_syntax::object::{Array, Stream};
+    let mut take = |stream: Stream<'_>| -> Option<()> {
+        let decoded = stream.decoded().ok()?;
+        *budget = budget.checked_sub(decoded.len())?;
+        each(&decoded);
+        Some(())
+    };
+    let raw = page.raw();
+    if let Some(stream) = raw.get::<Stream<'_>>(b"Contents") {
+        take(stream)?;
+    } else if let Some(array) = raw.get::<Array<'_>>(b"Contents") {
+        for stream in array.iter::<Stream<'_>>() {
+            take(stream)?;
+        }
+    }
+    Some(())
+}
 
 /// One PDF side, opened.
 fn open_pdf(source: &Option<Source>) -> Option<Option<hayro::hayro_syntax::Pdf>> {
@@ -1143,7 +1171,7 @@ fn open_pdf(source: &Option<Source>) -> Option<Option<hayro::hayro_syntax::Pdf>>
 
 /// A page's fingerprint: its content and every object its resources reach,
 /// or `None` when an image it holds is larger than any image may decode.
-fn page_print(page: &hayro::hayro_syntax::page::Page<'_>) -> Option<u64> {
+fn page_print(page: &hayro::hayro_syntax::page::Page<'_>, budget: &mut usize) -> Option<u64> {
     use hayro::hayro_syntax::object::{MaybeRef, Object};
     use std::hash::{Hash, Hasher};
     fn walk(
@@ -1206,7 +1234,7 @@ fn page_print(page: &hayro::hayro_syntax::page::Page<'_>) -> Option<u64> {
         Some(())
     }
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    page.page_stream().unwrap_or_default().hash(&mut hasher);
+    page_contents(page, budget, |stream| stream.hash(&mut hasher))?;
     if let Some(resources) = page.raw().get::<Object<'_>>(b"Resources") {
         walk(resources, page.xref(), &mut hasher, &mut HashSet::new())?;
     }
@@ -1215,7 +1243,11 @@ fn page_print(page: &hayro::hayro_syntax::page::Page<'_>) -> Option<u64> {
 
 /// Every page's fingerprint, or `None` when one holds an image too large.
 fn page_prints(pdf: &hayro::hayro_syntax::Pdf) -> Option<Vec<u64>> {
-    pdf.pages().iter().map(|page| page_print(&page)).collect()
+    let mut budget = PDF_DECODED;
+    pdf.pages()
+        .iter()
+        .map(|page| page_print(&page, &mut budget))
+        .collect()
 }
 
 /// Which page both sides draw, and what the line says about it.
@@ -1259,13 +1291,18 @@ fn pdf_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, Option<Stri
     };
     let (old_prints, new_prints) = (prints(&old)?, prints(&new)?);
     let (index, note) = chosen_page(old_prints.as_deref(), new_prints.as_deref());
-    let cost = [&old, &new]
-        .into_iter()
-        .flatten()
-        .filter_map(|pdf| pdf.pages().get(index).or_else(|| pdf.pages().first()))
-        .map(|page| page.page_stream().map_or(0, <[u8]>::len))
-        .max()
-        .unwrap_or(0);
+    // Past the length the floor refuses, a page is not decoded further.
+    let refused = (PDF_BUDGET / f64::from(SVG_SHORTEST)) as usize;
+    let mut cost = 0;
+    for pdf in [&old, &new].into_iter().flatten() {
+        let pages = pdf.pages();
+        let Some(page) = pages.get(index).or_else(|| pages.first()) else {
+            continue;
+        };
+        let mut budget = refused;
+        page_contents(page, &mut budget, |_| {})?;
+        cost = cost.max(refused - budget);
+    }
     let long = (PDF_BUDGET / cost.max(1) as f64).min(f64::from(PDF_LONG_SIDE)) as f32;
     if long < SVG_SHORTEST {
         return None;

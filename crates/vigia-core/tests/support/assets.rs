@@ -182,9 +182,17 @@ pub fn claimed_png(width: u32, height: u32) -> Vec<u8> {
     bytes
 }
 
-/// A PDF whose pages are `width` by `height` points and draw `content`, with
-/// `trailer` added to its trailer dictionary.
-pub fn pdf_with(pages: &[(u32, u32, &[u8])], trailer: &str) -> Vec<u8> {
+/// A PDF whose pages are `width` by `height` points, each drawing `content`
+/// listed `repeat` times in its `/Contents`, with `resources` as every page's
+/// resources and `trailer` added to the trailer dictionary. `extras` follow
+/// as objects of their own, numbered from `3 + 2 * pages`.
+pub fn pdf_doc(
+    pages: &[(u32, u32, &[u8])],
+    resources: &str,
+    repeat: usize,
+    extras: &[&[u8]],
+    trailer: &str,
+) -> Vec<u8> {
     let mut out = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n".to_vec();
     let mut offsets = Vec::new();
     let object = |out: &mut Vec<u8>, body: &[u8], offsets: &mut Vec<usize>| {
@@ -208,11 +216,16 @@ pub fn pdf_with(pages: &[(u32, u32, &[u8])], trailer: &str) -> Vec<u8> {
         &mut offsets,
     );
     for (page, (width, height, content)) in pages.iter().enumerate() {
+        let stream = format!("{} 0 R", 4 + 2 * page);
+        let contents = if repeat == 1 {
+            stream
+        } else {
+            format!("[{}]", vec![stream; repeat].join(" "))
+        };
         object(
             &mut out,
             format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Contents {} 0 R >>",
-                4 + 2 * page
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Resources << {resources} >> /Contents {contents} >>"
             )
             .as_bytes(),
             &mut offsets,
@@ -221,6 +234,9 @@ pub fn pdf_with(pages: &[(u32, u32, &[u8])], trailer: &str) -> Vec<u8> {
         stream.extend_from_slice(content);
         stream.extend_from_slice(b"\nendstream");
         object(&mut out, &stream, &mut offsets);
+    }
+    for extra in extras {
+        object(&mut out, extra, &mut offsets);
     }
     let xref = out.len();
     out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1).as_bytes());
@@ -235,6 +251,21 @@ pub fn pdf_with(pages: &[(u32, u32, &[u8])], trailer: &str) -> Vec<u8> {
         .as_bytes(),
     );
     out
+}
+
+/// A PDF of `pages`, with `trailer` added to its trailer dictionary.
+pub fn pdf_with(pages: &[(u32, u32, &[u8])], trailer: &str) -> Vec<u8> {
+    pdf_doc(pages, "", 1, &[], trailer)
+}
+
+/// The resources a page needs to set text in Helvetica as `/F1`.
+pub const HELVETICA: &str =
+    "/Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >>";
+
+/// A 48 by 24 point PDF that sets `label` in Helvetica.
+pub fn label_pdf(label: &str) -> Vec<u8> {
+    let content = format!("BT /F1 12 Tf 4 8 Td ({label}) Tj ET");
+    pdf_doc(&[(48, 24, content.as_bytes())], HELVETICA, 1, &[], "")
 }
 
 /// A PDF of `pages`, each `width` by `height` points drawing `content`.
