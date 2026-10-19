@@ -64,7 +64,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            gh pr diff "${{ github.event.pull_request.number }}" --name-only > changed
+            gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+              --jq '.[] | .filename, (.previous_filename // empty)' > changed
           else
             : > changed
           fi

@@ -23,6 +23,9 @@
 # pull request that carries the `full-ci` label. A partial run that turns out
 # wrong needs a way to be overridden without a code change.
 #
+# The caller lists a renamed file under both names, so moving code into a
+# docs path is still code.
+#
 # Usage: [CI_FULL=true] change-class.sh < paths
 set -eu
 
@@ -42,6 +45,9 @@ fi
 
 img='(jpg|jpeg|png|svg|gif)'
 
+# Exit 1 is grep matching nothing, which means every path is prose. Anything
+# above it is grep failing, and that must not read as docs.
+set +e
 code=$(printf '%s\n' "$paths" | grep -Ev \
     -e '^[^/]+\.md$' \
     -e '^docs/[^/]+\.md$' \
@@ -58,7 +64,14 @@ code=$(printf '%s\n' "$paths" | grep -Ev \
     -e '^\.github/FUNDING\.yml$' \
     -e '^\.gitignore$' \
     -e "^assets/[^/]+\\.$img\$" \
-    || true)
+    -e "^assets/proposals/[^/]+\\.$img\$" \
+    -e '^\.techpack/templates/[^/]+\.md$')
+status=$?
+set -e
+if [ "$status" -gt 1 ]; then
+    echo "::error::grep failed with status $status, so the class cannot be decided" >&2
+    exit "$status"
+fi
 
 if [ -n "$code" ]; then
     printf '%s\n' "$code" | sed 's/^/::notice::full, because of: /'
