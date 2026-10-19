@@ -2073,7 +2073,11 @@ impl View {
                 // window, so `index >= stop` means the walk reached the last file and
                 // not that it consumed it.
                 let before = view.rows.len();
-                walked.blocks.push((index, skip, before));
+                walked.blocks.push(Block {
+                    file: index,
+                    first: skip,
+                    start: before,
+                });
                 let asked = skip.min(span);
                 let mut file_notes = notes_at(change, index, &pinned);
                 // Before the retain below: a note being retyped is still one.
@@ -2451,7 +2455,7 @@ impl View {
             })
             .collect();
         let total: usize = costs.iter().map(|(pieces, under)| pieces + 1 + under).sum();
-        total.saturating_sub(aimed(&costs, &walked.blocks, aim).2)
+        total.saturating_sub(aimed(&costs, &walked.blocks, aim))
     }
 
     /// Turn logical rows into display rows, record the gutter, and answer the rows
@@ -2534,12 +2538,12 @@ impl View {
             under[boxed.row] += boxed_rows;
             box_built = rows;
         }
-        let cost = |at: usize| breaks[at].len() + 1 + under[at];
-        let total: usize = (0..breaks.len()).map(cost).sum();
         let costs: Vec<(usize, usize)> = (0..breaks.len())
             .map(|at| (breaks[at].len(), under[at]))
             .collect();
-        let (_, _, opens_at) = aimed(&costs, blocks, aim);
+        let cost = |at: usize| costs[at].0 + 1 + costs[at].1;
+        let total: usize = (0..breaks.len()).map(cost).sum();
+        let opens_at = aimed(&costs, blocks, aim);
         // Whether the screen opens where a step put it rather than on its first row.
         let aiming = opens_at > 0 || aim.rise.is_some();
         // Every pinned answer's blocks, whether the window reaches them or not:
@@ -3156,37 +3160,54 @@ struct Laid {
     aim: Aim,
 }
 
+/// A file the walk took rows from.
+#[derive(Debug, Clone, Copy)]
+struct Block {
+    file: usize,
+    /// The first of its rows taken.
+    first: usize,
+    /// The logical row that one landed on.
+    start: usize,
+}
+
 /// The position of logical row `at` of a walk.
-fn position_of(blocks: &[(usize, usize, usize)], at: usize) -> Position {
-    let (file, first, start) = blocks
+fn position_of(blocks: &[Block], at: usize) -> Position {
+    let block = blocks
         .iter()
         .rev()
-        .find(|(_, _, start)| *start <= at)
+        .find(|block| block.start <= at)
         .copied()
-        .unwrap_or_default();
+        .unwrap_or(Block {
+            file: 0,
+            first: 0,
+            start: 0,
+        });
     Position {
-        file,
-        row: first + at - start,
+        file: block.file,
+        row: block.first + at - block.start,
         under: 0,
     }
 }
 
-/// The step `aim` opens on among walked rows of `(pieces, hung)` each: its logical
-/// row, how far under it, and the display rows above it.
-fn aimed(
-    costs: &[(usize, usize)],
-    blocks: &[(usize, usize, usize)],
-    aim: Aim,
-) -> (usize, usize, usize) {
+/// The logical row of a walk that `position` names, if the walk took it.
+fn logical_of(blocks: &[Block], rows: usize, position: Position) -> Option<usize> {
+    blocks.iter().enumerate().find_map(|(n, block)| {
+        let end = blocks.get(n + 1).map_or(rows, |next| next.start);
+        let at = (block.start + position.row).checked_sub(block.first)?;
+        (block.file == position.file && position.row >= block.first && at < end).then_some(at)
+    })
+}
+
+/// Display rows above the step `aim` opens on, among walked rows of
+/// `(pieces, hung)` each.
+fn aimed(costs: &[(usize, usize)], blocks: &[Block], aim: Aim) -> usize {
     let Some(&(_, first)) = costs.first() else {
-        return (0, 0, 0);
+        return 0;
     };
-    let anchor = aim.rise.and_then(|(anchor, by)| {
-        let at = (0..costs.len())
-            .find(|&at| position_of(blocks, at) == Position { under: 0, ..anchor })?;
-        Some((at, by))
-    });
-    let (at, under) = match anchor {
+    let rise = aim
+        .rise
+        .and_then(|(anchor, by)| Some((logical_of(blocks, costs.len(), anchor)?, by)));
+    let (at, under) = match rise {
         Some((mut at, by)) => {
             let mut under = 0;
             for _ in 0..by {
@@ -3207,8 +3228,7 @@ fn aimed(
         .iter()
         .map(|(pieces, hung)| pieces + 1 + hung)
         .sum();
-    let inside = if under == 0 { 0 } else { costs[at].0 + under };
-    (at, under, above + inside)
+    above + if under == 0 { 0 } else { costs[at].0 + under }
 }
 
 /// What the walk carries beside the rows.
@@ -3224,9 +3244,8 @@ struct Walked {
     boxed: Option<BoxPin>,
     /// Pictures hung under their size line's logical row, for the display pass.
     hung: Vec<Hung>,
-    /// Each file the walk took rows from: its index, the first of its rows taken,
-    /// and the logical row that one landed on.
-    blocks: Vec<(usize, usize, usize)>,
+    /// Each file the walk took rows from.
+    blocks: Vec<Block>,
     /// Columns and rows a changed image's pictures may take, or `None` where no
     /// picture is drawn.
     room: Option<(u16, u16)>,

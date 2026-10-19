@@ -174,10 +174,8 @@ pub struct App {
     note_count: NoteCount,
     /// Where the last frame stood when it drew the diff's last row.
     end: Option<Position>,
-    /// Steps the last frame drew, which a page step is measured in. Stepping
-    /// by the display height instead walks over unwrapped content.
-    shown: usize,
-    /// Where each step the last frame drew opens, from its top.
+    /// Where each step the last frame drew opens, from its top. A page step is
+    /// measured in them: the display height walks over unwrapped content.
     steps: Vec<Position>,
     /// A step up the next collect resolves: the top it left, the steps owed
     /// above it, and the position it left behind.
@@ -266,7 +264,6 @@ impl Default for App {
             note_box: None,
             note_count: NoteCount::default(),
             end: None,
-            shown: 0,
             steps: Vec::new(),
             rise: None,
             icons: false,
@@ -313,7 +310,6 @@ impl App {
             overview: config.overview,
             wrap: config.wrap,
             notes_shown: config.notes,
-            shown: 0,
             steps: Vec::new(),
             rise: None,
             staged: config.staged,
@@ -1276,16 +1272,12 @@ impl App {
             return Ok(());
         }
         let left = by - self.position.under;
-        let anchor = Position {
-            under: 0,
-            ..self.position
-        };
+        self.position.under = 0;
         // A rise no frame has resolved yet is owed from its own anchor.
         let (anchor, owed) = match self.rise {
             Some((before, owed, at)) if at == self.position => (before, owed),
-            _ => (anchor, 0),
+            _ => (self.position, 0),
         };
-        self.position.under = 0;
         self.up(left, frame)?;
         self.rise = Some((anchor, owed + left, self.position));
         Ok(())
@@ -1479,7 +1471,6 @@ impl App {
         // in the code that knows where the diff landed, and a caller that kept
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
-        self.shown = view.steps.len();
         self.steps.clone_from(&view.steps);
         Ok(view)
     }
@@ -1499,9 +1490,9 @@ impl App {
     /// the last frame rather than [`Self::wrap`]: the loop paints once per batch, so
     /// turning wrap off would otherwise grow the step under a screen that held less.
     fn screenful(&self, height: usize) -> usize {
-        if self.shown > 0 {
+        if !self.steps.is_empty() {
             // Clamped by the pane this step is being taken in.
-            self.shown.min(height)
+            self.steps.len().min(height)
         } else {
             height
         }
