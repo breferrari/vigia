@@ -328,7 +328,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 | ✅ | Half-block image panels | [#634](https://github.com/breferrari/vigia/issues/634) |
 | ✅ | Real-pixel image protocols | [#635](https://github.com/breferrari/vigia/issues/635) |
 | ✅ | macOS background query blocks. **Found while building #635; first, because every macOS start in a silent terminal waits for a key** | [#646](https://github.com/breferrari/vigia/issues/646) |
-| ⬜ | Decoder panic stops the pane. **Found by review on #643; before #637 and #638, which each add a decoder** | [#645](https://github.com/breferrari/vigia/issues/645) |
+| 🔨 | Decoder panic stops the pane. **Found by review on #643; before #637 and #638, which each add a decoder** | [#645](https://github.com/breferrari/vigia/issues/645) |
 | ⬜ | SVG image panels | [#637](https://github.com/breferrari/vigia/issues/637) |
 | ⬜ | PDF image panels | [#638](https://github.com/breferrari/vigia/issues/638) |
 | ⬜ | LFS fetch leaves binary. **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
