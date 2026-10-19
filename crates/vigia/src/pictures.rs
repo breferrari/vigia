@@ -1149,7 +1149,8 @@ fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>)> {
 /// than [`PDF_BUDGET`] there.
 const PDF_LONG_SIDE: f32 = 1024.0;
 /// What one PDF page may cost, in bytes of content stream times pixels on
-/// the long side. 1.4 MiB at 1024 pixels, about 250ms.
+/// the long side: 1.4 MiB at 1024 pixels. Measured, a page from 3 to 20 MB
+/// of content takes 0.29 to 0.51 seconds on the worker.
 const PDF_BUDGET: f64 = 1.4 * 1024.0 * 1024.0 * 1024.0;
 /// The most objects one page's resources are read through to fingerprint it.
 const PDF_OBJECTS: usize = 10_000;

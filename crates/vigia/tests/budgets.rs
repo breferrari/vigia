@@ -3342,6 +3342,61 @@ fn pictures_frame_pdf() {
     );
 }
 
+/// The worker draws a page of 20 MB of content within its bound: priced by
+/// its length, it renders small. Measured 2026-10-19 on macOS, release:
+/// 0.29 to 0.51 seconds from 3 to 20 MB, the longest at 20.
+#[test]
+fn pdf_stream_bound() {
+    use vigia::pictures::{Inks, Pictures};
+
+    let mut ops = support::icon_ops(200);
+    ops.push(b'\n');
+    while ops.len() < 10_000 {
+        ops.extend_from_slice(b"0.5 0.5 0.5 rg 1 1 3 3 re f\n");
+    }
+    let heavy = support::pdf_doc(&[(24, 24, &ops)], "", 2_000, &[], "");
+    let scratch = Scratch::new("pdf-stream-bound");
+    scratch.write("a.pdf", support::icon_pdf(1));
+    scratch.commit_all("baseline");
+    scratch.write("a.pdf", &heavy);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let pane = Rect::new(0, 0, 120, 40);
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        ratatui_image::picker::Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let layout = layout_of(&app, pane, frame.files().len());
+    let history = History::new();
+    let mut highlighter = Highlighter::eager();
+    let mut view = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+    let began = Instant::now();
+    pictures.attach(&mut view.rows, &frame);
+    assert!(
+        pictures.settle(Duration::from_secs(60)),
+        "the picture was not built"
+    );
+    let took = began.elapsed();
+    eprintln!("note: a page of 20 MB of content built in {took:?}, off the paint");
+    assert!(
+        took < budget(Duration::from_millis(600)),
+        "the worker took {took:?} for a page of 20 MB of content"
+    );
+}
+
 /// A PDF of about 16 MiB, the most the frame path reads: an image's worth of
 /// bytes it skips, and a content stream that inflates to 15 MiB, which it
 /// measures.
