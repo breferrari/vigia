@@ -63,6 +63,8 @@ pub struct Worktree {
     deleted: Cell<bool>,
     /// LFS files compared with their local object.
     lfs_compares: Cell<u64>,
+    /// Stored blobs read to learn whether they are LFS pointers.
+    lfs_blob_reads: Cell<u64>,
     /// Whether the configuration names Git LFS, read with it.
     lfs: Cell<bool>,
     /// Whether each LFS file's bytes equal its object, by its fingerprint and its
@@ -104,6 +106,7 @@ impl Worktree {
             reloads: Cell::new(0),
             deleted: Cell::new(false),
             lfs_compares: Cell::new(0),
+            lfs_blob_reads: Cell::new(0),
             lfs_verdicts: RefCell::new(HashMap::new()),
             lfs_pointers: RefCell::new(HashMap::new()),
             lfs_budget: Cell::new(LFS_COMPARE_MAX),
@@ -277,7 +280,10 @@ impl Worktree {
             .find_header(id)
             .is_ok_and(|header| header.size() < picture::POINTER_MAX as u64);
         let found = small
-            .then(|| self.blob(id, path).ok())
+            .then(|| {
+                self.lfs_blob_reads.set(self.lfs_blob_reads.get() + 1);
+                self.blob(id, path).ok()
+            })
             .flatten()
             .and_then(|blob| picture::lfs_pointer(&blob).map(|(oid, size)| (oid.to_owned(), size)));
         self.lfs_pointers.borrow_mut().insert(id, found.clone());
@@ -1160,6 +1166,12 @@ impl Worktree {
     fn lfs_wait_until(&self, until: std::time::SystemTime) {
         let wait = self.lfs_wait.get().map_or(until, |at| at.min(until));
         self.lfs_wait.set(Some(wait));
+    }
+
+    /// How many stored blobs this worktree has read to learn whether they are
+    /// LFS pointers.
+    pub fn lfs_blob_reads(&self) -> u64 {
+        self.lfs_blob_reads.get()
     }
 
     /// How many LFS verdicts this worktree holds.

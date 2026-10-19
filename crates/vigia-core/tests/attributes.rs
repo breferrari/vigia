@@ -538,3 +538,29 @@ fn lfs_verdicts_pruned() {
         "a verdict outlived the file the walk stopped flagging"
     );
 }
+
+#[test]
+fn lfs_large_blob_unread() {
+    let scratch = Scratch::new("attr-lfs-large-blob");
+    scratch.write(
+        ".gitattributes",
+        "*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    scratch.write("big.txt", numbered_lines(400));
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    scratch.write("big.txt", numbered_lines(401));
+    assert_eq!(
+        listed(&scratch),
+        ["big.txt"],
+        "the edited file did not list"
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(
+        worktree.lfs_blob_reads(),
+        0,
+        "a stored blob too large to be an LFS pointer was read to find out"
+    );
+}
