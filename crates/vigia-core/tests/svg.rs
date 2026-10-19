@@ -243,7 +243,8 @@ fn svg_no_pictures_text() {
     scratch.write("icon.svg", &icon(root, "blue"));
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    frame.advance().expect("advance");
+    // Settled, so the drawn diff is cached and the switch has to drop it.
+    support::settle(&mut frame);
     let drawn = |frame: &mut vigia_core::Frame| {
         let (_, diff) = frame.diff(0).expect("diff");
         (diff.binary, diff.picture.is_some(), diff.added)

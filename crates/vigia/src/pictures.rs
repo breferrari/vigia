@@ -748,8 +748,8 @@ const MAX_FILTERED: usize = 64;
 const MAX_KERNEL: u32 = 32 * 32;
 
 /// An embedded image, as usvg reads it, once its share of `budget` and its
-/// size are known to fit. A nested SVG is refused: it would bring its own
-/// million nodes. Any refusal sets `over`.
+/// size are known to fit. A nested SVG has no raster size, so it is refused
+/// with its own million nodes. Any refusal sets `over`.
 fn embedded(
     mime: &str,
     data: std::sync::Arc<Vec<u8>>,
@@ -761,9 +761,6 @@ fn embedded(
         over.store(true, Ordering::Relaxed);
         None
     };
-    if mime == "image/svg+xml" {
-        return refuse();
-    }
     let size = data.len() as u64;
     if budget
         .try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
