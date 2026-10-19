@@ -330,7 +330,7 @@ pub struct Answer {
     pub sixel: bool,
     /// Its cell size in pixels is known.
     pub cell: bool,
-    /// It answered any of the query, so a protocol it did not claim is absent.
+    /// It answered with its cell size, so a protocol it did not claim is absent.
     pub heard: bool,
 }
 

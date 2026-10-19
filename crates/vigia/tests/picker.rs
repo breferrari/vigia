@@ -57,8 +57,7 @@ fn silent_terminal_no_reader() {
         .and_then(|w| w.parse().ok())
         .unwrap_or(f64::MAX);
     assert!(
-        // The query's wait, then the wait for a late answer to begin.
-        waited < 2.0 * vigia::PICTURES_WAIT.as_secs_f64() * 1000.0 + 100.0,
+        waited < vigia::PICTURES_WAIT.as_secs_f64() * 1000.0 + 200.0,
         "the query waited {waited}ms on a silent terminal: {line}"
     );
 }
@@ -99,18 +98,22 @@ fn asked_in_pty(answer: Option<&[u8]>) -> String {
 }
 
 #[test]
-fn late_answer_drained() {
-    // Past the query's own wait, so only the drain stands between it and the reader.
-    let late = vigia::PICTURES_WAIT + Duration::from_millis(100);
-    let text = asked_after(Some(b"\x1b_Gi=31;OK\x1b\\\x1b[6;20;10t\x1b[0n"), late);
+fn late_answer_read() {
+    // Past the background query's own wait, where a fixed wait used to give up
+    // and leave the rest of the answer for the reader. The query now ends on the
+    // status reply, which this answer carries last.
+    let text = asked_after(
+        Some(b"\x1b_Gi=31;OK\x1b\\\x1b[6;20;10t\x1b[0n"),
+        Duration::from_millis(250),
+    );
     assert!(
         text.contains("got z"),
         "a late answer reached the reader as keys: {text}"
     );
     let line = asked_line(&text);
     assert!(
-        line.contains("canon=true"),
-        "line mode or echo was lost: {line}"
+        line.contains("Kitty") && line.contains("canon=true"),
+        "a late answer was not read, or the modes were lost: {line}"
     );
 }
 
