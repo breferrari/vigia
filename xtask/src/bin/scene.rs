@@ -5,6 +5,7 @@
 //! `cargo run -p xtask --bin scene -- replay` writes them in bursts, the way
 //! an agent does.
 
+// Shared with the tests, which use generators this binary does not.
 #[path = "../../../crates/vigia-core/tests/support/assets.rs"]
 #[allow(dead_code)]
 mod assets;
@@ -35,13 +36,12 @@ fn main() -> ExitCode {
     let scene = Scene::new(&dir);
     scene.baseline();
     println!("vigia {}", dir.display());
+    println!();
     if replay {
-        println!();
         scene.replay(1.0, |line| println!("{line}"));
     } else {
         scene.changes();
-        println!();
-        for (path, shows) in STATES {
+        for (path, shows) in states() {
             println!("{path:<28} {shows}");
         }
     }
@@ -63,58 +63,103 @@ fn fresh_dir() -> PathBuf {
     unreachable!("the counter does not end")
 }
 
-/// Every state `static` writes, by path, and what the pane shows for it.
-const STATES: &[(&str, &str)] = &[
-    ("src/added.rs", "added source"),
-    ("src/deleted.rs", "deleted source"),
-    ("src/small.rs", "a one-line hunk"),
-    ("src/medium.rs", "an eight-line hunk"),
-    ("src/large.rs", "a forty-line hunk"),
-    ("png/added.png", "added: one panel"),
-    ("png/deleted.png", "deleted: one panel"),
-    ("png/modified.png", "modified, same size: three panels"),
-    ("png/resized.png", "resized: three panels, sizes differ"),
+/// A raster format the image states are written in, and where.
+struct Raster {
+    format: ImageFormat,
+    folder: &'static str,
+    ext: &'static str,
+}
+
+impl Raster {
+    fn file(&self, name: &str) -> String {
+        format!("{}/{name}.{}", self.folder, self.ext)
+    }
+}
+
+const RASTERS: [Raster; 4] = [
+    Raster {
+        format: ImageFormat::Png,
+        folder: "png",
+        ext: "png",
+    },
+    Raster {
+        format: ImageFormat::Jpeg,
+        folder: "jpeg",
+        ext: "jpg",
+    },
+    Raster {
+        format: ImageFormat::Gif,
+        folder: "gif",
+        ext: "gif",
+    },
+    Raster {
+        format: ImageFormat::WebP,
+        folder: "webp",
+        ext: "webp",
+    },
+];
+
+/// The five states each raster format is written in, and what they show.
+const RASTER_STATES: [(&str, &str); 5] = [
+    ("added", "added: one panel"),
+    ("deleted", "deleted: one panel"),
+    ("modified", "modified, same size: three panels"),
+    ("resized", "resized: old and new"),
     (
-        "png/after.png",
-        "staged as a rename of png/before.png (press a), then changed",
-    ),
-    ("jpeg/", "the same five states as png/"),
-    ("gif/", "the same five states as png/"),
-    ("webp/", "the same five states as png/"),
-    ("png/one-pixel.png", "1 px changed"),
-    ("png/profile.png", "colour profile changed"),
-    ("gif/animated.gif", "first frames compared"),
-    (
-        "broken/truncated.png",
-        "cut in its pixels: could not be decoded",
-    ),
-    ("broken/truncated-header.png", "cut in its header: binary"),
-    ("broken/corrupt.png", "pixels garbled: could not be decoded"),
-    (
-        "broken/too-large.png",
-        "past the decode limit: could not be decoded",
-    ),
-    ("lfs/pointer.png", "an LFS pointer, drawn from its object"),
-    ("bin/blob.dat", "binary"),
-    ("svg/icon.svg", "SVG, shapes changed"),
-    ("svg/label.svg", "SVG, only its text changed"),
-    (
-        "svg/costly.svg",
-        "SVG refused for cost: could not be decoded",
+        "after",
+        "a staged rename (press a), then changed (unstaged is #658)",
     ),
 ];
 
-/// The raster formats every image state is written in, with their extension.
-const FORMATS: [(ImageFormat, &str, &str); 4] = [
-    (ImageFormat::Png, "png", "png"),
-    (ImageFormat::Jpeg, "jpeg", "jpg"),
-    (ImageFormat::Gif, "gif", "gif"),
-    (ImageFormat::WebP, "webp", "webp"),
-];
+/// Every state `static` writes, by path, and what the pane shows for it.
+fn states() -> Vec<(String, &'static str)> {
+    let mut states: Vec<(String, &'static str)> = [
+        ("src/added.rs", "added source"),
+        ("src/deleted.rs", "deleted source"),
+        ("src/small.rs", "a one-line hunk"),
+        ("src/medium.rs", "an eight-line hunk"),
+        ("src/large.rs", "a forty-line hunk"),
+    ]
+    .into_iter()
+    .map(|(path, shows)| (path.to_owned(), shows))
+    .collect();
+    for raster in &RASTERS {
+        for (name, shows) in RASTER_STATES {
+            states.push((raster.file(name), shows));
+        }
+    }
+    states.extend(
+        [
+            ("png/one-pixel.png", "1 px changed"),
+            ("png/profile.png", "colour profile changed"),
+            ("gif/animated.gif", "first frames compared"),
+            (
+                "broken/truncated.png",
+                "cut in its pixels: could not be decoded",
+            ),
+            ("broken/truncated-header.png", "cut in its header: binary"),
+            ("broken/corrupt.png", "pixels garbled: could not be decoded"),
+            (
+                "broken/too-large.png",
+                "claims 20000×20000: could not be decoded",
+            ),
+            ("lfs/pointer.png", "an LFS pointer, drawn from its object"),
+            ("bin/blob.dat", "binary"),
+            ("svg/icon.svg", "SVG, shapes changed"),
+            ("svg/label.svg", "SVG, only its text changed"),
+            (
+                "svg/costly.svg",
+                "SVG refused for cost: could not be decoded",
+            ),
+        ]
+        .into_iter()
+        .map(|(path, shows)| (path.to_owned(), shows)),
+    );
+    states
+}
 
 /// An image `width` by `height` in `format`, with the pixel at `changed`
-/// recoloured. One pixel near the end keeps most of a file's bytes, so a
-/// rename with this change is still matched as a rename.
+/// recoloured.
 fn image_with(
     format: ImageFormat,
     width: u32,
@@ -146,6 +191,35 @@ fn edited(count: usize, from: usize, edits: usize) -> String {
             "base"
         }
     })
+}
+
+/// The seed of the LFS object, and of its pointer's oid.
+const LFS_SEED: u8 = 0xab;
+
+/// The LFS object the committed pointer names.
+fn lfs_object() -> Vec<u8> {
+    image_with(ImageFormat::Png, 96, 64, LFS_SEED, None)
+}
+
+/// A two-frame GIF whose first frame comes from `seed`.
+fn two_frame_gif(seed: u8) -> Vec<u8> {
+    assets::animated_gif(&[
+        assets::gradient(48, 32, seed),
+        assets::gradient(48, 32, seed.wrapping_add(100)),
+    ])
+}
+
+/// Bytes that are binary and no image: NULs, from `seed`.
+fn blob(seed: u8) -> Vec<u8> {
+    (0..512u32)
+        .map(|n| {
+            if n % 7 == 0 {
+                0
+            } else {
+                (n as u8).wrapping_mul(seed)
+            }
+        })
+        .collect()
 }
 
 /// The bed's repository, and how to write into it.
@@ -214,19 +288,38 @@ impl Scene {
         std::fs::remove_file(self.inside(rela)).expect("remove a scene file");
     }
 
+    /// Stage `before` renamed to `after`, then change `after` in the working
+    /// tree: the staged run shows the rename and the unstaged run the change.
+    fn rename_then_change(&self, raster: &Raster) {
+        let (before, after) = (raster.file("before"), raster.file("after"));
+        self.remove(&before);
+        self.write(&after, image_with(raster.format, 96, 64, 40, None));
+        self.git(&["add", "--", &before, &after]);
+        self.write(&after, image_with(raster.format, 96, 64, 41, None));
+    }
+
     /// Every file the changes start from, committed.
     fn baseline(&self) {
         self.write("src/deleted.rs", lines(10, |_| "base"));
-        for (name, lines) in [("small", 20), ("medium", 40), ("large", 80)] {
-            self.write(&format!("src/{name}.rs"), edited(lines, 0, 0));
+        for (name, count) in [("small", 20), ("medium", 40), ("large", 80)] {
+            self.write(&format!("src/{name}.rs"), edited(count, 0, 0));
         }
         self.write("src/feature.rs", "");
-        for (format, folder, ext) in FORMATS {
-            let file = |name: &str| format!("{folder}/{name}.{ext}");
-            self.write(&file("deleted"), image_with(format, 96, 64, 10, None));
-            self.write(&file("modified"), image_with(format, 96, 64, 20, None));
-            self.write(&file("resized"), image_with(format, 48, 32, 30, None));
-            self.write(&file("before"), image_with(format, 96, 64, 40, None));
+        for raster in &RASTERS {
+            let format = raster.format;
+            self.write(
+                &raster.file("deleted"),
+                image_with(format, 96, 64, 10, None),
+            );
+            self.write(
+                &raster.file("modified"),
+                image_with(format, 96, 64, 20, None),
+            );
+            self.write(
+                &raster.file("resized"),
+                image_with(format, 48, 32, 30, None),
+            );
+            self.write(&raster.file("before"), image_with(format, 96, 64, 40, None));
         }
         self.write(
             "png/one-pixel.png",
@@ -236,7 +329,7 @@ impl Scene {
             "png/profile.png",
             assets::profiled_png(96, 64, 60, b"profile one"),
         );
-        self.write("gif/animated.gif", animated(70));
+        self.write("gif/animated.gif", two_frame_gif(70));
         for name in ["truncated", "truncated-header", "corrupt", "too-large"] {
             self.write(&format!("broken/{name}.png"), assets::png(48, 32, 80));
         }
@@ -245,8 +338,8 @@ impl Scene {
         self.write("svg/label.svg", assets::labelled_svg("Save"));
         self.write("svg/costly.svg", assets::icon_svg(3));
         // Committed as text before the attribute exists, so no filter runs.
-        let object = lfs_old();
-        let (oid, pointer) = assets::lfs_pointer(&object, 0xab);
+        let object = lfs_object();
+        let (oid, pointer) = assets::lfs_pointer(&object, LFS_SEED);
         self.write("lfs/pointer.png", pointer);
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "-m", "baseline"]);
@@ -275,25 +368,19 @@ impl Scene {
         self.write("src/small.rs", edited(20, 10, 1));
         self.write("src/medium.rs", edited(40, 12, 8));
         self.write("src/large.rs", edited(80, 20, 40));
-        // Each rename is staged, then changed: the staged run shows the
-        // rename and the unstaged run the change.
-        let mut renamed = vec!["add".to_owned(), "--".to_owned()];
-        for (format, folder, ext) in FORMATS {
-            let file = |name: &str| format!("{folder}/{name}.{ext}");
-            self.write(&file("added"), image_with(format, 96, 64, 15, None));
-            self.remove(&file("deleted"));
-            self.write(&file("modified"), image_with(format, 96, 64, 25, None));
-            self.write(&file("resized"), image_with(format, 64, 40, 30, None));
-            self.remove(&file("before"));
-            self.write(&file("after"), image_with(format, 96, 64, 40, None));
-            renamed.extend([file("before"), file("after")]);
-        }
-        self.git(&renamed.iter().map(String::as_str).collect::<Vec<_>>());
-        for (format, folder, ext) in FORMATS {
+        for raster in &RASTERS {
+            let format = raster.format;
+            self.write(&raster.file("added"), image_with(format, 96, 64, 15, None));
+            self.remove(&raster.file("deleted"));
             self.write(
-                &format!("{folder}/after.{ext}"),
-                image_with(format, 96, 64, 41, None),
+                &raster.file("modified"),
+                image_with(format, 96, 64, 25, None),
             );
+            self.write(
+                &raster.file("resized"),
+                image_with(format, 64, 40, 30, None),
+            );
+            self.rename_then_change(raster);
         }
         self.write(
             "png/one-pixel.png",
@@ -303,7 +390,7 @@ impl Scene {
             "png/profile.png",
             assets::profiled_png(96, 64, 60, b"profile two"),
         );
-        self.write("gif/animated.gif", animated(90));
+        self.write("gif/animated.gif", two_frame_gif(90));
         let whole = assets::png(48, 32, 81);
         self.write("broken/truncated.png", &whole[..whole.len() / 2]);
         self.write("broken/truncated-header.png", &whole[..20]);
@@ -338,12 +425,8 @@ impl Scene {
         say("svg/new.svg added");
         self.write("svg/new.svg", assets::icon_svg(4));
         pause(3.0);
-        say("png/before.png renamed to png/after.png, and changed");
-        self.remove("png/before.png");
-        self.write(
-            "png/after.png",
-            image_with(ImageFormat::Png, 96, 64, 40, Some((90, 63))),
-        );
+        say("png/before.png renamed to png/after.png and staged, then changed");
+        self.rename_then_change(&RASTERS[0]);
         pause(3.0);
         say("jpeg/deleted.jpg and src/deleted.rs deleted");
         self.remove("jpeg/deleted.jpg");
@@ -355,46 +438,21 @@ impl Scene {
         self.write("broken/flaky.png", assets::png(48, 32, 83));
         pause(3.0);
         say("gif/animated.gif changed");
-        self.write("gif/animated.gif", animated(90));
+        self.write("gif/animated.gif", two_frame_gif(90));
         say("done");
     }
-}
-
-/// The LFS object the committed pointer names.
-fn lfs_old() -> Vec<u8> {
-    image_with(ImageFormat::Png, 96, 64, 0xab, None)
-}
-
-/// A two-frame GIF whose first frame comes from `seed`.
-fn animated(seed: u8) -> Vec<u8> {
-    assets::animated_gif(&[
-        assets::gradient(48, 32, seed),
-        assets::gradient(48, 32, seed.wrapping_add(100)),
-    ])
-}
-
-/// Bytes that are binary and no image: NULs, from `seed`.
-fn blob(seed: u8) -> Vec<u8> {
-    (0..512u32)
-        .map(|n| {
-            if n % 7 == 0 {
-                0
-            } else {
-                (n as u8).wrapping_mul(seed)
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use vigia_core::{ChangeKind, Worktree};
+    use vigia::pictures::Kind;
+    use vigia_core::{ChangeKind, Origin, Worktree};
 
-    /// What the core makes of one changed path.
+    /// What the core lists for one changed path.
     #[derive(Debug)]
-    struct Read {
+    struct Listed {
         kind: ChangeKind,
         binary: bool,
         before: bool,
@@ -411,7 +469,16 @@ mod tests {
         dir
     }
 
-    fn read(dir: &Path) -> BTreeMap<String, Read> {
+    /// A path keyed by the run it is in.
+    fn keyed(origin: Origin, path: &str) -> String {
+        match origin {
+            Origin::Staged => format!("staged:{path}"),
+            Origin::Unstaged => path.to_owned(),
+        }
+    }
+
+    /// Both runs of the repository at `dir`, as the core lists them.
+    fn listed(dir: &Path) -> BTreeMap<String, Listed> {
         let worktree = Worktree::discover(dir).expect("the scene is a repository");
         let mut frame = worktree.frame();
         frame.show_staged(true);
@@ -420,10 +487,9 @@ mod tests {
             .map(|index| {
                 let (change, diff) = frame.diff(index).expect("diff");
                 let picture = diff.picture;
-                let staged = matches!(change.origin, vigia_core::Origin::Staged);
                 (
-                    format!("{}{}", if staged { "staged:" } else { "" }, change.path),
-                    Read {
+                    keyed(change.origin, &change.path),
+                    Listed {
                         kind: change.kind.clone(),
                         binary: diff.binary,
                         before: picture.is_some_and(|picture| picture.before.is_some()),
@@ -438,10 +504,10 @@ mod tests {
     #[test]
     fn scene_static_states() {
         let dir = built();
-        let found = read(&dir);
-        for (path, _) in STATES.iter().filter(|(path, _)| !path.ends_with('/')) {
+        let found = listed(&dir);
+        for (path, _) in states() {
             assert!(
-                found.contains_key(*path),
+                found.contains_key(&path),
                 "the printed list names {path}, which the scene did not change"
             );
         }
@@ -452,32 +518,41 @@ mod tests {
         };
         assert_eq!(at("src/added.rs").kind, ChangeKind::Added);
         assert_eq!(at("src/deleted.rs").kind, ChangeKind::Removed);
-        for (path, lines) in [
+        for (path, count) in [
             ("src/small.rs", 1),
             ("src/medium.rs", 8),
             ("src/large.rs", 40),
         ] {
-            assert_eq!(at(path).added, lines, "{path} has the wrong hunk");
+            assert_eq!(at(path).added, count, "{path} has the wrong hunk");
         }
-        for (_, folder, ext) in FORMATS {
-            let file = |name: &str| format!("{folder}/{name}.{ext}");
+        for raster in &RASTERS {
             let sides = |name: &str| {
-                let read = at(&file(name));
-                (read.before, read.after)
+                let listed = at(&raster.file(name));
+                (listed.before, listed.after)
             };
-            assert_eq!(sides("added"), (false, true), "{}", file("added"));
-            assert_eq!(sides("deleted"), (true, false), "{}", file("deleted"));
-            assert_eq!(sides("modified"), (true, true), "{}", file("modified"));
-            assert_eq!(sides("resized"), (true, true), "{}", file("resized"));
+            assert_eq!(sides("added"), (false, true), "{}", raster.file("added"));
             assert_eq!(
-                at(&format!("staged:{}", file("after"))).kind,
+                sides("deleted"),
+                (true, false),
+                "{}",
+                raster.file("deleted")
+            );
+            assert_eq!(
+                sides("modified"),
+                (true, true),
+                "{}",
+                raster.file("modified")
+            );
+            assert_eq!(sides("resized"), (true, true), "{}", raster.file("resized"));
+            assert_eq!(
+                at(&format!("staged:{}", raster.file("after"))).kind,
                 ChangeKind::Renamed {
-                    from: file("before")
+                    from: raster.file("before")
                 },
                 "{} is not a staged rename",
-                file("after")
+                raster.file("after")
             );
-            assert_eq!(sides("after"), (true, true), "{}", file("after"));
+            assert_eq!(sides("after"), (true, true), "{}", raster.file("after"));
         }
         for path in [
             "png/one-pixel.png",
@@ -491,17 +566,17 @@ mod tests {
             "svg/label.svg",
             "svg/costly.svg",
         ] {
-            let read = at(path);
+            let listed = at(path);
             assert!(
-                read.before && read.after,
-                "{path} has no size line: {read:?}"
+                listed.before && listed.after,
+                "{path} has no size line: {listed:?}"
             );
         }
         for path in ["broken/truncated-header.png", "bin/blob.dat"] {
-            let read = at(path);
+            let listed = at(path);
             assert!(
-                read.binary && !read.before && !read.after,
-                "{path} is not plain binary: {read:?}"
+                listed.binary && !listed.before && !listed.after,
+                "{path} is not plain binary: {listed:?}"
             );
         }
         let _ = std::fs::remove_dir_all(&dir);
@@ -510,17 +585,21 @@ mod tests {
     /// What the pane drew for one file, over every view that showed it.
     #[derive(Debug, Default)]
     struct Drawn {
-        /// Its size line's text and what the built picture said after it.
-        sized: Option<(String, Option<String>)>,
+        /// Its size line, the panels it was given, and what the built
+        /// picture said after the line.
+        sized: Option<(String, Kind, Option<String>)>,
         picture_rows: usize,
         reasons: Vec<String>,
         hunks: usize,
+        /// The path a rename's heading names it from.
+        from: Option<String>,
     }
 
     /// The static scene drawn by `vigia`'s own view at `width` by `height`,
-    /// scrolled from top to bottom, with every picture built while it is on
-    /// screen. Each view is also painted into a buffer.
-    fn drawn(dir: &Path, width: u16, height: u16) -> BTreeMap<String, Drawn> {
+    /// with the staged run beside the unstaged one when `staged`, one view
+    /// per file and every picture built while it is on screen. Each view is
+    /// also painted into a buffer.
+    fn draw_scene(dir: &Path, width: u16, height: u16, staged: bool) -> BTreeMap<String, Drawn> {
         use ratatui::buffer::Buffer;
         use ratatui::layout::Rect;
         use vigia::pictures::{Inks, Pictures};
@@ -556,10 +635,13 @@ mod tests {
                 "",
             )
         };
+        if staged {
+            app.apply(Action::ToggleStaged, &mut frame, usize::from(height))
+                .expect("show the staged run");
+            assert!(app.staged(), "the staged run is not shown");
+        }
         let mut found: BTreeMap<String, Drawn> = BTreeMap::new();
-        let files = frame.files().len();
-        // One view per file, each starting at its heading.
-        for _ in 0..files {
+        for _ in 0..frame.files().len() {
             let chrome = chrome(&app);
             let body = body_layout(
                 area,
@@ -591,33 +673,44 @@ mod tests {
                 Glyphs::default(),
                 &chrome,
             );
+            let key_of = |file: usize| {
+                let change = &frame.files()[file];
+                keyed(change.origin, &change.path)
+            };
             let mut heading: Option<String> = None;
             for row in &view.rows {
-                let path_of = |file: usize| frame.files()[file].path.clone();
                 match row {
-                    Row::File(entry) => heading = Some(entry.path.clone()),
+                    Row::File(entry) => {
+                        let key = keyed(entry.origin, &entry.path);
+                        found.entry(key.clone()).or_default().from = entry.from.clone();
+                        heading = Some(key);
+                    }
                     Row::Sized {
-                        line, file, ready, ..
+                        line,
+                        file,
+                        key,
+                        ready,
+                        ..
                     } => {
                         let suffix = ready.as_ref().and_then(|ready| ready.0.suffix());
-                        found.entry(path_of(*file)).or_default().sized =
-                            Some((line.clone(), suffix));
+                        found.entry(key_of(*file)).or_default().sized =
+                            Some((line.clone(), key.shape.kind, suffix));
                     }
                     Row::Picture { file, .. } => {
-                        found.entry(path_of(*file)).or_default().picture_rows += 1
+                        found.entry(key_of(*file)).or_default().picture_rows += 1
                     }
                     Row::Reason(reason) => {
-                        if let Some(path) = &heading {
+                        if let Some(key) = &heading {
                             found
-                                .entry(path.clone())
+                                .entry(key.clone())
                                 .or_default()
                                 .reasons
                                 .push(reason.clone());
                         }
                     }
                     Row::Hunk { .. } => {
-                        if let Some(path) = &heading {
-                            found.entry(path.clone()).or_default().hunks += 1;
+                        if let Some(key) = &heading {
+                            found.entry(key.clone()).or_default().hunks += 1;
                         }
                     }
                     _ => {}
@@ -633,7 +726,7 @@ mod tests {
     fn scene_renders() {
         let dir = built();
         for (width, height) in [(120, 40), (80, 24)] {
-            let found = drawn(&dir, width, height);
+            let found = draw_scene(&dir, width, height, false);
             let at = |path: &str| {
                 found.get(path).unwrap_or_else(|| {
                     panic!(
@@ -642,25 +735,28 @@ mod tests {
                     )
                 })
             };
-            let said = |path: &str| {
-                at(path)
-                    .sized
-                    .clone()
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "{path} drew no size line at {width}x{height}: {:?}",
-                            at(path)
-                        )
-                    })
-                    .1
-                    .unwrap_or_default()
+            let sized = |path: &str| {
+                at(path).sized.clone().unwrap_or_else(|| {
+                    panic!(
+                        "{path} drew no size line at {width}x{height}: {:?}",
+                        at(path)
+                    )
+                })
             };
-            for (_, folder, ext) in FORMATS {
-                for name in ["added", "deleted", "modified", "resized", "after"] {
-                    let path = format!("{folder}/{name}.{ext}");
+            let said = |path: &str| sized(path).2.unwrap_or_default();
+            for raster in &RASTERS {
+                for (name, panels) in [
+                    ("added", &[Kind::Added][..]),
+                    ("deleted", &[Kind::Deleted][..]),
+                    ("modified", &[Kind::Three, Kind::Mask][..]),
+                    ("resized", &[Kind::Pair, Kind::New][..]),
+                    ("after", &[Kind::Three, Kind::Mask][..]),
+                ] {
+                    let path = raster.file(name);
+                    let kind = sized(&path).1;
                     assert!(
-                        at(&path).sized.is_some(),
-                        "{path} drew no size line at {width}x{height}"
+                        panels.contains(&kind),
+                        "{path} drew {kind:?} at {width}x{height}"
                     );
                     assert!(
                         at(&path).picture_rows > 0,
@@ -685,6 +781,12 @@ mod tests {
                     "{path} drew no picture at {width}x{height}"
                 );
             }
+            // Old and new both drawn, so the old side came from the object.
+            assert!(
+                matches!(sized("lfs/pointer.png").1, Kind::Three | Kind::Mask),
+                "the LFS pointer did not draw its object as the old side: {:?}",
+                at("lfs/pointer.png")
+            );
             assert!(
                 said("png/one-pixel.png").starts_with("1 px changed"),
                 "{:?}",
@@ -708,6 +810,7 @@ mod tests {
             }
             for path in [
                 "src/added.rs",
+                "src/deleted.rs",
                 "src/small.rs",
                 "src/medium.rs",
                 "src/large.rs",
@@ -717,6 +820,20 @@ mod tests {
                     "{path} drew no hunk at {width}x{height}"
                 );
             }
+        }
+        // The staged run draws each rename as one, with its pictures.
+        let found = draw_scene(&dir, 120, 40, true);
+        for raster in &RASTERS {
+            let key = format!("staged:{}", raster.file("after"));
+            let drawn = found
+                .get(&key)
+                .unwrap_or_else(|| panic!("{key} was never drawn: {:?}", found.keys()));
+            assert_eq!(
+                drawn.from.as_deref(),
+                Some(raster.file("before").as_str()),
+                "{key} is not drawn as a rename"
+            );
+            assert!(drawn.picture_rows > 0, "{key} drew no picture");
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -729,7 +846,7 @@ mod tests {
         let mut said = Vec::new();
         scene.replay(0.0, |line| said.push(line.to_owned()));
         assert_eq!(said.last().map(String::as_str), Some("done"), "{said:?}");
-        let found = read(&dir);
+        let found = listed(&dir);
         let at = |path: &str| {
             found
                 .get(path)
@@ -740,11 +857,24 @@ mod tests {
             12,
             "the agent's file is not whole"
         );
+        let modified = at("png/modified.png");
+        assert!(
+            modified.before && modified.after,
+            "the rewrite did not draw: {modified:?}"
+        );
         assert_eq!(at("svg/new.svg").kind, ChangeKind::Added);
+        assert_eq!(
+            at("staged:png/after.png").kind,
+            ChangeKind::Renamed {
+                from: "png/before.png".to_owned()
+            }
+        );
+        assert_eq!(at("png/after.png").kind, ChangeKind::Modified);
         assert_eq!(at("jpeg/deleted.jpg").kind, ChangeKind::Removed);
         assert_eq!(at("src/deleted.rs").kind, ChangeKind::Removed);
         let flaky = at("broken/flaky.png");
         assert!(flaky.after, "the fixed image does not size: {flaky:?}");
+        assert_eq!(at("gif/animated.gif").kind, ChangeKind::Modified);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

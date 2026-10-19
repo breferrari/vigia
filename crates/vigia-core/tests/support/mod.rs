@@ -5,6 +5,7 @@
 //! A disposable git repository, built by real `git`.
 
 mod assets;
+// Each test binary takes the few generators it needs.
 #[allow(unused_imports)]
 pub use assets::*;
 
