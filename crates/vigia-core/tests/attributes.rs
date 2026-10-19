@@ -564,3 +564,48 @@ fn lfs_large_blob_unread() {
         "a stored blob too large to be an LFS pointer was read to find out"
     );
 }
+
+#[test]
+fn lfs_wakes_stop_when_decided() {
+    let scratch = Scratch::new("attr-lfs-wakes");
+    scratch.write(
+        ".gitattributes",
+        "*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let objects: Vec<(String, Vec<u8>, u8)> = (0..3u8)
+        .map(|n| (format!("{n}.png"), vec![n; 10 * 1024 * 1024], 0xc0 + n))
+        .collect();
+    for (rela, object, seed) in &objects {
+        let (_, pointer) = support::lfs_pointer(object, *seed);
+        scratch.write(rela, pointer);
+    }
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    for (rela, object, seed) in &objects {
+        let (oid, _) = support::lfs_pointer(object, *seed);
+        scratch.write(
+            &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
+            object,
+        );
+        scratch.write(rela, object);
+        settle(&scratch, rela);
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    // One file a walk, each walk armed by the one before it.
+    for walk in 1..objects.len() {
+        let now = std::time::SystemTime::now();
+        assert!(
+            frame.settles_in(now).is_some(),
+            "walk {walk} left files undecided and armed no wake"
+        );
+        frame.advance_if_settled(now).expect("the wake's walk");
+    }
+    assert!(frame.files().is_empty(), "a file was left undecided");
+    assert_eq!(
+        frame.settles_in(std::time::SystemTime::now()),
+        None,
+        "a wake stayed armed once every LFS file was decided"
+    );
+}
