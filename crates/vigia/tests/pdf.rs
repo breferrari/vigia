@@ -695,14 +695,19 @@ fn jpeg_claiming(side: u16) -> Vec<u8> {
     jpeg
 }
 
-/// A JPEG 2000 codestream of one grey `side` by `side` tile with no data.
-fn jpx_claiming(side: u32) -> Vec<u8> {
+/// A JPEG 2000 codestream of one `side` by `side` tile with no data, in
+/// `components` 8-bit components.
+fn jpx_claiming(side: u32, components: u16) -> Vec<u8> {
     let side = side.to_be_bytes();
     let zero = 0u32.to_be_bytes();
+    let length = (38 + 3 * components).to_be_bytes();
+    let each = [0x07, 0x01, 0x01].repeat(usize::from(components));
     [
         &[0xff, 0x4f][..],
-        // The image and tile size, one 8-bit component.
-        &[0xff, 0x51, 0x00, 0x29, 0x00, 0x00],
+        // The image and tile size, and each component's depth.
+        &[0xff, 0x51],
+        &length,
+        &[0x00, 0x00],
         &side,
         &side,
         &zero,
@@ -711,17 +716,18 @@ fn jpx_claiming(side: u32) -> Vec<u8> {
         &side,
         &zero,
         &zero,
-        &[0x00, 0x01, 0x07, 0x01, 0x01],
+        &components.to_be_bytes(),
+        &each,
         // One layer, no decomposition, 64 by 64 code blocks, reversible.
         &[
             0xff, 0x52, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x04, 0x04, 0x00, 0x01,
         ],
         &[0xff, 0x5c, 0x00, 0x04, 0x40, 0x40],
-        // One tile part, its packet empty.
-        &[
-            0xff, 0x90, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x01,
-        ],
-        &[0xff, 0x93, 0x00],
+        // One tile part, an empty packet for each component.
+        &[0xff, 0x90, 0x00, 0x0a, 0x00, 0x00],
+        &(14 + u32::from(components)).to_be_bytes(),
+        &[0x00, 0x01, 0xff, 0x93],
+        &vec![0; usize::from(components)],
         &[0xff, 0xd9],
     ]
     .concat()
@@ -734,10 +740,38 @@ fn pdf_jpx_bomb() {
         "pdf-jpx",
         &image_page(
             "/Width 8 /Height 8 /Filter /JPXDecode",
-            &jpx_claiming(11_000),
+            &jpx_claiming(11_000, 1),
         ),
         128,
     );
+}
+
+#[test]
+fn pdf_jpx_components() {
+    // 3000 by 3000 in four components: small as pixels, not as samples.
+    bounded_within(
+        "pdf-jpx-components",
+        &image_page(
+            "/Width 8 /Height 8 /Filter /JPXDecode",
+            &jpx_claiming(3_000, 4),
+        ),
+        128,
+    );
+}
+
+#[test]
+fn pdf_jpeg_working_set() {
+    // Its pixels fit the limit, and its samples with their coefficients do
+    // not.
+    let drawn = drawn(
+        "pdf-jpeg-working-set",
+        Some(&icon_pdf(1)),
+        &image_page(
+            "/Width 7000 /Height 7000 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode",
+            &jpeg_claiming(7_000),
+        ),
+    );
+    assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
 }
 
 /// A JBIG2 page of `side` by `side` with nothing on it.
