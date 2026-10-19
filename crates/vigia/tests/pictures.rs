@@ -11,7 +11,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui_image::picker::{Picker, ProtocolType};
-use support::{Scratch, png};
+use support::{Scratch, animated_gif, claimed_png, png};
 use vigia::pictures::{Inks, Kind, Pictures};
 use vigia::{Action, App, Glyphs, Pointing, Row, Theme, View, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, Standing};
@@ -340,19 +340,7 @@ fn changed_count_line() {
 #[test]
 fn gif_first_frame() {
     let first = screen_like(40, 40, [40, 90, 200]);
-    let gif = |second: &RgbaImage| {
-        let mut bytes = Vec::new();
-        {
-            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
-            encoder
-                .encode_frames(vec![
-                    image::Frame::new(first.clone()),
-                    image::Frame::new(second.clone()),
-                ])
-                .expect("encode");
-        }
-        bytes
-    };
+    let gif = |second: &RgbaImage| animated_gif(&[first.clone(), second.clone()]);
     let scratch = changed(
         "pictures-gif",
         "spinner.gif",
@@ -606,46 +594,11 @@ fn resize_mid_decode() {
     assert!(picture_rows(&view).iter().all(|(_, built)| *built));
 }
 
-/// The CRC of `bytes`, as PNG chunks carry it.
-fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = 0xffff_ffffu32;
-    for &byte in bytes {
-        crc ^= u32::from(byte);
-        for _ in 0..8 {
-            crc = if crc & 1 == 1 {
-                (crc >> 1) ^ 0xedb8_8320
-            } else {
-                crc >> 1
-            };
-        }
-    }
-    !crc
-}
-
-fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
-    let mut out = (data.len() as u32).to_be_bytes().to_vec();
-    out.extend_from_slice(kind);
-    out.extend_from_slice(data);
-    let mut covered = kind.to_vec();
-    covered.extend_from_slice(data);
-    out.extend_from_slice(&crc32(&covered).to_be_bytes());
-    out
-}
-
 /// A PNG whose header claims 30000 by 30000: the limits refuse its decode, and
 /// the line says so.
 #[test]
 fn decompression_bomb_refused() {
-    let mut bomb = b"\x89PNG\r\n\x1a\n".to_vec();
-    let mut header = 30_000u32.to_be_bytes().to_vec();
-    header.extend_from_slice(&30_000u32.to_be_bytes());
-    header.extend_from_slice(&[8, 6, 0, 0, 0]);
-    bomb.extend(chunk(b"IHDR", &header));
-    bomb.extend(chunk(
-        b"IDAT",
-        &[0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01],
-    ));
-    bomb.extend(chunk(b"IEND", &[]));
+    let bomb = claimed_png(30_000, 30_000);
     let scratch = changed("pictures-bomb", "bomb.png", &png(120, 260, 1), &bomb);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

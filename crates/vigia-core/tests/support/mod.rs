@@ -4,6 +4,11 @@
 
 //! A disposable git repository, built by real `git`.
 
+mod assets;
+// Each test binary takes the few generators it needs.
+#[allow(unused_imports)]
+pub use assets::*;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -730,21 +735,9 @@ impl Scratch {
 
         let scratch = Scratch { path };
         scratch.git(&["init", "-q", "-b", "main"]);
-        // Every one of these exists to stop a developer's global config from
-        // changing what the test measures. autocrlf in particular is commonly
-        // true on Windows and would rewrite line endings under us.
-        scratch.git(&["config", "core.autocrlf", "false"]);
-        scratch.git(&["config", "core.safecrlf", "false"]);
-        scratch.git(&["config", "user.email", "test@example.invalid"]);
-        scratch.git(&["config", "user.name", "vigia tests"]);
-        scratch.git(&["config", "commit.gpgsign", "false"]);
-        // **These two are here for `crates/vigia/tests/writes.rs`, which asserts
-        // that nothing under the worktree moves while `vigia` runs.** With
-        // `core.fsmonitor` on, a `git add` spawns a `git-fsmonitor--daemon` that
-        // outlives the command and keeps writing inside `.git`, including a
-        // `cookies/` directory it creates and deletes to synchronise with clients.
-        scratch.git(&["config", "core.fsmonitor", "false"]);
-        scratch.git(&["config", "core.untrackedCache", "false"]);
+        for (key, value) in GIT_CONFIG {
+            scratch.git(&["config", key, value]);
+        }
         scratch
     }
 
@@ -1269,45 +1262,4 @@ impl Scratch {
         );
         scratch
     }
-}
-
-/// `image` encoded as `format`. JPEG has no alpha channel to encode.
-pub fn encode_image(image: &image::RgbaImage, format: image::ImageFormat) -> Vec<u8> {
-    let mut bytes = std::io::Cursor::new(Vec::new());
-    match format {
-        image::ImageFormat::Jpeg => image::DynamicImage::ImageRgba8(image.clone())
-            .to_rgb8()
-            .write_to(&mut bytes, format),
-        _ => image.write_to(&mut bytes, format),
-    }
-    .expect("encode the fixture");
-    bytes.into_inner()
-}
-
-/// An image of `width` by `height` in `format`, every pixel from `seed`.
-pub fn encoded(format: image::ImageFormat, width: u32, height: u32, seed: u8) -> Vec<u8> {
-    let image = image::RgbaImage::from_fn(width, height, |x, y| {
-        image::Rgba([seed, (x % 256) as u8, (y % 256) as u8, 255])
-    });
-    encode_image(&image, format)
-}
-
-/// A phone-sized screenshot as a PNG, its colours from `accent`.
-pub fn screen_png(accent: u8) -> Vec<u8> {
-    let image = image::RgbaImage::from_fn(1170, 2532, |x, y| {
-        image::Rgba([accent, (x % 251) as u8, (y % 241) as u8, 255])
-    });
-    encode_image(&image, image::ImageFormat::Png)
-}
-
-/// An icon-shaped SVG: a gradient circle and a stroked path, its colours
-/// moved by `seed`.
-pub fn icon_svg(seed: u8) -> String {
-    format!(
-        r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#{seed:02x}0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#g)"/><path d="M7 12l3 3 7-7" stroke="#fff" stroke-width="2" fill="none"/></svg>"##
-    )
-}
-
-pub fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
-    encoded(image::ImageFormat::Png, width, height, seed)
 }

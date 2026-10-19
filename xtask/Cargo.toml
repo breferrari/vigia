@@ -28,5 +28,17 @@ two-face = { version = "0.5.2", default-features = false, features = [
 # regex-fancy) ride along.
 syntect = { workspace = true, features = ["yaml-load", "dump-create"] }
 
+# The scene bed's images, from the generators the tests share. Already in the
+# workspace graph, and nothing here ships.
+image.workspace = true
+
+[dev-dependencies]
+# The scene bed's tests read the scene through the core and draw it through
+# the pane, as a reader's pane would.
+ratatui.workspace = true
+ratatui-image.workspace = true
+vigia = { path = "../crates/vigia" }
+vigia-core.workspace = true
+
 [lints]
 workspace = true

@@ -79,6 +79,15 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps   # the docs, with th
 cargo fmt --all
 ```
 
+To look at every picture state beside ordinary code edits, build the scene bed and run `vigia` on what it prints in another pane:
+
+```sh
+cargo run -p xtask --bin scene -- static   # every state at once, listed one per line
+cargo run -p xtask --bin scene -- replay   # the same states written in bursts, about 20 seconds
+```
+
+Each run makes a new repository under your temp directory and touches nothing else.
+
 The suites run under nextest with its `ci` profile, which runs every test and reports every failure in one pass; `cargo test`, and nextest without that profile, stop at the first failure. The release gates run under `cargo test`, as CI runs them. CI sets `VIGIA_BUDGET_SLACK=3` on every step, because its shared runners are slow.
 
 CI runs on Linux, macOS and Windows, with a musl leg for the artifact that Linux actually ships. The budget gates run in debug on every commit. The absolute wall-clock tier runs in release only. A pull request that changes only documents, skills, templates or images runs the suites that read documents on Linux and skips the rest, so it finishes in a couple of minutes. The `full-ci` label forces the whole run on any pull request.
