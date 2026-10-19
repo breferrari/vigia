@@ -2,13 +2,14 @@
 
 Everything `vigia` reads to decide how the pane is drawn and what it opens as. Nothing here is required: the defaults are what the pane ships with, and the [README](../README.md) covers the two settings most people ever touch.
 
-Three independent settings decide how the pane is **drawn**, and most confusion here comes from reading any two as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three must allow a thing before it appears. A fourth decides what the pane **starts as**, and a fifth is not about drawing at all.
+Three independent settings decide how the pane is **drawn**, and most confusion here comes from reading any two as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three must allow a thing before it appears. **Pictures** is how a changed image is drawn. Another decides what the pane **starts as**, and a fifth is not about drawing at all.
 
 | | First answer wins |
 |---|---|
 | 🎨 **Palette** | `VIGIA_THEME` (a name, or a path) → `~/.config/vigia/theme` → **your terminal's own background** → `ansi` |
 | 🔦 **Depth** | `VIGIA_COLOR` → `NO_COLOR` → `TERM=dumb` → `COLORTERM` → `TERM_PROGRAM` → `TERM` → 16 |
 | ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → **an engine that draws octants and names its version** → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
+| 🖼️ **Pictures** | `VIGIA_PICTURES` → **your terminal's answer** (Kitty graphics, then Sixel) → `TERM_PROGRAM`/`TERM`/`WT_SESSION`, when the cell size is known → half-blocks, at 24-bit colour only |
 | 🪟 **View** | `~/.config/vigia/config` → everything off, except `links` and `notes`, and nothing hidden |
 | 🔔 **Updates** | one look at crates.io when the pane opens, and a footer line only if there is a newer release. `VIGIA_UPDATE=off` declines it |
 
@@ -74,6 +75,23 @@ VIGIA_GLYPHS=auto            # decide for me, which is the default
 **If the sparkline is a row of boxes, you want `block`.** That is a font without the braille patterns U+2800 to U+28FF, and it is the one direction detection cannot see. Windows is where this is most likely: the old console draws with Consolas, which carries none of them, so a bare `conhost` gets blocks and Windows Terminal gets braille.
 
 `octant` is chosen for you exactly where it is not a bet: ghostty 1.2+, kitty 0.40+ and VTE-based terminals from 0.78 draw the Unicode 16 octants themselves, the way every terminal draws box drawing, and each of those names itself and its version in the environment. Everywhere else the octants have to come from your font. Most fonts do not have them yet, so the answer stays braille. `VIGIA_GLYPHS=octant` remains your word for a terminal the table does not know. foot 1.20+ draws them too and exports no version, so it is deliberately not promoted: promoting it means a foot one release older gets tofu, and the code records that trade instead of taking it silently.
+
+</details>
+
+<details>
+<summary><b>🖼️ Pictures</b></summary>
+
+<br>
+
+A changed image draws its old and new pictures and where they differ. When the pane opens, it asks your terminal whether it draws Kitty graphics or Sixel, and how big a cell is in pixels. kitty, Ghostty, iTerm2 and Rio answer Kitty; Windows Terminal 1.22 and later, foot, and xterm with its Sixel support on answer Sixel. Inside tmux the question and the image pass through to the terminal outside it, and the pane turns tmux's `allow-passthrough` on to make that work. When the terminal does not answer, WezTerm and iTerm2 draw iTerm2 images, and kitty, Ghostty, foot and Windows Terminal draw as they would have answered. Everything else draws half-blocks, which need 24-bit colour.
+
+```sh
+VIGIA_PICTURES=kitty        # kitty graphics, through Unicode placeholders
+VIGIA_PICTURES=sixel
+VIGIA_PICTURES=iterm2
+VIGIA_PICTURES=halfblocks   # two pixels a cell, in any terminal with 24-bit colour
+VIGIA_PICTURES=auto         # decide for me, which is the default
+```
 
 </details>
 

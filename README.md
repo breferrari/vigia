@@ -487,14 +487,14 @@ The frame time in the status bar is a promise rather than a diagnostic: it is th
 
 ## 🎨 Make it yours
 
-A palette, a colour depth, which drawing glyphs your font carries, what the pane opens as, and whether it looks for updates. Every one has a default, and the defaults are what ships.
+A palette, a colour depth, which drawing glyphs your font carries, how a changed image is drawn, what the pane opens as, and whether it looks for updates. Every one has a default, and the defaults are what ships.
 
 ```sh
 VIGIA_THEME=dark vigia          # ansi, dark, light or system, or a path to your own
 NO_COLOR=1 vigia                # every ladder collapses to something readable
 ```
 
-**[`docs/CONFIG.md`](docs/CONFIG.md)** is the whole of it: the five ladders and what wins at each rung, the config file and its keys, and how to write a theme. **[`docs/THEME.md`](docs/THEME.md)** names every colour the pane draws.
+**[`docs/CONFIG.md`](docs/CONFIG.md)** is the whole of it: the six ladders and what wins at each rung, the config file and its keys, and how to write a theme. **[`docs/THEME.md`](docs/THEME.md)** names every colour the pane draws.
 
 ---
 

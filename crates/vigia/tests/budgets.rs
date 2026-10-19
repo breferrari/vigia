@@ -3423,6 +3423,11 @@ fn pictures_frame(protocol: ProtocolType) {
     for _ in 0..SAMPLED_FRAMES {
         frames.push(timed(&mut frame, &mut app, &mut highlighter, &mut pictures).0);
     }
+    eprintln!(
+        "note: {protocol:?} frames p50 {:?}, p99 {:?}",
+        frames.percentile(0.5),
+        frames.percentile(0.99)
+    );
     holds_p99(
         &format!(
             "I9: a settled frame repainting a changed image's three pictures in {protocol:?} \
