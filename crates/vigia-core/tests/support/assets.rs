@@ -14,12 +14,17 @@ pub fn encode_image(image: &image::RgbaImage, format: image::ImageFormat) -> Vec
     bytes.into_inner()
 }
 
+/// A `width` by `height` image whose red is `seed` and whose green and blue
+/// step with the column and the row.
+pub fn gradient(width: u32, height: u32, seed: u8) -> image::RgbaImage {
+    image::RgbaImage::from_fn(width, height, |x, y| {
+        image::Rgba([seed, (x % 256) as u8, (y % 256) as u8, 255])
+    })
+}
+
 /// An image of `width` by `height` in `format`, every pixel from `seed`.
 pub fn encoded(format: image::ImageFormat, width: u32, height: u32, seed: u8) -> Vec<u8> {
-    let image = image::RgbaImage::from_fn(width, height, |x, y| {
-        image::Rgba([seed, (x % 256) as u8, (y % 256) as u8, 255])
-    });
-    encode_image(&image, format)
+    encode_image(&gradient(width, height, seed), format)
 }
 
 /// A phone-sized screenshot as a PNG, its colours from `accent`.
@@ -47,9 +52,7 @@ pub fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
 /// so two that differ only in it compare as a profile change.
 pub fn profiled_png(width: u32, height: u32, seed: u8, profile: &[u8]) -> Vec<u8> {
     use image::ImageEncoder;
-    let image = image::RgbaImage::from_fn(width, height, |x, y| {
-        image::Rgba([seed, (x % 256) as u8, (y % 256) as u8, 255])
-    });
+    let image = gradient(width, height, seed);
     let mut bytes = Vec::new();
     let mut encoder = image::codecs::png::PngEncoder::new(&mut bytes);
     encoder
@@ -109,8 +112,8 @@ pub fn labelled_svg(label: &str) -> String {
 
 /// An SVG whose filter costs more than a picture may take, so it draws
 /// `could not be decoded`.
-pub fn costly_svg() -> String {
-    r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><filter id="t"><feTurbulence baseFrequency="0.5" numOctaves="100000000"/></filter><rect width="24" height="24" filter="url(#t)"/></svg>"#.to_owned()
+pub fn costly_svg() -> &'static str {
+    r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><filter id="t"><feTurbulence baseFrequency="0.5" numOctaves="100000000"/></filter><rect width="24" height="24" filter="url(#t)"/></svg>"#
 }
 
 /// A PNG whose header claims `width` by `height` and whose pixel data is a

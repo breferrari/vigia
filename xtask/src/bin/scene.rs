@@ -122,50 +122,43 @@ fn image_with(
     seed: u8,
     changed: Option<(u32, u32)>,
 ) -> Vec<u8> {
-    let mut image = image::RgbaImage::from_fn(width, height, |x, y| {
-        image::Rgba([seed, (x * 3 % 256) as u8, (y * 5 % 256) as u8, 255])
-    });
+    let mut image = assets::gradient(width, height, seed);
     if let Some((x, y)) = changed {
         image.put_pixel(x, y, image::Rgba([255, 0, 255, 255]));
     }
     assets::encode_image(&image, format)
 }
 
-/// Source text of `lines` numbered lines, with `tag` in each.
-fn source(lines: usize, tag: &str) -> String {
-    (1..=lines)
-        .map(|n| format!("fn line_{n}() -> &'static str {{ \"{tag}\" }}\n"))
+/// Source text of `count` numbered lines, each tagged by `tag_of` its number.
+fn lines<'a>(count: usize, tag_of: impl Fn(usize) -> &'a str) -> String {
+    (1..=count)
+        .map(|n| format!("fn line_{n}() -> &'static str {{ \"{}\" }}\n", tag_of(n)))
         .collect()
 }
 
-/// `base` with `count` lines from `from` on rewritten.
-fn edited(lines: usize, from: usize, count: usize) -> String {
-    (1..=lines)
-        .map(|n| {
-            if (from..from + count).contains(&n) {
-                format!("fn line_{n}() -> &'static str {{ \"edited\" }}\n")
-            } else {
-                format!("fn line_{n}() -> &'static str {{ \"base\" }}\n")
-            }
-        })
-        .collect()
+/// `count` lines tagged `base`, with `edits` lines from `from` on tagged
+/// `edited`.
+fn edited(count: usize, from: usize, edits: usize) -> String {
+    lines(count, |n| {
+        if (from..from + edits).contains(&n) {
+            "edited"
+        } else {
+            "base"
+        }
+    })
 }
 
 /// The bed's repository, and how to write into it.
 struct Scene {
     dir: PathBuf,
-    /// Every file written or removed, for the test that holds them inside
-    /// `dir`.
-    touched: std::cell::RefCell<Vec<PathBuf>>,
 }
 
 impl Scene {
-    /// A new repository at `dir`, configured so nothing of the reader's own
-    /// git config changes what it shows.
+    /// A new repository at `dir`, configured as `Scratch` configures one, so
+    /// nothing of the reader's own git config changes what it shows.
     fn new(dir: &Path) -> Self {
         let scene = Self {
             dir: dir.to_path_buf(),
-            touched: std::cell::RefCell::default(),
         };
         scene.git(&["init", "-q", "-b", "main"]);
         for (key, value) in [
@@ -206,9 +199,7 @@ impl Scene {
             "{} would leave the scene",
             rela.display()
         );
-        let path = self.dir.join(rela);
-        self.touched.borrow_mut().push(path.clone());
-        path
+        self.dir.join(rela)
     }
 
     fn write(&self, rela: &str, bytes: impl AsRef<[u8]>) {
@@ -225,7 +216,7 @@ impl Scene {
 
     /// Every file the changes start from, committed.
     fn baseline(&self) {
-        self.write("src/deleted.rs", source(10, "base"));
+        self.write("src/deleted.rs", lines(10, |_| "base"));
         for (name, lines) in [("small", 20), ("medium", 40), ("large", 80)] {
             self.write(&format!("src/{name}.rs"), edited(lines, 0, 0));
         }
@@ -254,7 +245,8 @@ impl Scene {
         self.write("svg/label.svg", assets::labelled_svg("Save"));
         self.write("svg/costly.svg", assets::icon_svg(3));
         // Committed as text before the attribute exists, so no filter runs.
-        let (oid, pointer) = assets::lfs_pointer(&lfs_old(), 0xab);
+        let object = lfs_old();
+        let (oid, pointer) = assets::lfs_pointer(&object, 0xab);
         self.write("lfs/pointer.png", pointer);
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "-m", "baseline"]);
@@ -267,38 +259,41 @@ impl Scene {
         self.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
         self.write(
             &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
-            lfs_old(),
+            object,
         );
         // The index is refreshed after the clock has passed the commit, so no
         // file reads as racily clean and status never asks the LFS filter
         // (#659, whose fix removes this).
         std::thread::sleep(Duration::from_millis(1100));
-        let _ = Command::new("git")
-            .arg("-C")
-            .arg(&self.dir)
-            .args(["update-index", "-q", "--refresh"])
-            .output();
+        self.git(&["update-index", "-q", "--refresh"]);
     }
 
     /// Every change of `static`, written at once.
     fn changes(&self) {
-        self.write("src/added.rs", source(12, "new"));
+        self.write("src/added.rs", lines(12, |_| "new"));
         self.remove("src/deleted.rs");
         self.write("src/small.rs", edited(20, 10, 1));
         self.write("src/medium.rs", edited(40, 12, 8));
         self.write("src/large.rs", edited(80, 20, 40));
+        // Each rename is staged, then changed: the staged run shows the
+        // rename and the unstaged run the change.
+        let mut renamed = vec!["add".to_owned(), "--".to_owned()];
         for (format, folder, ext) in FORMATS {
             let file = |name: &str| format!("{folder}/{name}.{ext}");
             self.write(&file("added"), image_with(format, 96, 64, 15, None));
             self.remove(&file("deleted"));
             self.write(&file("modified"), image_with(format, 96, 64, 25, None));
             self.write(&file("resized"), image_with(format, 64, 40, 30, None));
-            // Staged as a rename, then changed: the staged run shows the
-            // rename and the unstaged run the change.
             self.remove(&file("before"));
             self.write(&file("after"), image_with(format, 96, 64, 40, None));
-            self.git(&["add", "--", &file("before"), &file("after")]);
-            self.write(&file("after"), image_with(format, 96, 64, 41, None));
+            renamed.extend([file("before"), file("after")]);
+        }
+        self.git(&renamed.iter().map(String::as_str).collect::<Vec<_>>());
+        for (format, folder, ext) in FORMATS {
+            self.write(
+                &format!("{folder}/after.{ext}"),
+                image_with(format, 96, 64, 41, None),
+            );
         }
         self.write(
             "png/one-pixel.png",
@@ -329,8 +324,8 @@ impl Scene {
     fn replay(&self, pace: f64, mut say: impl FnMut(&str)) {
         let pause = |seconds: f64| std::thread::sleep(Duration::from_secs_f64(seconds * pace));
         say("an agent writes src/feature.rs, line by line");
-        for lines in 1..=12 {
-            self.write("src/feature.rs", source(lines, "feature"));
+        for count in 1..=12 {
+            self.write("src/feature.rs", lines(count, |_| "feature"));
             pause(0.15);
         }
         pause(3.0);
@@ -372,12 +367,10 @@ fn lfs_old() -> Vec<u8> {
 
 /// A two-frame GIF whose first frame comes from `seed`.
 fn animated(seed: u8) -> Vec<u8> {
-    let frame = |seed: u8| {
-        image::RgbaImage::from_fn(48, 32, |x, y| {
-            image::Rgba([seed, (x * 5 % 256) as u8, (y * 7 % 256) as u8, 255])
-        })
-    };
-    assets::animated_gif(&[frame(seed), frame(seed.wrapping_add(100))])
+    assets::animated_gif(&[
+        assets::gradient(48, 32, seed),
+        assets::gradient(48, 32, seed.wrapping_add(100)),
+    ])
 }
 
 /// Bytes that are binary and no image: NULs, from `seed`.
@@ -446,6 +439,12 @@ mod tests {
     fn scene_static_states() {
         let dir = built();
         let found = read(&dir);
+        for (path, _) in STATES.iter().filter(|(path, _)| !path.ends_with('/')) {
+            assert!(
+                found.contains_key(*path),
+                "the printed list names {path}, which the scene did not change"
+            );
+        }
         let at = |path: &str| {
             found
                 .get(path)
@@ -561,31 +560,36 @@ mod tests {
         let files = frame.files().len();
         // One view per file, each starting at its heading.
         for _ in 0..files {
+            let chrome = chrome(&app);
             let body = body_layout(
                 area,
-                &chrome(&app),
+                &chrome,
                 frame.files().len(),
                 vigia::list_rows_wanted(frame.files()),
             );
-            let mut view = app
-                .view(&mut frame, &mut highlighter, &history, body)
-                .expect("view");
-            pictures.attach(&mut view.rows, &frame);
-            assert!(
-                pictures.settle(Duration::from_secs(60)),
-                "the pictures were not built"
-            );
-            let mut view = app
-                .view(&mut frame, &mut highlighter, &history, body)
-                .expect("view");
-            pictures.attach(&mut view.rows, &frame);
+            // Once to queue what is on screen, and once more with it built.
+            let mut view = None;
+            for pass in 0..2 {
+                let mut drawn = app
+                    .view(&mut frame, &mut highlighter, &history, body)
+                    .expect("view");
+                pictures.attach(&mut drawn.rows, &frame);
+                if pass == 0 {
+                    assert!(
+                        pictures.settle(Duration::from_secs(60)),
+                        "the pictures were not built"
+                    );
+                }
+                view = Some(drawn);
+            }
+            let view = view.expect("two passes");
             render(
                 &mut Buffer::empty(area),
                 area,
                 &view,
                 &Theme::dark(),
                 Glyphs::default(),
-                &chrome(&app),
+                &chrome,
             );
             let mut heading: Option<String> = None;
             for row in &view.rows {
@@ -753,21 +757,6 @@ mod tests {
             dir.display()
         );
         let scene = Scene::new(&dir);
-        scene.baseline();
-        scene.changes();
-        let touched = scene.touched.borrow();
-        assert!(
-            touched.len() > 50,
-            "only {} files were written",
-            touched.len()
-        );
-        for path in touched.iter() {
-            assert!(
-                path.starts_with(&dir),
-                "{} is outside the scene",
-                path.display()
-            );
-        }
         for escape in [
             "../outside.txt",
             "/etc/outside.txt",
@@ -777,8 +766,11 @@ mod tests {
                 scene.write(escape, "x");
             }));
             assert!(refused.is_err(), "{escape} was written");
+            assert!(
+                !dir.join(escape).exists(),
+                "{escape} exists after its write was refused"
+            );
         }
-        drop(touched);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
