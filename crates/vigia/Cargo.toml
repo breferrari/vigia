@@ -32,7 +32,9 @@ categories = ["command-line-utilities", "development-tools"]
 exclude = ["tests/**"]
 
 [dependencies]
+image.workspace = true
 ratatui.workspace = true
+ratatui-image.workspace = true
 ratatui-textarea.workspace = true
 serde_json.workspace = true
 tachyonfx.workspace = true
@@ -96,8 +98,6 @@ signal-hook.workspace = true
 # above breaks harder and earlier, at compile time.
 [dev-dependencies]
 insta.workspace = true
-# Encodes the image fixtures.
-image.workspace = true
 
 # The same test-only pair `vigia-core`'s manifest explains: the shared support
 # module compiles into this crate's test binaries too, so both need them.
