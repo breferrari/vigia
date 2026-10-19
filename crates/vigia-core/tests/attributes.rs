@@ -519,3 +519,22 @@ fn lfs_walk_budget() {
         "the wake did not compare the file the first walk could not afford"
     );
 }
+
+#[test]
+fn lfs_verdicts_pruned() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-pruned", &object, &object, true);
+    settle(&scratch, "a.png");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(worktree.lfs_cached(), 1, "the setup kept no verdict");
+    // Back to the stored pointer, which the walk no longer flags.
+    scratch.git(&["checkout", "--", "a.png"]);
+    frame.advance().expect("advance after the restore");
+    assert_eq!(
+        worktree.lfs_cached(),
+        0,
+        "a verdict outlived the file the walk stopped flagging"
+    );
+}

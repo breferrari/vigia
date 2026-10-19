@@ -1145,7 +1145,6 @@ impl Worktree {
                 *status = bare;
             }
             self.lfs.set(lfs_configured(&repo));
-            self.lfs_verdicts.borrow_mut().clear();
             self.loaded_config.set(now);
             self.reloads.set(self.reloads.get() + 1);
             self.invalidate_filter();
@@ -1161,6 +1160,11 @@ impl Worktree {
     fn lfs_wait_until(&self, until: std::time::SystemTime) {
         let wait = self.lfs_wait.get().map_or(until, |at| at.min(until));
         self.lfs_wait.set(Some(wait));
+    }
+
+    /// How many LFS verdicts this worktree holds.
+    pub fn lfs_cached(&self) -> usize {
+        self.lfs_verdicts.borrow().len()
     }
 
     /// How many LFS files this worktree has compared with their local object.
