@@ -1452,8 +1452,19 @@ fn stepped(
     highlighter: &mut Highlighter,
     action: Action,
 ) -> View {
-    app.apply(action, frame, body()).expect("apply");
-    app.view(frame, highlighter, &History::new(), split())
+    stepped_in(app, frame, highlighter, action, split())
+}
+
+/// [`stepped`] in the layout `body`.
+fn stepped_in(
+    app: &mut App,
+    frame: &mut Frame,
+    highlighter: &mut Highlighter,
+    action: Action,
+    body: Body,
+) -> View {
+    app.apply(action, frame, body.diff).expect("apply");
+    app.view(frame, highlighter, &History::new(), body)
         .expect("view")
 }
 
@@ -1604,6 +1615,7 @@ fn page_overlap_counts_display_rows() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
     let before = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(4));
     assert_eq!(before.rows.len(), height, "the screen was not full");
     let after = stepped(&mut app, &mut frame, &mut highlighter, Action::Page(1));
@@ -1614,7 +1626,7 @@ fn page_overlap_counts_display_rows() {
     );
     assert_eq!(
         (after.top.row, after.top.under),
-        (3, before.top.under + height - 1),
+        (3, height - 1 + 1),
         "the page did not land inside the note"
     );
 }
@@ -1630,17 +1642,26 @@ fn jump_clears_under() {
         Action::Top,
         Action::File(1),
         Action::ListRow(0),
-        Action::ToggleFollow,
+        Action::Bottom,
         Action::DiffTo(0),
     ] {
-        stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
-        let inside = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(5));
+        stepped_in(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            Action::Top,
+            listed(),
+        );
+        let inside = stepped_in(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            Action::Scroll(5),
+            listed(),
+        );
         assert_eq!(inside.top.under, 2, "the setup did not reach the note");
-        let view = stepped(&mut app, &mut frame, &mut highlighter, jump);
+        let view = stepped_in(&mut app, &mut frame, &mut highlighter, jump, listed());
         assert_eq!(view.top.under, 0, "{jump:?} kept a hung-row offset");
-        if app.following() {
-            stepped(&mut app, &mut frame, &mut highlighter, Action::ToggleFollow);
-        }
     }
 }
 
@@ -1673,6 +1694,7 @@ fn under_clamped_when_note_shrinks() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
     let inside = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(9));
     assert_eq!(
         inside.top.under, 6,

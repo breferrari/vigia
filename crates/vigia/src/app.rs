@@ -174,9 +174,14 @@ pub struct App {
     note_count: NoteCount,
     /// Where the last frame stood when it drew the diff's last row.
     end: Option<Position>,
-    /// Logical rows the last frame drew, which a page step is measured in.
-    /// Stepping by the display height instead walks over unwrapped content.
+    /// Steps the last frame drew, which a page step is measured in. Stepping
+    /// by the display height instead walks over unwrapped content.
     shown: usize,
+    /// Where each step the last frame drew opens, from its top.
+    steps: Vec<Position>,
+    /// A step up the next collect resolves: the top it left, the steps owed
+    /// above it, and the position it left behind.
+    rise: Option<(Position, usize, Position)>,
     /// Whether the reader has asked for the staged run (`a`).
     staged: bool,
     /// Where the reader has asked the pane to stand, which `b` toggles and a row
@@ -262,6 +267,8 @@ impl Default for App {
             note_count: NoteCount::default(),
             end: None,
             shown: 0,
+            steps: Vec::new(),
+            rise: None,
             icons: false,
             // OSC 8 degrades silently, so it costs nothing where unsupported.
             links: true,
@@ -307,6 +314,8 @@ impl App {
             wrap: config.wrap,
             notes_shown: config.notes,
             shown: 0,
+            steps: Vec::new(),
+            rise: None,
             staged: config.staged,
             following: config.follow,
             icons: config.icons,
@@ -1232,11 +1241,48 @@ impl App {
         match rows.cmp(&0) {
             std::cmp::Ordering::Equal => Ok(()),
             std::cmp::Ordering::Greater => {
-                self.position.row = self.position.row.saturating_add(rows.unsigned_abs());
+                self.down(rows.unsigned_abs());
                 Ok(())
             }
-            std::cmp::Ordering::Less => self.up(rows.unsigned_abs(), frame),
+            std::cmp::Ordering::Less => self.rise(rows.unsigned_abs(), frame),
         }
+    }
+
+    /// Step down from the last frame's steps. Past them, or off a frame that drew
+    /// somewhere else, the rest are logical rows.
+    fn down(&mut self, by: usize) {
+        if self.steps.first() != Some(&self.position) {
+            self.position.row = self.position.row.saturating_add(by);
+            self.position.under = 0;
+            return;
+        }
+        if let Some(&step) = self.steps.get(by) {
+            self.position = step;
+        } else if let Some(&last) = self.steps.last() {
+            self.position = Position {
+                row: last.row.saturating_add(by + 1 - self.steps.len()),
+                under: 0,
+                ..last
+            };
+        }
+    }
+
+    /// Step up through the rows hung under the top first. The rest go up as
+    /// logical rows, and the collect finds the step they owe.
+    fn rise(&mut self, by: usize, frame: &mut Frame) -> Result<()> {
+        if by <= self.position.under {
+            self.position.under -= by;
+            return Ok(());
+        }
+        let left = by - self.position.under;
+        let anchor = Position {
+            under: 0,
+            ..self.position
+        };
+        self.position = anchor;
+        self.up(left, frame)?;
+        self.rise = Some((anchor, left, self.position));
+        Ok(())
     }
 
     /// Resolve a drag on the diff's bar into a position.
@@ -1373,6 +1419,13 @@ impl App {
                 // [`Self::paint`].
                 highlight: self.paint != Paint::Never,
                 pictures: self.pictures,
+                // Owed only to the position the step left, so anything that moved
+                // the viewport since drops it.
+                rise: self
+                    .rise
+                    .take()
+                    .filter(|(_, _, left)| *left == self.position)
+                    .map(|(anchor, by, _)| (anchor, by)),
             },
             &self.notes,
             self.notes_shown,
@@ -1420,7 +1473,8 @@ impl App {
         // in the code that knows where the diff landed, and a caller that kept
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
-        self.shown = view.shown();
+        self.shown = view.steps.len();
+        self.steps.clone_from(&view.steps);
         Ok(view)
     }
 

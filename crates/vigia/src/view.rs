@@ -1355,6 +1355,9 @@ pub struct Viewport {
     /// Whether a changed image may draw its pictures: the terminal draws 24-bit
     /// colour.
     pub pictures: bool,
+    /// A step up still owed: the top before it, and the steps above that top
+    /// to open on. [`Self::position`] is already that many rows higher.
+    pub rise: Option<(Position, usize)>,
 }
 
 impl Default for Viewport {
@@ -1374,6 +1377,7 @@ impl Default for Viewport {
             highlight: true,
             single: false,
             pictures: false,
+            rise: None,
         }
     }
 }
@@ -1416,6 +1420,9 @@ pub struct View {
     /// Where the top row actually came from, once the request was resolved
     /// against the files that exist and how tall they are.
     pub top: Position,
+    /// The position of every row a step can open on, in screen order. A wrapped
+    /// line's continuations are not steps.
+    pub steps: Vec<Position>,
     /// Whether this frame resolved the landing [`Viewport::landing`] asked for.
     pub landed: bool,
     /// Whether this frame drew the last row of the diff.
@@ -1821,6 +1828,7 @@ impl View {
             highlight,
             single,
             pictures,
+            rise,
         } = viewport;
         // Off the frame, so a row and the sparkline beside it cannot describe two
         // moments. §11.1 says what a still picture silences and what survives it.
@@ -1875,6 +1883,7 @@ impl View {
                 row: position.row,
                 under: 0,
             },
+            steps: Vec::new(),
             landed: false,
             ended: false,
             read: 0,
@@ -1988,6 +1997,10 @@ impl View {
         let mut index = view.top.file;
         let mut skip = position.row;
         let mut placed = false;
+        let mut aim = Aim {
+            under: position.under,
+            rise,
+        };
         // Whether the position this walk settled on is the diff's *bottom*.
         let landing_content = (wrap && width > 0).then(|| crate::render::content_width(10, width));
         let mut at_bottom = false;
@@ -2014,10 +2027,13 @@ impl View {
                 if landing && !view.landed {
                     skip = landing_of(&change.kind, diff, height, landing_content);
                     view.landed = true;
+                    aim = Aim::default();
                 }
 
                 if !placed {
                     if skip >= span {
+                        // The offset was under a row this file does not have.
+                        aim.under = 0;
                         if index + 1 < stop {
                             // Wholly above the window.
                             skip -= span;
@@ -2057,6 +2073,7 @@ impl View {
                 // window, so `index >= stop` means the walk reached the last file and
                 // not that it consumed it.
                 let before = view.rows.len();
+                walked.blocks.push((index, skip, before));
                 let asked = skip.min(span);
                 let mut file_notes = notes_at(change, index, &pinned);
                 // Before the retain below: a note being retyped is still one.
@@ -2105,7 +2122,9 @@ impl View {
                 // After the cheap terms, so an ordinary follow frame never pays for it:
                 // this walks every collected row and the three conditions above are
                 // field reads.
-                && view.display_rows(width, wrap, height, &walked, rows) < height
+                && view
+                    .display_rows(width, wrap, height, &walked, rows, aim)
+                    < height
                 && view.top
                     != Position {
                         file: first,
@@ -2124,7 +2143,9 @@ impl View {
             walked.pins.clear();
             walked.boxed = None;
             walked.hung.clear();
+            walked.blocks.clear();
             view.notes.segments.clear();
+            aim = Aim::default();
             // `walked.drawn` is deliberately kept.
 
             // And the parses go with them. Clearing the rows discards what was drawn;
@@ -2162,10 +2183,13 @@ impl View {
                 && view.top != floor);
 
         let trimmed = view.wrap_rows(
-            width,
-            wrap,
-            height,
-            at_bottom,
+            Laid {
+                width,
+                wrap,
+                height,
+                at_bottom,
+                aim,
+            },
             &walked,
             rows,
             highlight.then_some(&mut highlighter),
@@ -2386,7 +2410,8 @@ impl View {
         Ok(())
     }
 
-    /// How many rows of the terminal the rows this walk has collected would take.
+    /// How many rows of the terminal the rows this walk has collected would take,
+    /// from the step `aim` opens on.
     fn display_rows(
         &self,
         width: usize,
@@ -2394,6 +2419,7 @@ impl View {
         height: usize,
         walked: &Walked,
         drawn: bool,
+        aim: Aim,
     ) -> usize {
         let content = if width == 0 {
             0
@@ -2401,47 +2427,53 @@ impl View {
             let gutter = crate::render::gutter_width(&self.rows, width);
             crate::render::content_width(gutter, width)
         };
-        let mut under: usize = if drawn {
-            walked.pins.iter().map(|pin| pin.count(content)).sum()
-        } else {
-            0
-        };
+        let mut under = vec![0usize; self.rows.len()];
+        if drawn {
+            for pin in &walked.pins {
+                under[pin.row] += pin.count(content);
+            }
+        }
         if let Some(boxed) = &walked.boxed {
-            under += box_rows(boxed, content).0.len();
+            under[boxed.row] += box_rows(boxed, content).0.len();
         }
-        under += walked.hung.iter().map(|hung| hung.rows).sum::<usize>();
-        if !wrap || content == 0 {
-            return self.rows.len() + under;
+        for hung in &walked.hung {
+            under[hung.row] += hung.rows;
         }
-        under
-            + self
-                .rows
-                .iter()
-                .map(|row| match row {
-                    Row::Line { text, .. } => {
-                        1 + crate::render::breaks_of(text, content, height).len()
-                    }
-                    _ => 1,
-                })
-                .sum::<usize>()
+        let costs: Vec<(usize, usize)> = self
+            .rows
+            .iter()
+            .zip(under)
+            .map(|(row, under)| match row {
+                Row::Line { text, .. } if wrap && content > 0 => {
+                    (crate::render::breaks_of(text, content, height).len(), under)
+                }
+                _ => (0, under),
+            })
+            .collect();
+        let total: usize = costs.iter().map(|(pieces, under)| pieces + 1 + under).sum();
+        total.saturating_sub(aimed(&costs, &walked.blocks, aim).2)
     }
 
     /// Turn logical rows into display rows, record the gutter, and answer the rows
     /// the bottom clamp trimmed off the front: [`Self::top`] still names the first.
     /// The display rows are a line's continuations and, when `drawn`, the rows of
     /// the notes pinned under it, and both are counted in the same unit.
-    #[allow(clippy::too_many_arguments)]
     fn wrap_rows(
         &mut self,
-        width: usize,
-        wrap: bool,
-        height: usize,
-        at_bottom: bool,
+        laid: Laid,
         walked: &Walked,
         drawn: bool,
         mut pass: Option<&mut Pass<'_>>,
     ) -> usize {
+        let Laid {
+            width,
+            wrap,
+            height,
+            at_bottom,
+            aim,
+        } = laid;
         let pins = &walked.pins;
+        let blocks = &walked.blocks;
         // Only where a width was passed, so a caller that named none leaves
         // the decision where it has always been. See [`View::gutter`].
         self.gutter = (width > 0).then(|| crate::render::gutter_width(&self.rows, width));
@@ -2504,6 +2536,12 @@ impl View {
         }
         let cost = |at: usize| breaks[at].len() + 1 + under[at];
         let total: usize = (0..breaks.len()).map(cost).sum();
+        let costs: Vec<(usize, usize)> = (0..breaks.len())
+            .map(|at| (breaks[at].len(), under[at]))
+            .collect();
+        let (_, _, opens_at) = aimed(&costs, blocks, aim);
+        // Whether the screen opens where a step put it rather than on its first row.
+        let aiming = opens_at > 0 || aim.rise.is_some();
         // Every pinned answer's blocks, whether the window reaches them or not:
         // the pass sweeps what nothing asks for.
         if drawn && let Some(pass) = pass.as_deref_mut() {
@@ -2516,8 +2554,11 @@ impl View {
 
         // Nothing on this screen wraps and nothing sits under a row, so the rows
         // are the display rows and every index already names one.
-        if total == breaks.len() {
+        if total == breaks.len() && !aiming {
             self.ended = total <= height;
+            self.steps = (0..breaks.len())
+                .map(|at| position_of(blocks, at))
+                .collect();
             self.notes.marked = pins
                 .iter()
                 .filter(|pin| pin.marks)
@@ -2538,10 +2579,11 @@ impl View {
 
         // Both clamps as display rows dropped off the front, the only thing
         // either can move.
-        let mut dropped = if at_bottom {
-            total.saturating_sub(height)
-        } else {
-            0
+        // A screen opened inside a row's hung rows still fills the pane at the end.
+        let mut dropped = match (at_bottom, aiming) {
+            (true, true) => opens_at.min(total.saturating_sub(height)),
+            (true, false) => total.saturating_sub(height),
+            (false, _) => opens_at,
         };
         // A box the reader cannot see is a mode they cannot leave on purpose,
         // so the window is pulled into the span that shows one.
@@ -2571,6 +2613,12 @@ impl View {
         while from < breaks.len() && above >= cost(from) {
             above -= cost(from);
             from += 1;
+        }
+        if aiming && from < breaks.len() {
+            self.top = Position {
+                under: above.saturating_sub(breaks[from].len()),
+                ..position_of(blocks, from)
+            };
         }
 
         let texts: HashMap<&str, (&str, Option<&str>)> = pins
@@ -2644,6 +2692,7 @@ impl View {
                         let slice = text[start..cut].to_owned();
                         if piece == 0 {
                             landed[at] = Some(out.len());
+                            self.steps.push(position_of(blocks, at));
                             out.push(Row::Line {
                                 kind,
                                 number,
@@ -2673,10 +2722,13 @@ impl View {
                         skip -= 1;
                     } else {
                         landed[at] = Some(out.len());
+                        self.steps.push(position_of(blocks, at));
                         out.push(row);
                     }
                 }
             }
+            // The first hung row this logical row keeps, counted from one.
+            let mut hung_step = skip + 1;
             // The rows under this line, as far as the window reaches: the box
             // whole and then skipped like any row, each note from the first row
             // it keeps.
@@ -2727,6 +2779,11 @@ impl View {
                 {
                     whole.push((out.len(), text));
                 }
+                self.steps.push(Position {
+                    under: hung_step,
+                    ..position_of(blocks, at)
+                });
+                hung_step += 1;
                 out.push(note_row);
             }
         }
@@ -2769,7 +2826,8 @@ impl View {
                     .map(|row| (row, path.clone(), *origin))
             })
             .collect();
-        from
+        // An aimed top already names the first logical row drawn.
+        if aiming { 0 } else { from }
     }
 
     /// Rows of the diff this screen holds: §11.1's *screenful*, the line a trimmed
@@ -2925,6 +2983,7 @@ impl View {
             boxed: box_pin,
             hung,
             room,
+            blocks: _,
         } = walked;
         let Changed {
             kind,
@@ -3078,6 +3137,80 @@ impl View {
     }
 }
 
+/// The step a screen opens on, as a scroll asked for it.
+#[derive(Debug, Clone, Copy, Default)]
+struct Aim {
+    /// [`Position::under`] of the top row.
+    under: usize,
+    /// [`Viewport::rise`].
+    rise: Option<(Position, usize)>,
+}
+
+/// What the display pass lays the walked rows out against.
+struct Laid {
+    width: usize,
+    wrap: bool,
+    height: usize,
+    /// Whether the walk reached the end of the diff.
+    at_bottom: bool,
+    aim: Aim,
+}
+
+/// The position of logical row `at` of a walk.
+fn position_of(blocks: &[(usize, usize, usize)], at: usize) -> Position {
+    let (file, first, start) = blocks
+        .iter()
+        .rev()
+        .find(|(_, _, start)| *start <= at)
+        .copied()
+        .unwrap_or_default();
+    Position {
+        file,
+        row: first + at - start,
+        under: 0,
+    }
+}
+
+/// The step `aim` opens on among walked rows of `(pieces, hung)` each: its logical
+/// row, how far under it, and the display rows above it.
+fn aimed(
+    costs: &[(usize, usize)],
+    blocks: &[(usize, usize, usize)],
+    aim: Aim,
+) -> (usize, usize, usize) {
+    let Some(&(_, first)) = costs.first() else {
+        return (0, 0, 0);
+    };
+    let anchor = aim.rise.and_then(|(anchor, by)| {
+        let at = (0..costs.len())
+            .find(|&at| position_of(blocks, at) == Position { under: 0, ..anchor })?;
+        Some((at, by))
+    });
+    let (at, under) = match anchor {
+        Some((mut at, by)) => {
+            let mut under = 0;
+            for _ in 0..by {
+                if under > 0 {
+                    under -= 1;
+                } else if at > 0 {
+                    at -= 1;
+                    under = costs[at].1;
+                } else {
+                    break;
+                }
+            }
+            (at, under)
+        }
+        None => (0, aim.under.min(first)),
+    };
+    let above: usize = costs[..at]
+        .iter()
+        .map(|(pieces, hung)| pieces + 1 + hung)
+        .sum();
+    let inside = if under == 0 { 0 } else { costs[at].0 + under };
+    (at, under, above + inside)
+}
+
 /// What the walk carries beside the rows.
 #[derive(Default)]
 struct Walked {
@@ -3091,6 +3224,9 @@ struct Walked {
     boxed: Option<BoxPin>,
     /// Pictures hung under their size line's logical row, for the display pass.
     hung: Vec<Hung>,
+    /// Each file the walk took rows from: its index, the first of its rows taken,
+    /// and the logical row that one landed on.
+    blocks: Vec<(usize, usize, usize)>,
     /// Columns and rows a changed image's pictures may take, or `None` where no
     /// picture is drawn.
     room: Option<(u16, u16)>,
