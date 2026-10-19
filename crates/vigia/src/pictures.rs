@@ -337,10 +337,11 @@ pub struct Answer {
 /// Which protocol draws the pictures: the override, then the answer, then the
 /// table of terminals, then half-blocks.
 pub fn protocol_of(
+    forced: Option<ProtocolType>,
     answer: Answer,
-    lookup: impl Fn(&str) -> Option<String>,
-) -> Result<ProtocolType, PicturesError> {
-    Ok(forced(&lookup)?.unwrap_or_else(|| detected(answer, &lookup)))
+    lookup: &impl Fn(&str) -> Option<String>,
+) -> ProtocolType {
+    forced.unwrap_or_else(|| detected(answer, lookup))
 }
 
 /// The protocol [`PICTURES_VAR`] names, or `None` for `auto` or unset.
@@ -1183,6 +1184,14 @@ mod tests {
         move |key| pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
     }
 
+    /// The override then the answer, composed as `run` composes them.
+    fn chosen(
+        answer: Answer,
+        lookup: impl Fn(&str) -> Option<String>,
+    ) -> Result<ProtocolType, PicturesError> {
+        Ok(protocol_of(forced(&lookup)?, answer, &lookup))
+    }
+
     const KNOWN: Answer = Answer {
         kitty: false,
         sixel: false,
@@ -1203,18 +1212,18 @@ mod tests {
             ("KITTY", ProtocolType::Kitty),
         ] {
             assert_eq!(
-                protocol_of(answer, env(&[(PICTURES_VAR, value)])),
+                chosen(answer, env(&[(PICTURES_VAR, value)])),
                 Ok(want),
                 "{PICTURES_VAR}={value:?}"
             );
         }
         assert_eq!(
-            protocol_of(answer, env(&[(PICTURES_VAR, "auto")])),
+            chosen(answer, env(&[(PICTURES_VAR, "auto")])),
             Ok(ProtocolType::Kitty),
             "auto did not fall through to the answer"
         );
         assert_eq!(
-            protocol_of(answer, env(&[(PICTURES_VAR, "  ")])),
+            chosen(answer, env(&[(PICTURES_VAR, "  ")])),
             Ok(ProtocolType::Kitty),
             "a blank override was not taken as unset"
         );
@@ -1223,7 +1232,7 @@ mod tests {
     #[test]
     fn override_refused() {
         assert_eq!(
-            protocol_of(KNOWN, env(&[(PICTURES_VAR, "png")])),
+            chosen(KNOWN, env(&[(PICTURES_VAR, "png")])),
             Err(PicturesError {
                 value: "png".to_owned()
             })
@@ -1239,12 +1248,12 @@ mod tests {
             cell: true,
             heard: true,
         };
-        assert_eq!(protocol_of(kitty, &wezterm), Ok(ProtocolType::Kitty));
+        assert_eq!(chosen(kitty, &wezterm), Ok(ProtocolType::Kitty));
         let sixel = Answer {
             sixel: true,
             ..KNOWN
         };
-        assert_eq!(protocol_of(sixel, &wezterm), Ok(ProtocolType::Sixel));
+        assert_eq!(chosen(sixel, &wezterm), Ok(ProtocolType::Sixel));
     }
 
     #[test]
@@ -1272,7 +1281,7 @@ mod tests {
                 ProtocolType::Halfblocks,
             ),
         ] {
-            assert_eq!(protocol_of(KNOWN, env(pairs)), Ok(want), "{pairs:?}");
+            assert_eq!(chosen(KNOWN, env(pairs)), Ok(want), "{pairs:?}");
         }
     }
 
@@ -1283,17 +1292,17 @@ mod tests {
             ..KNOWN
         };
         assert_eq!(
-            protocol_of(heard, env(&[("WT_SESSION", "abc")])),
+            chosen(heard, env(&[("WT_SESSION", "abc")])),
             Ok(ProtocolType::Halfblocks),
             "the table drew Sixel for a terminal that answered without it"
         );
         assert_eq!(
-            protocol_of(heard, env(&[("TERM_PROGRAM", "WezTerm")])),
+            chosen(heard, env(&[("TERM_PROGRAM", "WezTerm")])),
             Ok(ProtocolType::Iterm2),
             "an answer hid iTerm2 images, which no terminal reports"
         );
         assert_eq!(
-            protocol_of(
+            chosen(
                 KNOWN,
                 env(&[("WT_SESSION", "abc"), ("TERM_PROGRAM", "vscode")])
             ),
@@ -1306,12 +1315,12 @@ mod tests {
     fn tmux_outer_hint() {
         let stale_kitty = env(&[("TERM", "tmux-256color"), ("KITTY_WINDOW_ID", "3")]);
         assert_eq!(
-            protocol_of(KNOWN, stale_kitty),
+            chosen(KNOWN, stale_kitty),
             Ok(ProtocolType::Halfblocks),
             "a kitty variable inside tmux was believed"
         );
         let iterm = env(&[("TERM_PROGRAM", "tmux"), ("ITERM_SESSION_ID", "w0")]);
-        assert_eq!(protocol_of(KNOWN, iterm), Ok(ProtocolType::Iterm2));
+        assert_eq!(chosen(KNOWN, iterm), Ok(ProtocolType::Iterm2));
     }
 
     #[test]
@@ -1321,7 +1330,7 @@ mod tests {
             ..KNOWN
         };
         assert_eq!(
-            protocol_of(unknown, env(&[("TERM_PROGRAM", "WezTerm")])),
+            chosen(unknown, env(&[("TERM_PROGRAM", "WezTerm")])),
             Ok(ProtocolType::Halfblocks),
             "a protocol was picked with no cell size to fit it to"
         );

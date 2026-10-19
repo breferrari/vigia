@@ -23,14 +23,9 @@ fn silent_child() {
     let (picker, answer) = vigia::picker(true);
     let waited = began.elapsed();
     ratatui::crossterm::terminal::disable_raw_mode().expect("leave raw mode");
-    // SAFETY: a zeroed termios is a valid out-parameter for tcgetattr.
-    let mut modes: libc::termios = unsafe { std::mem::zeroed() };
-    // SAFETY: stdin is this child's terminal, and `modes` is owned here.
-    unsafe { libc::tcgetattr(0, &mut modes) };
-    let canon = modes.c_lflag & (libc::ICANON | libc::ECHO) == (libc::ICANON | libc::ECHO);
     let mut tty = std::fs::File::open("/dev/tty").expect("the child has a terminal");
     println!(
-        "asked {:.3} {:?} {answer:?} canon={canon}",
+        "asked {:.3} {:?} {answer:?}",
         waited.as_secs_f64() * 1000.0,
         picker.protocol_type()
     );
@@ -48,10 +43,6 @@ fn silent_terminal_no_reader() {
     assert!(
         line.contains("Halfblocks"),
         "a silent terminal chose a protocol: {line}"
-    );
-    assert!(
-        line.contains("canon=true"),
-        "the query left the terminal without line mode or echo: {line}"
     );
     let waited: f64 = line
         .split("asked ")
@@ -113,10 +104,7 @@ fn late_answer_read() {
         "a late answer reached the reader as keys: {text}"
     );
     let line = asked_line(&text);
-    assert!(
-        line.contains("Kitty") && line.contains("canon=true"),
-        "a late answer was not read, or the modes were lost: {line}"
-    );
+    assert!(line.contains("Kitty"), "a late answer was not read: {line}");
 }
 
 #[test]

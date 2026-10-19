@@ -497,20 +497,26 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // After the first paint, so a terminal slow to answer delays only the
     // pictures, and before the input thread, which would read the answer as
     // keys. `SPEC.md` §11.1.
-    let (mut picker, answer) = terminal::picker(!reply.is_empty());
-    picker.set_protocol_type(
-        forced.unwrap_or_else(|| pictures::detected(answer, &|key: &str| std::env::var(key).ok())),
-    );
+    // Unix asks only a terminal that answered the background query; Windows,
+    // which sends no other, always asks. Forced half-blocks need no answer.
+    let ask = forced != Some(ratatui_image::picker::ProtocolType::Halfblocks)
+        && (cfg!(windows) || !reply.is_empty());
+    let (mut picker, answer) = terminal::picker(ask);
+    picker.set_protocol_type(pictures::protocol_of(forced, answer, &|key: &str| {
+        std::env::var(key).ok()
+    }));
     shell
         .app
         .draw_pictures(pictures::drawn(truecolour, picker.protocol_type()));
     shell.pictures.pick(picker);
-    // Drawn again whatever it answered: the query took any resize that came in
-    // during it, and on Windows, which asks blind, it may have printed.
-    if cfg!(windows) {
-        let _ = shell.session.screen().clear();
+    if ask {
+        // On Windows the query drops a resize that came in during it, and it is
+        // sent blind there, so it may have printed.
+        if cfg!(windows) {
+            let _ = shell.session.screen().clear();
+        }
+        shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
     }
-    shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
 
     // Armed only now.
     spawn_watch(path.to_path_buf(), tx.clone(), shell.hide.clone());
@@ -907,19 +913,6 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // the batch reaches its send. `InputLost` returns, and carries its own.
     shell.settle_send(Instant::now());
 
-    // The terminal keeps a Kitty image until told, past this process.
-    shell.pictures.retire_all();
-    let retired = shell.pictures.retired();
-    if !retired.is_empty() {
-        use std::io::Write;
-        let _ = shell
-            .session
-            .screen()
-            .backend_mut()
-            .write_all(retired.as_bytes());
-        let _ = shell.session.screen().backend_mut().flush();
-    }
-
     Ok(())
 }
 
@@ -1169,7 +1162,32 @@ struct Shell {
     effects_ran: bool,
 }
 
+// On every way out, while the screen is still this pane's: the terminal keeps
+// a Kitty image past this process until told.
+impl Drop for Shell {
+    fn drop(&mut self) {
+        self.pictures.retire_all();
+        self.write_retired();
+        use std::io::Write;
+        let _ = self.session.screen().backend_mut().flush();
+    }
+}
+
 impl Shell {
+    /// Send the Kitty deletes owed. A failed write leaves the images to the
+    /// terminal's own quota.
+    fn write_retired(&mut self) {
+        use std::io::Write;
+        let retired = self.pictures.retired();
+        if !retired.is_empty() {
+            let _ = self
+                .session
+                .screen()
+                .backend_mut()
+                .write_all(retired.as_bytes());
+        }
+    }
+
     /// The diff region's height for `action`, or zero where it reads none.
     fn diff_rows_for(
         &mut self,
@@ -2193,16 +2211,8 @@ impl Shell {
             &self.root,
         );
         // Before the draw, so the terminal drops the Kitty images of pictures that
-        // left the screen. A failed write leaves them to the terminal's own quota.
-        let retired = self.pictures.retired();
-        if !retired.is_empty() {
-            use std::io::Write;
-            let _ = self
-                .session
-                .screen()
-                .backend_mut()
-                .write_all(retired.as_bytes());
-        }
+        // left the screen.
+        self.write_retired();
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.

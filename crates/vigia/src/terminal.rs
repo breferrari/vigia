@@ -408,24 +408,25 @@ pub const PICTURES_WAIT: std::time::Duration = if cfg!(unix) {
 };
 
 /// Ask the terminal which image protocol it draws and its cell size in pixels,
-/// through `ratatui-image`'s own query. `answered` is false when the background
-/// query went unanswered, which on Unix skips this one: a terminal that answers
-/// nothing would cost a second wait. Windows sends no other query, so it always
-/// asks.
-pub fn picker(answered: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
+/// through `ratatui-image`'s own query, or with `ask` false give the half-blocks
+/// answer without asking. Called in raw mode: the crate leaves its own on when
+/// its query times out, and only the session's exit undoes it.
+pub fn picker(ask: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
     use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
     let unknown = || (Picker::halfblocks(), crate::pictures::Answer::default());
-    if cfg!(unix) && !answered {
+    if !ask {
         return unknown();
     }
+    debug_assert!(
+        ratatui::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false),
+        "the picture query ran outside raw mode"
+    );
     let options = QueryStdioOptions {
         timeout_ms: PICTURES_WAIT.as_millis() as i32,
         #[cfg(unix)]
         stdio: query_stdio(),
         ..QueryStdioOptions::default()
     };
-    // Inside the session's raw mode, which restores the terminal on exit: the
-    // crate leaves its own on when its query times out.
     let Ok(picker) = Picker::from_query_stdio_with_options(options) else {
         return unknown();
     };
