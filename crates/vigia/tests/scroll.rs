@@ -1746,7 +1746,7 @@ fn page_up_overlap() {
         "a page up over a long note did not keep exactly one display row of overlap"
     );
     assert_eq!(
-        after.steps.len(),
+        after.steps().len(),
         height,
         "the page up did not open the screen inside the note"
     );

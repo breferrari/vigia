@@ -1491,7 +1491,8 @@ impl App {
         // its own answer would be a second rule for the same fact.
         self.list_top = view.list_top;
         self.shown = view.shown();
-        self.steps.clone_from(&view.steps);
+        self.steps.clear();
+        self.steps.extend_from_slice(view.steps());
         self.kept = (rise.is_some() && !view.ended).then_some(view.top);
         Ok(view)
     }

@@ -1420,9 +1420,8 @@ pub struct View {
     /// Where the top row actually came from, once the request was resolved
     /// against the files that exist and how tall they are.
     pub top: Position,
-    /// The position of every row a step can open on, in screen order. A wrapped
-    /// line's continuations are not steps.
-    pub steps: Vec<Position>,
+    /// See [`Self::steps`].
+    steps: Vec<Position>,
     /// Whether this frame resolved the landing [`Viewport::landing`] asked for.
     pub landed: bool,
     /// Whether this frame drew the last row of the diff.
@@ -1747,6 +1746,12 @@ pub fn rows_in(frame: &mut Frame, index: usize) -> Result<usize> {
 }
 
 impl View {
+    /// The position of every row a step can open on, in screen order. A wrapped
+    /// line's continuations are not steps.
+    pub fn steps(&self) -> &[Position] {
+        &self.steps
+    }
+
     /// How many distinct files this screen's diff region draws.
     pub fn shown_files(&self) -> usize {
         if self.rows.is_empty() {
