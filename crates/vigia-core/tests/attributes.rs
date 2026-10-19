@@ -198,3 +198,180 @@ fn lfs_keeps_links() {
     );
     assert_eq!((diff.added, diff.removed), (1, 1));
 }
+
+/// A pointer under `filter=lfs` that status must read again, because its
+/// timestamp moved after the index was written, with a driver that cannot be
+/// spawned.
+fn racy_pointer(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(
+        ".gitattributes",
+        "lfs/*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:\
+        4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 12345\n";
+    scratch.write("lfs/pointer.png", pointer);
+    scratch.write("notes.txt", numbered_lines(3));
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    // The same bytes again, so only the timestamp says it may have changed.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    scratch.write("lfs/pointer.png", pointer);
+    scratch.write("notes.txt", numbered_lines(4));
+    scratch
+}
+
+#[test]
+fn racy_lfs_lists() {
+    let scratch = racy_pointer("attr-racy-lfs");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame
+        .advance()
+        .expect("a racily clean LFS pointer with no driver to run stopped the walk");
+    let paths: Vec<&str> = frame.files().iter().map(|c| c.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["notes.txt"],
+        "the walk did not list exactly the changed file"
+    );
+}
+
+/// An LFS pointer to `object` committed as `a.png`, with `worktree` written
+/// where it was after the index, and `object` in the local store when `stored`.
+/// `notes.txt` changes beside it, so a walk always has one change to list.
+fn lfs_content(name: &str, object: &[u8], worktree: &[u8], stored: bool) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(
+        ".gitattributes",
+        "*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let (oid, pointer) = support::lfs_pointer(object, 0xab);
+    scratch.write("a.png", pointer);
+    scratch.write("notes.txt", numbered_lines(3));
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    if stored {
+        scratch.write(
+            &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
+            object,
+        );
+    }
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    scratch.write("a.png", worktree);
+    scratch.write("notes.txt", numbered_lines(4));
+    scratch
+}
+
+/// The paths one walk of `scratch` lists.
+fn listed(scratch: &Scratch) -> Vec<String> {
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    frame.files().iter().map(|c| c.path.clone()).collect()
+}
+
+#[test]
+fn racy_driver_not_run() {
+    let scratch = Scratch::new("attr-racy-driver");
+    let marker = scratch.root().join("ran");
+    scratch.write(".gitattributes", "*.csv filter=marker\n");
+    scratch.write("a.csv", numbered_lines(3));
+    scratch.write("notes.txt", numbered_lines(3));
+    scratch.commit_all("initial");
+    // After the commit, so only a status read could start it.
+    scratch.git(&[
+        "config",
+        "filter.marker.clean",
+        &format!("touch '{}'; cat", marker.display()),
+    ]);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    scratch.write("a.csv", numbered_lines(3));
+    scratch.write("notes.txt", numbered_lines(4));
+    assert_eq!(
+        listed(&scratch),
+        ["notes.txt"],
+        "the walk listed the wrong files"
+    );
+    assert!(!marker.exists(), "the status walk ran the clean driver");
+}
+
+#[test]
+fn racy_lfs_content_unchanged() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-same", &object, &object, true);
+    assert_eq!(
+        listed(&scratch),
+        ["notes.txt"],
+        "content equal to its LFS object listed as changed"
+    );
+}
+
+#[test]
+fn racy_lfs_content_changed() {
+    let object = b"real image bytes\n".repeat(10);
+    let mut edited = object.clone();
+    edited[5] = b'X';
+    let scratch = lfs_content("attr-lfs-edited", &object, &edited, true);
+    assert_eq!(
+        listed(&scratch),
+        ["a.png", "notes.txt"],
+        "content that differs from its LFS object did not list"
+    );
+}
+
+#[test]
+fn racy_lfs_no_object() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-unfetched", &object, &object, false);
+    assert_eq!(
+        listed(&scratch),
+        ["a.png", "notes.txt"],
+        "content whose object is not fetched did not list"
+    );
+}
+
+#[test]
+fn racy_lfs_large_listed() {
+    let object = vec![7u8; 16 * 1024 * 1024 + 1];
+    let scratch = lfs_content("attr-lfs-large", &object, &object, true);
+    assert_eq!(
+        listed(&scratch),
+        ["a.png", "notes.txt"],
+        "a file over the compare bound did not list"
+    );
+}
+
+#[test]
+fn racy_lfs_size_first() {
+    let object = b"real image bytes\n".repeat(10);
+    let longer = b"real image bytes\n".repeat(11);
+    let scratch = lfs_content("attr-lfs-longer", &object, &longer, true);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(
+        frame.files().iter().any(|c| c.path == "a.png"),
+        "a length other than the pointer's did not list"
+    );
+    assert_eq!(
+        worktree.lfs_compares(),
+        0,
+        "a length mismatch still read the object"
+    );
+}
+
+#[test]
+fn racy_lfs_compare_cached() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-cached", &object, &object, true);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    frame.advance().expect("advance again");
+    assert_eq!(
+        worktree.lfs_compares(),
+        1,
+        "an unchanged fingerprint compared the file again"
+    );
+}

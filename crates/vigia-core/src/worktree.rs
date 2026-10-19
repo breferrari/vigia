@@ -58,6 +58,9 @@ pub struct Worktree {
     /// Whether the last tracked walk found a deletion, which lasts until it is
     /// committed or restored, so the next walk goes straight to tracking.
     deleted: Cell<bool>,
+    /// LFS files compared with their local object, for the gate that holds the
+    /// compare to once per timestamp.
+    lfs_compares: Cell<u64>,
 }
 
 impl Worktree {
@@ -83,6 +86,7 @@ impl Worktree {
             loaded_config: Cell::new(None),
             reloads: Cell::new(0),
             deleted: Cell::new(false),
+            lfs_compares: Cell::new(0),
         })
     }
 
@@ -991,6 +995,11 @@ impl Worktree {
             self.reloads.set(self.reloads.get() + 1);
             self.invalidate_filter();
         }
+    }
+
+    /// How many LFS files this worktree has compared with their local object.
+    pub fn lfs_compares(&self) -> u64 {
+        self.lfs_compares.get()
     }
 
     pub(crate) fn reloads(&self) -> u64 {
