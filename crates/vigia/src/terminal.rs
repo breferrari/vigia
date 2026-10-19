@@ -411,17 +411,16 @@ pub fn picker(asked: bool) -> (ratatui_image::picker::Picker, crate::pictures::A
     if cfg!(unix) && !asked {
         return (Picker::halfblocks(), crate::pictures::Answer::default());
     }
-    let picker = {
-        let options = QueryStdioOptions {
-            timeout_ms: PICTURES_WAIT.as_millis() as i32,
-            #[cfg(unix)]
-            stdio: query_stdio(),
-            #[cfg(unix)]
-            kitty_shared_memory_object: QueryStdioOptions::probe_kitty_smo(),
-            ..QueryStdioOptions::default()
-        };
-        Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks())
+    let options = QueryStdioOptions {
+        timeout_ms: PICTURES_WAIT.as_millis() as i32,
+        #[cfg(unix)]
+        stdio: query_stdio(),
+        #[cfg(unix)]
+        kitty_shared_memory_object: QueryStdioOptions::probe_kitty_smo(),
+        ..QueryStdioOptions::default()
     };
+    let picker =
+        Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks());
     let caps = picker.capabilities();
     // The terminal's own size in pixels, which the crate's fallback reads too.
     let sized = ratatui::crossterm::terminal::window_size()

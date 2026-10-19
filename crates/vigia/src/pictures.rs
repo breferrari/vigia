@@ -688,6 +688,7 @@ fn panel(
 ) -> Option<SlicedProtocol> {
     let image = DynamicImage::ImageRgb8(painted(image, hit, paint, inks));
     let size = Size::new(slot.width, slot.rows);
+    // Direct, because the picker's fit would read the grid as font pixels.
     if picker.protocol_type() == ProtocolType::Halfblocks {
         return Some(SlicedProtocol::Halfblocks(
             Halfblocks::new(image, size).ok()?,
@@ -696,21 +697,34 @@ fn panel(
     SlicedProtocol::new_with_resize(picker, image, size, ratatui_image::Resize::Fit(None)).ok()
 }
 
-/// The pixels a slot is drawn at: two to a cell's height for half-blocks, and
-/// the image fitted into the slot's real pixels for a protocol.
+/// A slot's half-block grid: two pixels to a cell's height.
+fn grid_of(slot: Slot) -> (u32, u32) {
+    (u32::from(slot.width), u32::from(slot.rows) * 2)
+}
+
+/// The pixels a slot is drawn at: its half-block grid, or for a protocol the
+/// image fitted into the slot's real pixels. Fitted here rather than by the
+/// crate because the mask is painted at these pixels.
 fn pixels_of(slot: Slot, (width, height): (u32, u32), picker: &Picker) -> (u32, u32) {
-    let grid = (u32::from(slot.width), u32::from(slot.rows) * 2);
     if picker.protocol_type() == ProtocolType::Halfblocks {
-        return grid;
+        return grid_of(slot);
     }
     let font = picker.font_size();
     let room = (
-        grid.0 * u32::from(font.width),
+        u32::from(slot.width) * u32::from(font.width),
         u32::from(slot.rows) * u32::from(font.height),
     );
-    let scale = (f64::from(room.0) / f64::from(width)).min(f64::from(room.1) / f64::from(height));
-    let fitted = |side: u32, cap: u32| ((f64::from(side) * scale).floor() as u32).clamp(1, cap);
-    (fitted(width, room.0), fitted(height, room.1))
+    // The side that binds is the room exactly, so the crate's own fit sees a
+    // whole number of cells and does not resize again.
+    // `side` scaled by `to / by`, at most `cap`.
+    let scaled = |side: u32, to: u32, by: u32, cap: u32| {
+        ((u64::from(side) * u64::from(to) / u64::from(by)) as u32).clamp(1, cap)
+    };
+    if u64::from(room.0) * u64::from(height) <= u64::from(room.1) * u64::from(width) {
+        (room.0, scaled(height, room.0, width, room.1))
+    } else {
+        (scaled(width, room.1, height, room.0), room.1)
+    }
 }
 
 /// Which cells of a half-block grid `width` by `height` changed.
@@ -828,7 +842,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
             .clone();
         let hit = match (paint, &mask) {
             (Paint::Mask, Some(mask)) => {
-                let grid = (u32::from(slot.width), u32::from(slot.rows) * 2);
+                let grid = grid_of(slot);
                 Some(Hits {
                     cells: shrink_mask(mask, image.dimensions(), grid),
                     width: grid.0,
@@ -1188,6 +1202,12 @@ mod tests {
         picker.set_protocol_type(ProtocolType::Kitty);
         // 100x120 pixels of room at 10x20 cells; a 1:2 image is fitted by height.
         assert_eq!(pixels_of(slot, (100, 200), &picker), (60, 120));
+        let tall = Slot { rows: 20, ..slot };
+        assert_eq!(
+            pixels_of(tall, (100, 300), &picker),
+            (100, 300),
+            "a width-bound panel was cut to its width in height"
+        );
         assert_eq!(
             pixels_of(slot, (4, 4), &picker),
             (100, 100),

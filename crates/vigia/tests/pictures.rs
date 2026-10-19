@@ -367,11 +367,23 @@ fn gif_first_frame() {
         Some("pixels unchanged"),
         "a frame past the first was compared"
     );
-    let decoded = pictures::decodes();
+    // The built picture itself, not the process-wide decode count, which tests
+    // running beside this one move.
+    let ready = |view: &View| {
+        view.rows.iter().find_map(|row| match row {
+            Row::Sized { ready, .. } => ready.clone(),
+            _ => None,
+        })
+    };
+    let built = ready(&view).expect("a built picture");
     for _ in 0..5 {
-        pane.view(&mut frame);
+        let again = pane.view(&mut frame);
+        assert_eq!(
+            ready(&again),
+            Some(built.clone()),
+            "a settled pane built again"
+        );
     }
-    assert_eq!(pictures::decodes(), decoded, "a settled pane decoded again");
 }
 
 #[test]
