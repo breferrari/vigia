@@ -136,8 +136,7 @@ impl Source {
         match self {
             Self::File(path) => read_file(path),
             Self::Blob { git_dir, id, store } => {
-                // Opened per read and dropped, so no pack stays mapped for a `git gc`
-                // in the next pane to trip over.
+                // Opened per read, so the worker keeps no repository handle of its own.
                 let repo = gix::open(git_dir).ok()?;
                 let bytes = repo
                     .find_object(*id)
