@@ -27,6 +27,16 @@ Not "later". Never. Listed so the debate does not have to recur.
 - **Remote operations.** No fetch, no push, no network.
 - **A GUI.** Terminal only.
 
+## Releases
+
+Each release ships one or more phases. A phase marked internal changes no binary, and it rides whichever release comes next.
+
+| Release | Phases | What it brings |
+|---|---|---|
+| 1.2.0 | 9, 10 | Pictures, on current Rust |
+| 1.3.0 | 11 | Work that grows with input moved off the paint |
+| 1.4.0 | 12, plus whatever of 13 and 14 has merged by then | Correct at the edges |
+
 ---
 
 ## Phase 1 — core engine
@@ -317,13 +327,13 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 ## Phase 9 — pictures
 
-Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
+Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in 1.2.0.
 
 **Filter: does it show what a changed picture looks like, in any terminal, without the pane stopping being a monitor?** Asked by the reader for app assets and snapshot-test references. SPEC §11.2 B23 is the ruling.
 
 | | Task | Issue |
 |---|---|---|
-| 🔨 | A changed image draws pictures instead of the word binary. **Split into the rows below** | [#632](https://github.com/breferrari/vigia/issues/632) |
+| 🔨 | Side-by-side image diff **Split into the rows below** | [#632](https://github.com/breferrari/vigia/issues/632) |
 | ✅ | Image size line | [#633](https://github.com/breferrari/vigia/issues/633) |
 | ✅ | Half-block image panels | [#634](https://github.com/breferrari/vigia/issues/634) |
 | ✅ | Real-pixel image protocols | [#635](https://github.com/breferrari/vigia/issues/635) |
@@ -334,16 +344,16 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 | ⬜ | PDF image panels | [#638](https://github.com/breferrari/vigia/issues/638) |
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
 | ✅ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
-| ⬜ | Status runs the LFS filter. **Found while building #655** | [#659](https://github.com/breferrari/vigia/issues/659) |
-| ⬜ | LFS fetch leaves binary. **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
-| ⬜ | Bar counts picture rows. **Found by review on #657** | [#660](https://github.com/breferrari/vigia/issues/660) |
-| ⬜ | Kitty image lost on reattach. **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
-| ⬜ | Cell size fixed at startup. **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
-| ⬜ | Changed binary rename unpaired. **Found while building #655** | [#658](https://github.com/breferrari/vigia/issues/658) |
+| ⬜ | Run no filter driver during status **Found while building #655** | [#659](https://github.com/breferrari/vigia/issues/659) |
+| ⬜ | Redraw an LFS image when its object arrives **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
+| ⬜ | Leave picture rows out of the scrollbar's count **Found by review on #657** | [#660](https://github.com/breferrari/vigia/issues/660) |
+| ⬜ | Resend Kitty images after a tmux reattach **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
+| ⬜ | Follow cell size changes after startup **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
+| ⬜ | Pair a renamed and changed image as a rename **Found while building #655** | [#658](https://github.com/breferrari/vigia/issues/658) |
 
 ## Phase 10 — current Rust
 
-Milestone: [Phase 10](https://github.com/breferrari/vigia/milestone/11)
+Milestone: [Phase 10](https://github.com/breferrari/vigia/milestone/11). Ships in 1.2.0.
 
 **Filter: does it make the code use what the latest stable Rust offers, where that is simpler, faster or more exact?** The workspace tracks the latest stable, ruled by the reader on 2026-10-19 (SPEC §6).
 
@@ -351,25 +361,84 @@ Milestone: [Phase 10](https://github.com/breferrari/vigia/milestone/11)
 |---|---|---|
 | ⬜ | Adopt Rust 1.99 features | [#642](https://github.com/breferrari/vigia/issues/642) |
 
-## Shelf
+## Phase 11 — off the paint
 
-Milestone: [Shelf](https://github.com/breferrari/vigia/milestone/5)
+Milestone: [Phase 11](https://github.com/breferrari/vigia/milestone/12). Ships in 1.3.0.
 
-Every item on the deferral shelf below has a milestone here, so a milestone-filtered query can reach shelved work. Prose alone cannot do that. The shelf carries the *reason*. This table carries the *state*.
+**Filter: does it keep work whose cost grows with a file's or the repository's size off the frame path, measured on a real repository?** Asked by the reader on 2026-10-19.
 
-**Older issues, notes and the dated cells below cite "Phase 5", and every such citation means this shelf**: the milestone URL keeps `/5` from the name it carried until 2026-08-06. `take-next` skips the milestone because its description starts with `Shelf:`. A title with no phase number sorts last by the fallback of that query. So the two guards agree.
+| | Task | Issue |
+|---|---|---|
+| ⬜ | Stop syntect recompiling a fence's closing regex on every search **Decision: the reader rules this, and nothing is taken from it until he does** | [#264](https://github.com/breferrari/vigia/issues/264) |
+| ⬜ | Keep size-proportional work off the frame path | [#666](https://github.com/breferrari/vigia/issues/666) |
+| ⬜ | Re-diff a large changed file off the paint | [#665](https://github.com/breferrari/vigia/issues/665) |
+| ⬜ | Measure first paint at ten thousand changed files, renames on and off | [#48](https://github.com/breferrari/vigia/issues/48) |
+| ⬜ | Take change fingerprints from the status walk, not a stat per file | [#19](https://github.com/breferrari/vigia/issues/19) |
+| ⬜ | Budget the re-diff of drawn files inside the settle margin | [#73](https://github.com/breferrari/vigia/issues/73) |
+| ⬜ | Measure an @ guard on Markdown's email auto-link pattern | [#265](https://github.com/breferrari/vigia/issues/265) |
+| ⬜ | Measure the pane beside real agent sessions on other repositories | [#72](https://github.com/breferrari/vigia/issues/72) |
+| ⬜ | Prefetch pictures just past the view | [#663](https://github.com/breferrari/vigia/issues/663) |
+| ⬜ | Bound Kitty's first transmit on the paint | [#664](https://github.com/breferrari/vigia/issues/664) |
 
-**A shelf item comes off it when daily use asks for it, and the asking is the whole test.** The rows under it show what happens when the entry rule fires on every audit and the exit rule depends on a judgement that nobody is scheduled to make.
+## Phase 12 — correct at the edges
 
-**The occasion is the pull-forward, and the question is one line: would this be built if it were not already written down?** Ask the question of an item when something reaches for it, not on a schedule that nobody keeps. If an item cannot answer yes, it is not waiting for a phase. It is declined, and closing it as declined is a result, not a loss. A shelf that almost nothing is ever declined from is not being filtered. It is being filled.
+Milestone: [Phase 12](https://github.com/breferrari/vigia/milestone/13). Ships in 1.4.0.
 
+**Filter: is every file, path, terminal, theme and note a reader meets drawn and reported right?**
 
-**If a second shelf is ever created, its milestone description must begin `Shelf:`.** A query cannot read a rule that lives only in prose. `take-next` step 1 is a query, and it offers an unmarked shelf as the next phase ([#83](https://github.com/breferrari/vigia/issues/83)). Whoever creates the next shelf reads this paragraph, so the rule is stated here and not only in the skill. Comparison 6 of that pre-flight fires when the two disagree.
+| | Task | Issue |
+|---|---|---|
+| ⬜ | Choose the default view: unstaged only, or staged beside it **Decision: the reader rules this, and nothing is taken from it until he does** | [#50](https://github.com/breferrari/vigia/issues/50) |
+| ⬜ | Choose how the header draws a worktree name with invisible characters **Decision: the reader rules this, and nothing is taken from it until he does** | [#89](https://github.com/breferrari/vigia/issues/89) |
+| ⬜ | Rule on a CP437 fallback for the caret, pulse and elision marks **Decision: the reader rules this, and nothing is taken from it until he does** | [#237](https://github.com/breferrari/vigia/issues/237) |
+| ⬜ | Catch a write that restores the modification time | [#16](https://github.com/breferrari/vigia/issues/16) |
+| ⬜ | Key the frame cache on raw path bytes, not a lossy string | [#17](https://github.com/breferrari/vigia/issues/17) |
+| ⬜ | Check whether a default tmux sends mouse events to a non-active pane | [#188](https://github.com/breferrari/vigia/issues/188) |
+| ⬜ | Follow a mid-session theme flip once crossterm can deliver it | [#332](https://github.com/breferrari/vigia/issues/332) |
+| ⬜ | Cap wrapped breaks the same way in the short check and the layout | [#661](https://github.com/breferrari/vigia/issues/661) |
+| ⬜ | Observe what a prompting session does with a posted note | [#444](https://github.com/breferrari/vigia/issues/444) |
+
+## Phase 13 — testable by construction
+
+Milestone: [Phase 13](https://github.com/breferrari/vigia/milestone/14). Internal; rides the next release.
+
+**Filter: can every gesture, table and status seam be tested, and is it derived rather than audited?**
+
+| | Task | Issue |
+|---|---|---|
+| ⬜ | Decide whether gix status gets a seam **Decision: the reader rules this, and nothing is taken from it until he does** | [#74](https://github.com/breferrari/vigia/issues/74) |
+| ⬜ | Let a test build a Shell and drive a gesture through it | [#441](https://github.com/breferrari/vigia/issues/441) |
+| ⬜ | Hold the three overlays in one Option<Overlay> | [#515](https://github.com/breferrari/vigia/issues/515) |
+| ⬜ | Derive sheet.rs's geometry from the table's own length | [#393](https://github.com/breferrari/vigia/issues/393) |
+| ⬜ | Gate each sheet key against its row and derive the wide keys cell | [#312](https://github.com/breferrari/vigia/issues/312) |
+| ⬜ | Make the rail's arrival width depend on the glyph rung | [#284](https://github.com/breferrari/vigia/issues/284) |
+| ⬜ | Classify every tracked markdown file under one written-layer rule | [#504](https://github.com/breferrari/vigia/issues/504) |
+
+## Phase 14 — the instruments
+
+Milestone: [Phase 14](https://github.com/breferrari/vigia/milestone/15). Internal; rides the next release.
+
+**Filter: do the take-order, the workflow gates and publishing hold by mechanism, not by reading?**
+
+| | Task | Issue |
+|---|---|---|
+| ⬜ | Class every prose path as docs and merge docs-only rebases without fresh CI **Asked by the reader; taken before #659** | [#667](https://github.com/breferrari/vigia/issues/667) |
+| ⬜ | Read the take-order from ROADMAP.md, not milestone titles | [#108](https://github.com/breferrari/vigia/issues/108) |
+| ⬜ | Harden the bump.yml gates against reindents, echoes and env values | [#145](https://github.com/breferrari/vigia/issues/145) |
+| ⬜ | Publish to crates.io by trusted publishing and delete the registry token | [#141](https://github.com/breferrari/vigia/issues/141) |
+
+## Shelf (retired 2026-10-19)
+
+Milestone: [Shelf](https://github.com/breferrari/vigia/milestone/5), closed.
+
+**The shelf was retired on 2026-10-19, on the reader's order: every open item on it moved into Phases 11 to 14, and its milestone is closed.** No item waits outside a phase, so the take-order reaches all of them. A pass that judges an item not worth building declines it with evidence. The tables below are kept as a record of why each item waited. They are history, not a build order.
+
+**Older issues, notes and the dated cells below cite "Phase 5", and every such citation means this shelf**: the milestone URL keeps `/5` from the name it carried until 2026-08-06.
 
 | | Task | Issue |
 |---|---|---|
 | ✅ | Every sheet guard reads a `Regions` snapshot that is one batch stale | [#307](https://github.com/breferrari/vigia/issues/307) |
-| ⬜ | A theme flip mid-session cannot reach the shell, and the blocker is crossterm's parser | [#332](https://github.com/breferrari/vigia/issues/332) |
+| ⬜ | A theme flip mid-session cannot reach the shell, and the blocker is crossterm's parser. **Moved to Phase 12, 2026-10-19** | [#332](https://github.com/breferrari/vigia/issues/332) |
 | ✅ | Sentence test names. **Not planned** | [#553](https://github.com/breferrari/vigia/issues/553) |
 | ✅ | `cargo install` cannot replace the binary while a registered `vigia mcp` holds it open on Windows | [#458](https://github.com/breferrari/vigia/issues/458) |
 | ✅ | Every Windows upgrade leaves another copy of the binary behind | [#486](https://github.com/breferrari/vigia/issues/486) |
@@ -378,8 +447,8 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | The height walk trusts a cached diff by path | [#390](https://github.com/breferrari/vigia/issues/390) |
 | ✅ | Four assertion messages carry a lost line continuation | [#438](https://github.com/breferrari/vigia/issues/438) |
 | ✅ | The CPU clock gate takes an absolute bound once, so a loaded suite fails it | [#439](https://github.com/breferrari/vigia/issues/439) |
-| ⬜ | No test can build a Shell, so a gesture's decisions must move out to be seen | [#441](https://github.com/breferrari/vigia/issues/441) |
-| ⬜ | What a prompting session does with a note posted into its socket is unobserved | [#444](https://github.com/breferrari/vigia/issues/444) |
+| ⬜ | No test can build a Shell, so a gesture's decisions must move out to be seen. **Moved to Phase 13, 2026-10-19** | [#441](https://github.com/breferrari/vigia/issues/441) |
+| ⬜ | What a prompting session does with a note posted into its socket is unobserved. **Moved to Phase 12, 2026-10-19** | [#444](https://github.com/breferrari/vigia/issues/444) |
 | ✅ | Lift the tinyvec bound once a compiling release exists | [#397](https://github.com/breferrari/vigia/issues/397) |
 | ✅ | `SHEET_KEEP` names two things, so removing a gesture reassigns the never-drop set by rank | [#464](https://github.com/breferrari/vigia/issues/464) |
 | ✅ | Local gates diverge from CI | [#650](https://github.com/breferrari/vigia/issues/650) |
@@ -387,19 +456,19 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | A hidden path still wakes the watch. **Deferred by [#495](https://github.com/breferrari/vigia/issues/495): it changes what I1 measures** | [#501](https://github.com/breferrari/vigia/issues/501) |
 | ✅ | A note's rows are built whole before the clamp trims them. **Deferred by [#452](https://github.com/breferrari/vigia/issues/452): the steady frame is 12.557ms against 12.483ms as prose, and it is the frame an answer arrives on that scales** | [#530](https://github.com/breferrari/vigia/issues/530) |
 | ✅ | The caret row's weight is the one modifier a theme file cannot reach | [#195](https://github.com/breferrari/vigia/issues/195) |
-| ⬜ | Three overlays are kept apart by hand in eight places. **Deferred by [#511](https://github.com/breferrari/vigia/issues/511) and again by [#508](https://github.com/breferrari/vigia/issues/508): a refactor of the two that predate the branches that found it.** [#519](https://github.com/breferrari/vigia/issues/519) is its duplicate, filed before this row was found and closed against it | [#515](https://github.com/breferrari/vigia/issues/515) |
-| ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them | [#312](https://github.com/breferrari/vigia/issues/312) |
+| ⬜ | Three overlays are kept apart by hand in eight places. **Deferred by [#511](https://github.com/breferrari/vigia/issues/511) and again by [#508](https://github.com/breferrari/vigia/issues/508): a refactor of the two that predate the branches that found it.** [#519](https://github.com/breferrari/vigia/issues/519) is its duplicate, filed before this row was found and closed against it. **Moved to Phase 13, 2026-10-19** | [#515](https://github.com/breferrari/vigia/issues/515) |
+| ⬜ | The sheet's tables are audited, not derived, so the keymap can still drift into them. **Moved to Phase 13, 2026-10-19** | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ✅ | A body-file path the leak guard cannot read is allowed in silence. **Found by [#508](https://github.com/breferrari/vigia/issues/508), which published a session URL past it** | [#520](https://github.com/breferrari/vigia/issues/520) |
 | ✅ | A gate can rebuild its expected value from the value under test, and one did | [#499](https://github.com/breferrari/vigia/issues/499) |
-| ⬜ | The fingerprint cannot see a timestamp-preserving write | [#16](https://github.com/breferrari/vigia/issues/16) |
-| ⬜ | Two paths differing outside UTF-8 collapse onto one cache key | [#17](https://github.com/breferrari/vigia/issues/17) |
+| ⬜ | The fingerprint cannot see a timestamp-preserving write. **Moved to Phase 12, 2026-10-19** | [#16](https://github.com/breferrari/vigia/issues/16) |
+| ⬜ | Two paths differing outside UTF-8 collapse onto one cache key. **Moved to Phase 12, 2026-10-19** | [#17](https://github.com/breferrari/vigia/issues/17) |
 | ✅ | A frame reads a whole file to discover it is binary | [#18](https://github.com/breferrari/vigia/issues/18) |
-| ⬜ | An idle frame is one `stat` per changed file | [#19](https://github.com/breferrari/vigia/issues/19) |
+| ⬜ | An idle frame is one `stat` per changed file. **Moved to Phase 11, 2026-10-19** | [#19](https://github.com/breferrari/vigia/issues/19) |
 | ✅ | `take-next`: the pre-flight cannot see an untracked spec prerequisite | [#34](https://github.com/breferrari/vigia/issues/34) |
 | ✅ | The bulk-rewrite I9 gate is flaky on macOS hosted runners | [#36](https://github.com/breferrari/vigia/issues/36) |
-| ⬜ | Rename tracking and the non-streaming walk, at ten thousand files | [#48](https://github.com/breferrari/vigia/issues/48) |
-| ⬜ | The thesis workload, measured from real use rather than a fixture | [#72](https://github.com/breferrari/vigia/issues/72) |
-| ⬜ | Default view: unstaged only, or working-tree-vs-HEAD | [#50](https://github.com/breferrari/vigia/issues/50) |
+| ⬜ | Rename tracking and the non-streaming walk, at ten thousand files. **Moved to Phase 11, 2026-10-19** | [#48](https://github.com/breferrari/vigia/issues/48) |
+| ⬜ | The thesis workload, measured from real use rather than a fixture. **Moved to Phase 11, 2026-10-19** | [#72](https://github.com/breferrari/vigia/issues/72) |
+| ⬜ | Default view: unstaged only, or working-tree-vs-HEAD. **Moved to Phase 12, 2026-10-19** | [#50](https://github.com/breferrari/vigia/issues/50) |
 | ✅ | I7 is measured without the highlighter, and the first parse costs 98ms | [#51](https://github.com/breferrari/vigia/issues/51) |
 | ✅ | The heat projection's cost follows the file rather than the window | [#55](https://github.com/breferrari/vigia/issues/55) |
 | ✅ | The chrome may be too dim to read on a real terminal | [#60](https://github.com/breferrari/vigia/issues/60) |
@@ -407,8 +476,8 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | The row wash drops a column under every wide glyph. **Not on screen: the backend never receives a wide glyph's second cell; the gate now reads what a terminal draws** | [#63](https://github.com/breferrari/vigia/issues/63) |
 | ✅ | A file the attributes declare binary is diffed as text anyway | [#68](https://github.com/breferrari/vigia/issues/68) |
 | ✅ | An LFS-tracked text file diffs its pointer against its content | [#69](https://github.com/breferrari/vigia/issues/69) |
-| ⬜ | The settle margin's cost is bounded structurally and unbounded temporally | [#73](https://github.com/breferrari/vigia/issues/73) |
-| ⬜ | The `gix` status surface is load-bearing on every budget with no seam | [#74](https://github.com/breferrari/vigia/issues/74) |
+| ⬜ | The settle margin's cost is bounded structurally and unbounded temporally. **Moved to Phase 11, 2026-10-19** | [#73](https://github.com/breferrari/vigia/issues/73) |
+| ⬜ | The `gix` status surface is load-bearing on every budget with no seam. **Moved to Phase 13, 2026-10-19** | [#74](https://github.com/breferrari/vigia/issues/74) |
 | ✅ | A push to `main` was cancelled where the concurrency guard says it cannot be | [#75](https://github.com/breferrari/vigia/issues/75) |
 | ✅ | `take-next`: a deferral reason is a dated claim and nothing re-reads one | [#76](https://github.com/breferrari/vigia/issues/76) |
 | ✅ | The wheel ignores the pointer, and the thumb it draws cannot be grabbed | [#79](https://github.com/breferrari/vigia/issues/79) |
@@ -416,10 +485,10 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | The row's two fixed runs allocate a byte each, per content row per frame | [#171](https://github.com/breferrari/vigia/issues/171) |
 | ✅ | A steady worktree saturates half the band, because the factor above the mean was never measured on this signal. **Closed by [#457](https://github.com/breferrari/vigia/issues/457): the element is gone** | [#281](https://github.com/breferrari/vigia/issues/281) |
 | ✅ | A wider pane can take a row off the body, and the diff pays it | [#283](https://github.com/breferrari/vigia/issues/283) |
-| ⬜ | The rail's arrival width is derived at the block rung, and a dense rung climbs earlier | [#284](https://github.com/breferrari/vigia/issues/284) |
+| ⬜ | The rail's arrival width is derived at the block rung, and a dense rung climbs earlier. **Moved to Phase 13, 2026-10-19** | [#284](https://github.com/breferrari/vigia/issues/284) |
 | ✅ | `take-next` sorts milestones by a field that is null on every one of them | [#83](https://github.com/breferrari/vigia/issues/83) |
 | ✅ | A repeated `base` reports itself with eighteen spaces mid-sentence | [#88](https://github.com/breferrari/vigia/issues/88) |
-| ⬜ | The worktree name skips the control-character transformation content rows get | [#89](https://github.com/breferrari/vigia/issues/89) |
+| ⬜ | The worktree name skips the control-character transformation content rows get. **Moved to Phase 12, 2026-10-19** | [#89](https://github.com/breferrari/vigia/issues/89) |
 | ✅ | `render` promises any area is legal, and an area taller than its buffer panics | [#91](https://github.com/breferrari/vigia/issues/91) |
 | ✅ | The diff's total height is taken from the cache by presence, not by validity | [#84](https://github.com/breferrari/vigia/issues/84) |
 | ✅ | `FrameStats::bytes` conflates bytes counted with bytes diffed | [#85](https://github.com/breferrari/vigia/issues/85) |
@@ -427,36 +496,36 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | `take-next`: pre-flight the spec against the tracker | [#20](https://github.com/breferrari/vigia/issues/20) |
 | ✅ | The heat strip and scrollbar tracks resolve to the colour of the pane behind them. **Already true by #214 and #322's values; gated here** | [#98](https://github.com/breferrari/vigia/issues/98) |
 | ✅ | The character walk is bounded per span rather than per row | [#106](https://github.com/breferrari/vigia/issues/106) |
-| ⬜ | The take-order is derived from milestone titles, when the roadmap already holds it | [#108](https://github.com/breferrari/vigia/issues/108) |
+| ⬜ | The take-order is derived from milestone titles, when the roadmap already holds it. **Moved to Phase 14, 2026-10-19** | [#108](https://github.com/breferrari/vigia/issues/108) |
 | ✅ | `Esc` closes the gestures sheet and `SPEC.md` says it does not | [#391](https://github.com/breferrari/vigia/issues/391) |
 | ✅ | The clipboard write's failure branch is unreachable by any test | [#392](https://github.com/breferrari/vigia/issues/392) |
-| ⬜ | `sheet.rs` restates two dozen constants the table's own length implies | [#393](https://github.com/breferrari/vigia/issues/393) |
+| ⬜ | `sheet.rs` restates two dozen constants the table's own length implies. **Moved to Phase 13, 2026-10-19** | [#393](https://github.com/breferrari/vigia/issues/393) |
 | ✅ | A `core.autocrlf` or `.git/info/attributes` change is invisible to the cache guard | [#111](https://github.com/breferrari/vigia/issues/111) |
 | ✅ | A denied rustdoc lint that no job runs | [#131](https://github.com/breferrari/vigia/issues/131) |
 | ✅ | `take-next` reads Copilot's line comments with the wrong login | [#132](https://github.com/breferrari/vigia/issues/132) |
 | ✅ | `MIN_TICKS` restates `MIN_FRAMES`, and the queue it looks like it guards is unbounded | [#114](https://github.com/breferrari/vigia/issues/114) |
 | ✅ | 0.1.1: the crate carries no LICENSE, and Windows posture is still unstated | [#135](https://github.com/breferrari/vigia/issues/135) |
-| ⬜ | 0.1.1: trusted publishing, so the crates.io token stops existing | [#141](https://github.com/breferrari/vigia/issues/141) |
+| ⬜ | 0.1.1: trusted publishing, so the crates.io token stops existing. **Moved to Phase 14, 2026-10-19** | [#141](https://github.com/breferrari/vigia/issues/141) |
 | ✅ | The bump cannot move a protected main, because the checks it needs can never arrive | [#143](https://github.com/breferrari/vigia/issues/143) |
-| ⬜ | The workflow gates read text, and text has more spellings than the mechanism | [#145](https://github.com/breferrari/vigia/issues/145) |
+| ⬜ | The workflow gates read text, and text has more spellings than the mechanism. **Moved to Phase 14, 2026-10-19** | [#145](https://github.com/breferrari/vigia/issues/145) |
 | ✅ | decision: a bonus hint rung is never worth a row, and nobody ruled whether it is worth a readout | [#147](https://github.com/breferrari/vigia/issues/147) |
 | ✅ | Pointer motion draws a full frame, and I1's letter says it should not | [#154](https://github.com/breferrari/vigia/issues/154) |
 | ✅ | §5.1 says the deliberate departures are two, and enumerates four | [#156](https://github.com/breferrari/vigia/issues/156) |
 | ✅ | The absolute frame budgets flake on shared runners, and the failure reads as a regression | [#178](https://github.com/breferrari/vigia/issues/178) |
-| ⬜ | Under a default tmux, a non-active pane may get no mouse events at all | [#188](https://github.com/breferrari/vigia/issues/188) |
+| ⬜ | Under a default tmux, a non-active pane may get no mouse events at all. **Moved to Phase 12, 2026-10-19** | [#188](https://github.com/breferrari/vigia/issues/188) |
 | ✅ | `App::chrome` takes four pointer marks positionally, and every new mark churns thirty call sites | [#191](https://github.com/breferrari/vigia/issues/191) |
 | ✅ | The churn band's heights are ungated, so three mutations to its stacking survive | [#225](https://github.com/breferrari/vigia/issues/225) |
 | ✅ | WSL inside Windows Terminal gets no row wash, because `WT_SESSION` is read only on Windows | [#226](https://github.com/breferrari/vigia/issues/226) |
 | ✅ | `gh pr checks --watch` reports green while the matrix has not started | [#236](https://github.com/breferrari/vigia/issues/236) |
-| ⬜ | The caret, the pulse and the elision markers are drawn outside CP437 with no rung | [#237](https://github.com/breferrari/vigia/issues/237) |
+| ⬜ | The caret, the pulse and the elision markers are drawn outside CP437 with no rung. **Moved to Phase 12, 2026-10-19** | [#237](https://github.com/breferrari/vigia/issues/237) |
 | ✅ | The CPU attribution clock under-reports on a loaded Windows runner | [#246](https://github.com/breferrari/vigia/issues/246) |
 | ✅ | A heat strip finer than its file draws a solid change as dashes | [#230](https://github.com/breferrari/vigia/issues/230) |
 | ✅ | A churn sample buys the file size the status walk already paid for | [#233](https://github.com/breferrari/vigia/issues/233) |
 | ✅ | The churn band measures how many files were written, not how much changed. **Closed by [#457](https://github.com/breferrari/vigia/issues/457): the element is gone** | [#232](https://github.com/breferrari/vigia/issues/232) |
 | ✅ | A screenful of one-line-paragraph prose costs 117ms with every pattern already compiled | [#261](https://github.com/breferrari/vigia/issues/261) |
 | ✅ | `watch.rs` takes budget slack and CI never gives it any | [#263](https://github.com/breferrari/vigia/issues/263) |
-| ⬜ | A fenced code block costs 32 to 60ms of parse, and #261's guard does not reach it | [#264](https://github.com/breferrari/vigia/issues/264) |
-| ⬜ | The residual after #261 is a diffuse Markdown parse cost, largest single term an email auto-link at 94us a call | [#265](https://github.com/breferrari/vigia/issues/265) |
+| ⬜ | A fenced code block costs 32 to 60ms of parse, and #261's guard does not reach it. **Moved to Phase 11, 2026-10-19** | [#264](https://github.com/breferrari/vigia/issues/264) |
+| ⬜ | The residual after #261 is a diffuse Markdown parse cost, largest single term an email auto-link at 94us a call. **Moved to Phase 11, 2026-10-19** | [#265](https://github.com/breferrari/vigia/issues/265) |
 | ✅ | ci complete fails on every draft PR, because its legs skip and it treats skipped as failure | [#267](https://github.com/breferrari/vigia/issues/267) |
 | ✅ | A two-face bump with no xtask rerun leaves the committed dump stale and every gate green | [#268](https://github.com/breferrari/vigia/issues/268) |
 | ✅ | holds_p99_rounds excused a uniform breach as a host stall | [#269](https://github.com/breferrari/vigia/issues/269) |
@@ -470,35 +539,34 @@ Every item on the deferral shelf below has a milestone here, so a milestone-filt
 | ✅ | The pre-flight's cheapest loop is its slowest | [#371](https://github.com/breferrari/vigia/issues/371) |
 | ✅ | `take-next` step 1 cannot see a session already inside its row | [#303](https://github.com/breferrari/vigia/issues/303) |
 | ✅ | decision: a ledger and prose share a ceiling | [#374](https://github.com/breferrari/vigia/issues/374) |
-| ⬜ | Nothing holds the written layer's two lists against the documents that exist | [#504](https://github.com/breferrari/vigia/issues/504) |
+| ⬜ | Nothing holds the written layer's two lists against the documents that exist. **Moved to Phase 13, 2026-10-19** | [#504](https://github.com/breferrari/vigia/issues/504) |
 | ✅ | Clippy lints one platform, denies for three | [#376](https://github.com/breferrari/vigia/issues/376) |
 | ✅ | A row's wrap and its frame are sized by two expressions that disagree by two columns | [#474](https://github.com/breferrari/vigia/issues/474) |
 | ✅ | A hidden directory wakes the watch on macOS | [#599](https://github.com/breferrari/vigia/issues/599) |
 | ✅ | The bar's span is spelled at each call site rather than decided once for the map and the painter | [#424](https://github.com/breferrari/vigia/issues/424) |
-| ⬜ | A subject the notes filter drops is only a workflow notice | [#524](https://github.com/breferrari/vigia/issues/524) |
+| ✅ | A subject the notes filter drops is only a workflow notice. **Closed 2026-10-19: resolved by #611** | [#524](https://github.com/breferrari/vigia/issues/524) |
 | ✅ | Status walk config stale | [#606](https://github.com/breferrari/vigia/issues/606) |
 | ✅ | Watcher excludes keep opened config | [#619](https://github.com/breferrari/vigia/issues/619) |
 | ✅ | Exclude files frozen at watch start | [#621](https://github.com/breferrari/vigia/issues/621) |
 | ✅ | Mixed release notes fail the bump | [#624](https://github.com/breferrari/vigia/issues/624) |
-| ⬜ | Short check caps wrapped breaks lower | [#661](https://github.com/breferrari/vigia/issues/661) |
+| ⬜ | Short check caps wrapped breaks lower. **Moved to Phase 12, 2026-10-19** | [#661](https://github.com/breferrari/vigia/issues/661) |
 
 **[#178](https://github.com/breferrari/vigia/issues/178) is an instrument finding and goes here rather than into a phase**, which is the rule of this file for a queue that serves the product and the mirror equally. Found while merging [#166](https://github.com/breferrari/vigia/issues/166). The absolute frame budgets fail on shared CI runners often enough to be a pattern, and each failure reads as a regression. `main` at `34f74ec` reported p99 98.96ms against the 48ms budget with **p50 9.25ms and max 255.40ms**. [#176](https://github.com/breferrari/vigia/pull/176) reported p99 73.14ms with **p50 3.67ms and max 179.78ms**, on a different test and a different platform. It passed on a re-run of the identical commit. The shape is the finding: a regression moves the median, and a runner that loses the CPU for a quantum moves two samples of 250. It is deferred and not fixed for two reasons. It did not block the product pass it interrupted (one re-run cleared it). And the fix is a ruling about where budgets are measured, not a patch. It is worth filing because [#142](https://github.com/breferrari/vigia/pull/142) already recorded one of these and reported it honestly. That is the right handling and also the warning: the third time, nobody reads the numbers. **Closed 2026-08-17 by [#212](https://github.com/breferrari/vigia/issues/212)**. It is the entry above, not a repeat of it. The gate attributes a breach with thread CPU time instead of re-measuring it and believing the result. So the gate can say whether the time went into work or into waiting for a CPU.
 
 **[#188](https://github.com/breferrari/vigia/issues/188) is here because it needs a person at a terminal, and it is the largest unverified thing this repository currently believes about its own mouse.** Found while reversing [#123](https://github.com/breferrari/vigia/issues/123), by reading tmux's source to check a claim that ruling was about to make about `focus-events`. The reading is that `server_client_reset_state` takes its mode from the **active** pane and unions `MODE_MOUSE_ALL` across panes only inside a guard on the `mouse` option, and that option defaults to off. If that is right, under a default tmux nobody ever requests `?1003h` for a non-active pane. Then `vigia`, beside the agent the reader types in, receives no wheel, no click and no drag at all. §11.1 describes all three without that qualification. **Deferred rather than folded into #123 for the reason that ruling exists**: had that ruling, written to correct exactly that error, asserted an unverified mechanism about shipped behaviour, the ruling would have been the error again, one level down. It is a Shelf entry and not a Phase 8 row because it is not a look-and-feel question and because no product pass is blocked by it: hover degrades to its residual rung either way. To settle it, run one `tmux new-session` at the default and one with `set -g mouse on`. That takes a minute for somebody with a terminal. It is unreachable from here.
 
----
 
-## Deferral shelf
+### Deferral record
 
 Items that surfaced mid-phase and would have derailed the block they surfaced in. Deferral is a first-class outcome recorded here, not a dropped ball and not scope creep absorbed silently. Each one carries the phase it moved to.
 
 | Item | Surfaced | Moved to | Why |
 |---|---|---|---|
 | Local gates diverge from CI ([#650](https://github.com/breferrari/vigia/issues/650)) | #647, 2026-10-19 | Shelf, taken same day | `checks.sh` counted a draft run as green because no rules file said `ci.yml` skips drafts. The local commands also left out the doc build, so a doc warning reached the ready run. |
-| A theme flip mid-session cannot reach the shell ([#332](https://github.com/breferrari/vigia/issues/332)) | Phase 8, 2026-09-30 | Shelf | Ruled 2026-09-30, reader: wait for upstream. crossterm 0.29.0 parses the mode 2031 reply as incomplete and never delivers it. The fix is crossterm-rs/crossterm#1106, open. Comes back when a crossterm release carries it. |
+| A theme flip mid-session cannot reach the shell ([#332](https://github.com/breferrari/vigia/issues/332)) | Phase 8, 2026-09-30 | Shelf, then Phase 12 on 2026-10-19 | Ruled 2026-09-30, reader: wait for upstream. crossterm 0.29.0 parses the mode 2031 reply as incomplete and never delivers it. The fix is crossterm-rs/crossterm#1106, open. Comes back when a crossterm release carries it. |
 | A visible change that names no key is filed as internal, and 0.48.0's notes lost one ([#523](https://github.com/breferrari/vigia/issues/523)) | 0.48.0, 2026-09-11 | Shelf, taken same day | Found by reading 0.48.0's published notes after the release ran green. `changelog-entry.sh` dropped `A list behind the token puts the pane at any commit` on the word `token`. The list carried that word for the release's own credentials, and the pane now draws it in its header. The allow pass that exists for this case asks for a backticked key, and the subject has none. The notes and the changelog are corrected by hand. This is the second occurrence of [#467](https://github.com/breferrari/vigia/issues/467)'s class with a different word. So the fix widens the allow pass rather than tuning the drop list again: `the pane` survives it. The measurement covered every first-parent subject to 0.48.0. It recovered two visible changes, and that entry let no internal subject through. |
-| A subject the notes filter drops is reported only as a workflow notice ([#524](https://github.com/breferrari/vigia/issues/524)) | #523, 2026-09-11 | Shelf | Split out of #523. It is the part that let the defect ship. The script already names every subject it drops, and its own comment says why: a drop is invisible everywhere else. A `::notice::` on a release run that went green is read by nobody, so the remedy does not reach. Shelved rather than taken there because any shape that reaches a person puts the drops in the release's published text. That is a ruling about what a reader sees. |
-| Nothing holds the written layer's two lists against the documents that exist ([#504](https://github.com/breferrari/vigia/issues/504)) | #374, 2026-09-10 | Shelf | Found by the altitude pass over #374. Closing it means classifying every tracked `.md` as prose, ledger or out of the rule's reach. That is a ruling about each of them, and it goes a long way past what #374 asked. `register.rs::markdown()` already finds the population. What is missing is the ruling on the third bucket. |
+| A subject the notes filter drops is reported only as a workflow notice ([#524](https://github.com/breferrari/vigia/issues/524)) | #523, 2026-09-11 | Shelf, then closed on 2026-10-19 (resolved by #611) | Split out of #523. It is the part that let the defect ship. The script already names every subject it drops, and its own comment says why: a drop is invisible everywhere else. A `::notice::` on a release run that went green is read by nobody, so the remedy does not reach. Shelved rather than taken there because any shape that reaches a person puts the drops in the release's published text. That is a ruling about what a reader sees. |
+| Nothing holds the written layer's two lists against the documents that exist ([#504](https://github.com/breferrari/vigia/issues/504)) | #374, 2026-09-10 | Shelf, then Phase 13 on 2026-10-19 | Found by the altitude pass over #374. Closing it means classifying every tracked `.md` as prose, ledger or out of the rule's reach. That is a ruling about each of them, and it goes a long way past what #374 asked. `register.rs::markdown()` already finds the population. What is missing is the ruling on the third bucket. |
 | A row's wrap and its frame are sized by two expressions that disagree by two columns ([#474](https://github.com/breferrari/vigia/issues/474)) | #466, 2026-09-08 | Shelf, taken 2026-09-09 | Found while measuring the enclosure's width rung. `View::layout` wraps at `content_width(gutter, width)`. `Renderer::note_row` draws at `glyphs.width - line_origin(gutter)`. Below some width the second runs two columns past the first: at fifteen columns a body wraps at seven inside a box whose inner width is nine. `content` is what every content line wraps at, not only a note's. So moving either expression moves the wrap of every line at narrow widths, and it needs the wrap suite around it. That is a width contract beside #466's one column. It is also why the enclosure's rung has no gate on its wide side: `edge_width` set one column wider survives the whole suite, but one column narrower goes red at once. The slack is what no drawn edge can see, and it is two columns. The edge is not cut until the third shave, because the room it is drawn in runs that far past the content the boundary was decided on |
 | The sheet has no roomy rung: no air, no sections, and a reorder that would invert the keep-set ([#285](https://github.com/breferrari/vigia/issues/285)) | #220, 2026-08-24 | Phase 8 | #220 carried three rungs under one title, which is #125's shape. Split before a plan was written. This rung needs a display reorder, and the height ladder's keep-set depends on that order. So it cannot ride along with the width rung. |
 | At the residual floor the sheet still drops gestures in silence, and reaching them is an input-model ruling ([#286](https://github.com/breferrari/vigia/issues/286)) | #220, 2026-08-24 | Phase 8 | The half no column trading can reach, on a pane short and narrow at once. Reaching it is an input-model ruling against B12's *it is not a mode*. #220 and #285 block it, because both move the heights at which dropping starts. |
@@ -509,40 +577,40 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | The mutation harness is re-improvised every pass, and the same footgun has fired in four of them ([#299](https://github.com/breferrari/vigia/issues/299)) | #286, 2026-08-24 | Shelf | Instrument work, so the Shelf rather than a phase: #286 was not blocked by it, only slowed. In #286's pass, `git checkout -- <file>` reverted a mutation on a dirty tree and destroyed uncommitted work three times. The vault records the same trap on 2026-07-30 (which already called it a repeat) and twice more on 2026-08-22. |
 | `take-next` step 8 names a recurrence and prescribes a workaround, with no point at which the recurrence becomes a bug ([#290](https://github.com/breferrari/vigia/issues/290)) | #220, 2026-08-24 | Shelf, fixed same day | Instrument work, and #220 was not blocked by it. The vault session that audited #220's own work record surfaced it. Step 8 states that the write guard has refused nine calls running and offers hand-filing. It names no point at which that becomes a defect. |
 | A screenful of one-line-paragraph prose costs 117ms with every pattern already compiled ([#261](https://github.com/breferrari/vigia/issues/261)) | #129, 2026-08-21 | Shelf | Turned up while measuring #129 and is the opposite shape to it: #129's cliff is flat in content size, this one tracks what is on screen and survives every warm. **Taken and closed 2026-08-22, and the cause recorded here when it was shelved was wrong in every part**. The real cause was Markdown's block-start lookahead exploring the inline-content alternation exponentially. Kept rather than deleted because a shelf entry recording a falsified cause is what a later reader plans against. |
-| A fenced code block costs 32 to 60ms of parse, and #261's guard does not reach it ([#264](https://github.com/breferrari/vigia/issues/264)) | #261, 2026-08-22 | Shelf | Split out of #261, which closed the prose and table case entirely in this repository and was unable to close this one. |
-| The residual after #261 is a diffuse Markdown parse cost, largest single term an email auto-link at 94us a call ([#265](https://github.com/breferrari/vigia/issues/265)) | #261, 2026-08-22 | Shelf | **Not a breach on any platform measured, and shelved for that reason rather than for cost.** After #261's guard the worst 24-line screenful of **prose** in this repository is `ROADMAP.md` at 10.03ms and `SPEC.md` at 8.81ms, both inside I9's 16ms with room, so nothing here is something a reader can feel. |
+| A fenced code block costs 32 to 60ms of parse, and #261's guard does not reach it ([#264](https://github.com/breferrari/vigia/issues/264)) | #261, 2026-08-22 | Shelf, then Phase 11 on 2026-10-19 | Split out of #261, which closed the prose and table case entirely in this repository and was unable to close this one. |
+| The residual after #261 is a diffuse Markdown parse cost, largest single term an email auto-link at 94us a call ([#265](https://github.com/breferrari/vigia/issues/265)) | #261, 2026-08-22 | Shelf, then Phase 11 on 2026-10-19 | **Not a breach on any platform measured, and shelved for that reason rather than for cost.** After #261's guard the worst 24-line screenful of **prose** in this repository is `ROADMAP.md` at 10.03ms and `SPEC.md` at 8.81ms, both inside I9's 16ms with room, so nothing here is something a reader can feel. |
 | A draft PR shows a red `ci complete`, and a draft-era run can cancel the real one | #267, 2026-08-23 | Shelf, taken | Instrument work, and the same `cancel-in-progress` grouping #301 records from the other direction. Closed by [#274](https://github.com/breferrari/vigia/issues/274). |
 | ci complete fails on every draft PR, because its legs skip and it treats skipped as failure ([#267](https://github.com/breferrari/vigia/issues/267)) | #266, 2026-08-22 | Shelf | **An instrument finding, so it is shelved rather than filed into a phase**. This is this file's own rule about a queue that serves the product and the mirror equally. |
 | A steady worktree saturates half the band, because the factor above the mean was never measured on this signal ([#281](https://github.com/breferrari/vigia/issues/281)) | #256, 2026-08-22 | Shelf, closed by #457 | Measured while sweeping #256: on a flat fixture the band puts **40 of 76 columns at full height** at eighty columns, and a saturated column carries one bit. |
 | A wider pane can take a row off the body, and the diff pays it ([#283](https://github.com/breferrari/vigia/issues/283)) | #252, 2026-08-23 | Shelf | Found by a width sweep written for the rail and **not caused by it**: it reproduces at eight columns, in `Footer::plan`, on `main`, where the rail is gated on 134. |
-| The rail's arrival width is derived at the block rung, and a dense rung climbs earlier ([#284](https://github.com/breferrari/vigia/issues/284)) | #252, 2026-08-23 | Shelf | Found in #252's fourth audit round. The rail arrives at 134 because that is the one width below 328 where splitting the pane costs neither region a glance rung. `Columns::plan` takes the glyph rung. A braille or octant cell draws two buckets per column. So the stacked ladder climbs at a 119-column pane and is already past the settled rung by 133. |
+| The rail's arrival width is derived at the block rung, and a dense rung climbs earlier ([#284](https://github.com/breferrari/vigia/issues/284)) | #252, 2026-08-23 | Shelf, then Phase 13 on 2026-10-19 | Found in #252's fourth audit round. The rail arrives at 134 because that is the one width below 328 where splitting the pane costs neither region a glance rung. `Columns::plan` takes the glyph rung. A braille or octant cell draws two buckets per column. So the stacked ladder climbs at a 119-column pane and is already past the settled rung by 133. |
 | holds_p99_rounds excused a uniform breach as a host stall ([#269](https://github.com/breferrari/vigia/issues/269)) | #266, 2026-08-22 | **fixed in #266** | An instrument finding is normally shelved, but this one was **taken inside the product pass because that pass was blocked by it**: #261's new prose gate had no way to fail on the defect it exists to catch. |
 | The host-versus-work attribution needs a resolution floor ([#270](https://github.com/breferrari/vigia/issues/270)) | #266, 2026-08-22 | Shelf | The residual of #269. It was split out **after the obvious fix was implemented, found broken on a shipped tier, and reverted**. That is why it is worth a row rather than a note: the next reader will reach for the same fix. |
 | `take-next` step 1 cannot see a session already inside the row it hands you ([#303](https://github.com/breferrari/vigia/issues/303)) | #298, 2026-08-25 | Shelf | Instrument work, so the Shelf rather than a phase: this pass was not blocked by it, it took the next unstarted row and continued. |
-| The sheet's tables are audited, not derived, so the keymap can still drift into them ([#312](https://github.com/breferrari/vigia/issues/312)) | #288, 2026-08-25 | Shelf | Found by #288's `/simplify` round and deeper than that row's own acceptance, which is gate-side by its own words. |
+| The sheet's tables are audited, not derived, so the keymap can still drift into them ([#312](https://github.com/breferrari/vigia/issues/312)) | #288, 2026-08-25 | Shelf, then Phase 13 on 2026-10-19 | Found by #288's `/simplify` round and deeper than that row's own acceptance, which is gate-side by its own words. |
 | The churn band's heights are ungated ([#225](https://github.com/breferrari/vigia/issues/225)) | #159, 2026-08-18 | Shelf | Found by mutation testing during #159's audit, on code that predates it. Three mutations to `band_cell` and the arithmetic feeding it survive the whole suite, because every band gate checks presence, row count and yielding. None reads a drawn column's glyph. |
 | Support every modern language ([#235](https://github.com/breferrari/vigia/issues/235)) | #161, 2026-08-18 | Shelf | Reported from a live pane while this pass was in progress, and confirmed by probing `syntect` directly rather than by reading the code. `load_defaults_newlines` carries 75 syntaxes and none of them is Swift. So `syntax_for` returns `None`, and the file draws as plain text, which is its documented ordinary case. |
 | The caret row's weight is the one modifier a theme file cannot reach ([#195](https://github.com/breferrari/vigia/issues/195)) | #193, 2026-08-16 | Shelf | Raised by the altitude review on [#193](https://github.com/breferrari/vigia/issues/193), which found the stated reason for the constant false. The reason argued that the theme owns colour and the shell owns structure, and cited `CARET` and `RULE`. Those are **glyphs**, a vocabulary the theme grammar does not have at all. |
 | decision: a bonus hint rung is never worth a row, and nobody ruled whether it is worth a readout ([#147](https://github.com/breferrari/vigia/issues/147)) | #121, 2026-08-14 | Shelf | §11.1's drop order puts advice above instrumentation at every width, and `HINT_BASELINE` later carved out a category that ruling predates: a rung nobody is *owed*. |
-| The workflow gates read text, and text has more spellings than the mechanism ([#145](https://github.com/breferrari/vigia/issues/145)) | #143, 2026-08-11 | Shelf | Five evasions of `package.rs`'s workflow gates. A mutation demonstrated each one, and each mutation was YAML-parsed first to confirm it landed. A reindented job defeats the fixed-column key scan. An `echo` carrying a step's name moves `step_block`'s anchor. An `env:` value satisfies `assert_precedes`. The version arithmetic and `concurrency` block have no gate at all. |
+| The workflow gates read text, and text has more spellings than the mechanism ([#145](https://github.com/breferrari/vigia/issues/145)) | #143, 2026-08-11 | Shelf, then Phase 14 on 2026-10-19 | Five evasions of `package.rs`'s workflow gates. A mutation demonstrated each one, and each mutation was YAML-parsed first to confirm it landed. A reindented job defeats the fixed-column key scan. An `echo` carrying a step's name moves `step_block`'s anchor. An `env:` value satisfies `assert_precedes`. The version arithmetic and `concurrency` block have no gate at all. |
 | `take-next` reads Copilot's line comments with the wrong login ([#132](https://github.com/breferrari/vigia/issues/132)) | #24, 2026-08-08 | Shelf | Step 7's `/comments` query filters on `copilot-pull-request-reviewer[bot]`, which is the login `/reviews` returns. `/comments` returns `Copilot`, so the documented command prints nothing however many comments exist. |
 | A denied rustdoc lint that no job runs ([#131](https://github.com/breferrari/vigia/issues/131)) | #24, 2026-08-08 | Shelf | `lib.rs` denies `rustdoc::broken_intra_doc_links` and nothing runs `cargo doc`, so the lint has never been evaluated. Two links are broken on `main` today and `--document-private-items` exits 101 rather than documenting. |
-| The take-order rests on milestone titles rather than this file ([#108](https://github.com/breferrari/vigia/issues/108)) | #83, 2026-08-04 | Phase 5 | Raised by the altitude review on [#107](https://github.com/breferrari/vigia/pull/107) and demonstrated: this file's `## Phase <n>` section order is `1 2 3 4 6 7 5`, which already carries the take-order **and** shelf-last, in a version-controlled artifact a reviewer can diff. |
-| The thesis workload, measured from real use ([#72](https://github.com/breferrari/vigia/issues/72)) | Phase 6, 2026-08-07 | Shelf | Not deferred for lacking value: it is deferred because **a pass cannot produce a week**. The evidence it needs accrues from the pane being open beside real sessions, which is happening daily. Each real-use finding files as its own issue, the way [#129](https://github.com/breferrari/vigia/issues/129) already did. |
-| Default view: unstaged only, or working-tree-vs-HEAD ([#50](https://github.com/breferrari/vigia/issues/50)) | Phase 6, 2026-08-07 | Shelf | §10's own words: "confirm against a week of real use". This is the same calendar dependency as #72, and it is shelved for the same reason. The first outside-reader datum (committed files vanishing read as *missing*) is already on #72's thread. |
+| The take-order rests on milestone titles rather than this file ([#108](https://github.com/breferrari/vigia/issues/108)) | #83, 2026-08-04 | Phase 5, then Phase 14 on 2026-10-19 | Raised by the altitude review on [#107](https://github.com/breferrari/vigia/pull/107) and demonstrated: this file's `## Phase <n>` section order is `1 2 3 4 6 7 5`, which already carries the take-order **and** shelf-last, in a version-controlled artifact a reviewer can diff. |
+| The thesis workload, measured from real use ([#72](https://github.com/breferrari/vigia/issues/72)) | Phase 6, 2026-08-07 | Shelf, then Phase 11 on 2026-10-19 | Not deferred for lacking value: it is deferred because **a pass cannot produce a week**. The evidence it needs accrues from the pane being open beside real sessions, which is happening daily. Each real-use finding files as its own issue, the way [#129](https://github.com/breferrari/vigia/issues/129) already did. |
+| Default view: unstaged only, or working-tree-vs-HEAD ([#50](https://github.com/breferrari/vigia/issues/50)) | Phase 6, 2026-08-07 | Shelf, then Phase 12 on 2026-10-19 | §10's own words: "confirm against a week of real use". This is the same calendar dependency as #72, and it is shelved for the same reason. The first outside-reader datum (committed files vanishing read as *missing*) is already on #72's thread. |
 | Multi-worktree view: several agent sessions at once | Market pass, 2026-07-30 | Phase 5 | The strongest differentiator after glanceability, and the most monitor-shaped. Needs the single-worktree frame path to be cheap first, or it multiplies a cost we have not paid down |
 | Jujutsu and Sapling support | Market pass, 2026-07-30 | Phase 5 | Git is the thesis. A second VCS before the first one is beautiful is scope, not reach |
 | A truncated `.git/index` aborts instead of reporting ([#13](https://github.com/breferrari/vigia/issues/13)) | I2a, 2026-07-30 | Phase 2, with I8 | A `gix` defect, not a frame-path one: an index shorter than the object hash underflows a slice and panics, and `panic = "abort"` makes it uncatchable. |
 | A symlink diffs as its target's contents ([#15](https://github.com/breferrari/vigia/issues/15)) | I2a, 2026-07-30 | Phase 5, **reason expired, taken 2026-08-05** | Pre-existing in `Worktree::diff`, which reads through the link where git stores the target *path*. Demonstrated against git as the oracle. |
-| The fingerprint cannot see a timestamp-preserving write ([#16](https://github.com/breferrari/vigia/issues/16)) | I2a, 2026-07-30 | Phase 5 | `cp -p`, `rsync -t` and `touch -r` keep the length and put the modification time back, and no margin can catch that. |
-| Two paths differing outside UTF-8 collapse onto one cache key ([#17](https://github.com/breferrari/vigia/issues/17)) | I2a, 2026-07-30 | Phase 5 | `to_str_lossy` makes `FileChange::path` both the filesystem identity and the display string, and those are different jobs. |
-| An idle frame is one `stat` per changed file ([#19](https://github.com/breferrari/vigia/issues/19)) | I2a, 2026-07-30 | Phase 5, **reason expired 2026-07-31, see below** | 36.71ms at 2000 changed files against a 16ms budget, almost all of it syscalls. The fix is to revalidate what is drawn rather than everything, which I4 already licenses and which needs a UI that knows what is visible. |
+| The fingerprint cannot see a timestamp-preserving write ([#16](https://github.com/breferrari/vigia/issues/16)) | I2a, 2026-07-30 | Phase 5, then Phase 12 on 2026-10-19 | `cp -p`, `rsync -t` and `touch -r` keep the length and put the modification time back, and no margin can catch that. |
+| Two paths differing outside UTF-8 collapse onto one cache key ([#17](https://github.com/breferrari/vigia/issues/17)) | I2a, 2026-07-30 | Phase 5, then Phase 12 on 2026-10-19 | `to_str_lossy` makes `FileChange::path` both the filesystem identity and the display string, and those are different jobs. |
+| An idle frame is one `stat` per changed file ([#19](https://github.com/breferrari/vigia/issues/19)) | I2a, 2026-07-30 | Phase 5, **reason expired 2026-07-31, see below**, then Phase 11 on 2026-10-19 | 36.71ms at 2000 changed files against a 16ms budget, almost all of it syscalls. The fix is to revalidate what is drawn rather than everything, which I4 already licenses and which needs a UI that knows what is visible. |
 | An external kill leaves the terminal in raw mode ([#24](https://github.com/breferrari/vigia/issues/24)) | I8, 2026-07-30 | Phase 5 → Phase 7, 2026-08-05 (see the pull-forward log), **taken 2026-08-08** | I8 promised "including `SIGINT`" and the shell falsified the premise: raw mode clears `ISIG` and `ENABLE_PROCESSED_INPUT`, so the interrupt key is a key event and never a signal. |
 | `take-next`'s pre-flight cannot see an untracked spec prerequisite ([#34](https://github.com/breferrari/vigia/issues/34)) | #32, 2026-07-31 | Phase 5 | The pre-flight's four comparisons are all keyed on `I<n>` tokens and issue metadata. So a prerequisite stated in `SPEC.md` prose with no issue behind it is invisible to every one of them. |
 | The heat projection's cost follows the file ([#55](https://github.com/breferrari/vigia/issues/55)) | #41's pre-flight, 2026-07-31 | Phase 5 | Not deferred by a session that wanted to avoid it: **nothing had ever taken it**, because it is an open `SPEC.md` §10 bullet that no issue named, which is the exact hole that [#34](https://github.com/breferrari/vigia/issues/34) added the fifth comparison for. |
 | I7 is measured without the highlighter ([#51](https://github.com/breferrari/vigia/issues/51)) | #45, 2026-07-31 | Phase 5 | The same blind spot as #45's, one invariant over: I7's 20.37ms comes from `crates/vigia-core/examples/timings.rs`, which is core-only and builds no `Highlighter`, while the shipped first paint parses whatever the first screenful shows. |
-| The settle margin's cost is unbudgeted ([#73](https://github.com/breferrari/vigia/issues/73)) | Craft review, 2026-07-31 | Phase 5 | Not a rediscovery of [#32](https://github.com/breferrari/vigia/issues/32), which settled the margin's **soundness** and added the gate that drives frames without ever letting the fixture settle. |
-| The worktree name skips the control-character transformation ([#89](https://github.com/breferrari/vigia/issues/89)) | Audit of [#67](https://github.com/breferrari/vigia/issues/67), 2026-08-02 | Phase 5 | Found by mutation sweep rather than by use. The framing took a round to get right. It reads as `put_marked` measuring with `width_of`, while `ratatui` will drop control graphemes. So a name is marked as cut when only invisible characters did not fit. |
+| The settle margin's cost is unbudgeted ([#73](https://github.com/breferrari/vigia/issues/73)) | Craft review, 2026-07-31 | Phase 5, then Phase 11 on 2026-10-19 | Not a rediscovery of [#32](https://github.com/breferrari/vigia/issues/32), which settled the margin's **soundness** and added the gate that drives frames without ever letting the fixture settle. |
+| The worktree name skips the control-character transformation ([#89](https://github.com/breferrari/vigia/issues/89)) | Audit of [#67](https://github.com/breferrari/vigia/issues/67), 2026-08-02 | Phase 5, then Phase 12 on 2026-10-19 | Found by mutation sweep rather than by use. The framing took a round to get right. It reads as `put_marked` measuring with `width_of`, while `ratatui` will drop control graphemes. So a name is marked as cut when only invisible characters did not fit. |
 | `render` promises any area is legal and panics on a tall area ([#91](https://github.com/breferrari/vigia/issues/91)) | Audit of [#77](https://github.com/breferrari/vigia/issues/77), 2026-08-03 | Phase 5 | Found by an adversarial pass on [#77](https://github.com/breferrari/vigia/issues/77), which introduced an **x-axis** instance of the same defect and fixed that one: the footer's recolouring pass walks columns by index where every other writer clips. |
 | A repeated `base` reports itself with eighteen spaces ([#88](https://github.com/breferrari/vigia/issues/88)) | Audit of [#67](https://github.com/breferrari/vigia/issues/67), 2026-08-02 | Phase 5 | Found by an audit agent reading `theme.rs` for a doc-comment correction rather than by using the tool. A two-line string literal lost its continuation backslash, so eighteen columns of source indentation reach a reader's terminal inside an error message. It has shipped since [#61](https://github.com/breferrari/vigia/pull/61). |
 | Five findings from using the pinned list ([#77](https://github.com/breferrari/vigia/issues/77), [#78](https://github.com/breferrari/vigia/issues/78), [#79](https://github.com/breferrari/vigia/issues/79), [#80](https://github.com/breferrari/vigia/issues/80), [#81](https://github.com/breferrari/vigia/issues/81)) | #66, 2026-08-02 | Phase 3 and Phase 8 | Reported by running the branch rather than by reading it. This is the fourth time that method found something here, after [#30](https://github.com/breferrari/vigia/issues/30), [#45](https://github.com/breferrari/vigia/issues/45) and [#57](https://github.com/breferrari/vigia/issues/57). |
@@ -551,25 +619,25 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | A deferral reason is a dated claim ([#76](https://github.com/breferrari/vigia/issues/76)) | The shelf itself, 2026-08-01 | Phase 5 | Second instance, so it is a pattern rather than an incident. [#19](https://github.com/breferrari/vigia/issues/19)'s reason named a precondition Phase 2 then met. It sat expired for a whole phase until a session happened to read the shelf. The section above this table exists because of it. |
 | A `main` run was cancelled at queue time ([#75](https://github.com/breferrari/vigia/issues/75)) | #65's merge, 2026-08-01 | Phase 5 | `ci.yml` sets `cancel-in-progress` false on `main` and says why in a comment: *"a commit nobody verified lands looking like it was"*. The run for `5c8af44` was cancelled before a single job started. |
 | An agent's write is how the grammar compile arrives ([#129](https://github.com/breferrari/vigia/issues/129)) | #72, 2026-08-07 | Phase 8 | This repository's first finding from a *worktree* rather than from a fixture. It is a shape `SPEC.md` §10 already knew about, arriving by a route nobody wrote down. §10 lists the ways a reader meets a cold grammar parse and every one is a key they pressed: `G`, a follow jump, scrolling up. |
-| No seam between this crate and `gix` ([#74](https://github.com/breferrari/vigia/issues/74)) | Craft review, 2026-07-31 | Phase 5 | The status walk, rename tracking, the attributes stack and the filter machinery are consumed directly and widely. So §3's budgets are a **transitive** property of a pre-1.0 dependency's implementation. |
+| No seam between this crate and `gix` ([#74](https://github.com/breferrari/vigia/issues/74)) | Craft review, 2026-07-31 | Phase 5, then Phase 13 on 2026-10-19 | The status walk, rename tracking, the attributes stack and the filter machinery are consumed directly and widely. So §3's budgets are a **transitive** property of a pre-1.0 dependency's implementation. |
 | Pointer motion draws a full frame ([#154](https://github.com/breferrari/vigia/issues/154)) | I1, 2026-08-15 | Phase 8 | Found while ruling [#123](https://github.com/breferrari/vigia/issues/123), which changes no source: this has been true since the mouse landed in Phase 2. |
 | A note's rows are built whole before the clamp trims them ([#530](https://github.com/breferrari/vigia/issues/530)) | 2026-09-12 | Shelf | Not an I9 breach: the steady frame holds at 12.6ms. Only the frame an answer arrives on scales with its length, and that is paid once. |
-| Three overlays are kept apart by hand in eight places ([#515](https://github.com/breferrari/vigia/issues/515)) | #511, 2026-09-11 | Shelf | A structural refactor across the Shell. Nothing is broken: B22 holds today, by hand. |
-| What a prompting session does with a posted note is unobserved ([#444](https://github.com/breferrari/vigia/issues/444)) | B21, 2026-09-07 | Shelf | Needs a person running two panes with a session that prompts. An agent cannot observe it. |
-| No test can build a Shell ([#441](https://github.com/breferrari/vigia/issues/441)) | #420, 2026-09-06 | Shelf | Needs a ruling on the harness shape before it is built. It changes how every gesture is tested. |
-| sheet.rs restates constants the table implies ([#393](https://github.com/breferrari/vigia/issues/393)) | #386, 2026-09-03 | Shelf | Test-only. The suite restates the renderer on purpose, so only derivations from its own tables are safe. |
+| Three overlays are kept apart by hand in eight places ([#515](https://github.com/breferrari/vigia/issues/515)) | #511, 2026-09-11 | Shelf, then Phase 13 on 2026-10-19 | A structural refactor across the Shell. Nothing is broken: B22 holds today, by hand. |
+| What a prompting session does with a posted note is unobserved ([#444](https://github.com/breferrari/vigia/issues/444)) | B21, 2026-09-07 | Shelf, then Phase 12 on 2026-10-19 | Needs a person running two panes with a session that prompts. An agent cannot observe it. |
+| No test can build a Shell ([#441](https://github.com/breferrari/vigia/issues/441)) | #420, 2026-09-06 | Shelf, then Phase 13 on 2026-10-19 | Needs a ruling on the harness shape before it is built. It changes how every gesture is tested. |
+| sheet.rs restates constants the table implies ([#393](https://github.com/breferrari/vigia/issues/393)) | #386, 2026-09-03 | Shelf, then Phase 13 on 2026-10-19 | Test-only. The suite restates the renderer on purpose, so only derivations from its own tables are safe. |
 | watch.rs evicts an arbitrary path ([#368](https://github.com/breferrari/vigia/issues/368)) | 2026-08-28 | Shelf | Has an open PR, #531, from another session. |
-| The caret, the pulse and the elision markers are outside CP437 ([#237](https://github.com/breferrari/vigia/issues/237)) | #159, 2026-08-18 | Shelf | Needs a ruling and evidence from a console font without those glyphs. |
-| Under a default tmux a non-active pane may get no mouse events ([#188](https://github.com/breferrari/vigia/issues/188)) | #123, 2026-08-16 | Shelf | Needs a person in tmux to observe it. |
-| 0.1.1: trusted publishing, so the crates.io token stops existing ([#141](https://github.com/breferrari/vigia/issues/141)) | 2026-08-09 | Shelf | Needs the reader to register the trusted publisher on crates.io. |
-| Rename tracking and the non-streaming walk, at ten thousand changed files ([#48](https://github.com/breferrari/vigia/issues/48)) | #34, 2026-07-31 | Shelf | A frame-path redesign measured at a scale no reader has reported. The §10 bullets stay open. |
+| The caret, the pulse and the elision markers are outside CP437 ([#237](https://github.com/breferrari/vigia/issues/237)) | #159, 2026-08-18 | Shelf, then Phase 12 on 2026-10-19 | Needs a ruling and evidence from a console font without those glyphs. |
+| Under a default tmux a non-active pane may get no mouse events ([#188](https://github.com/breferrari/vigia/issues/188)) | #123, 2026-08-16 | Shelf, then Phase 12 on 2026-10-19 | Needs a person in tmux to observe it. |
+| 0.1.1: trusted publishing, so the crates.io token stops existing ([#141](https://github.com/breferrari/vigia/issues/141)) | 2026-08-09 | Shelf, then Phase 14 on 2026-10-19 | Needs the reader to register the trusted publisher on crates.io. |
+| Rename tracking and the non-streaming walk, at ten thousand changed files ([#48](https://github.com/breferrari/vigia/issues/48)) | #34, 2026-07-31 | Shelf, then Phase 11 on 2026-10-19 | A frame-path redesign measured at a scale no reader has reported. The §10 bullets stay open. |
 | Status walk config stale ([#606](https://github.com/breferrari/vigia/issues/606)) | #111, 2026-09-30 | Shelf | Found by #111's altitude review. Reloading the one repository means a borrow at each of its 12 readers, on the status path. The diff is already correct, and only a file that differs by line endings alone can be listed wrongly. |
 | Watcher excludes keep opened config ([#619](https://github.com/breferrari/vigia/issues/619)) | #606, 2026-09-30 | Shelf | Found by #617's review. Only a changed `core.excludesFile` shows it, and the fix changes how the shell holds its watcher. |
 | Exclude files frozen at watch start ([#621](https://github.com/breferrari/vigia/issues/621)) | #619, 2026-09-30 | Shelf | Found by #619's review. It predates #619, and only an edit to `.git/info/exclude` or the excludes file shows it. |
 | Mixed release notes fail the bump ([#624](https://github.com/breferrari/vigia/issues/624)) | #368, 2026-09-30 | Shelf | Found by #531's review. It is release machinery, not the burst cap, and #531 avoids it by writing its own squash body. |
-| Short check caps wrapped breaks lower ([#661](https://github.com/breferrari/vigia/issues/661)) | #644, 2026-10-19 | Shelf | Found by #657's review. A one-frame restart with no visible defect. |
+| Short check caps wrapped breaks lower ([#661](https://github.com/breferrari/vigia/issues/661)) | #644, 2026-10-19 | Shelf, then Phase 12 on 2026-10-19 | Found by #657's review. A one-frame restart with no visible defect. |
 
-### A deferral reason is a dated claim like any other
+#### A deferral reason is a dated claim like any other
 
 **Worked instance, and the one that made this a heading: [#19](https://github.com/breferrari/vigia/issues/19).** It went to Phase 5 because the fix *"needs a UI that knows what is visible"*, and Phase 2 shipped that UI: I4 makes the shell diff only what it draws, and [#32](https://github.com/breferrari/vigia/issues/32) measured the consequence. Over the same fixture and event, the core ran **98 of 182 frames over the 16ms budget** and the shell ran **0 of 1060**. The precondition the deferral named had already been met for a phase.
 
@@ -622,6 +690,8 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | Mixed release notes fail the bump ([#624](https://github.com/breferrari/vigia/issues/624)) | Off the Shelf, 2026-09-30 | Taken by the unattended loop, whose merged #617 and #622 it breaks the next release on. Workflow work, which the loop takes when it blocks releasing the loop's own PRs. |
 | The heat projection's cost follows the file ([#55](https://github.com/breferrari/vigia/issues/55)) | Off the Shelf, 2026-09-30 | Taken by the unattended loop when `next.sh` ran dry. The row's reason was that nothing had ever taken it, which is not a reason that can hold. The fix is a slot beside the cached diff: a file's heat strip is projected once per computed diff and served from the frame while that diff is reused, so a frame pays a copy per drawn heading and the walk over the hunks is paid once per computed diff |
 | A note's rows are built whole before the clamp trims them ([#530](https://github.com/breferrari/vigia/issues/530)) | Off the Shelf, 2026-09-30 | Taken by the reader's approval of the plan when `next.sh` ran dry. The row's reason was a cost statement, not a blocker: the arrival frame of a fenced answer scaled with the answer's length and was paid once. A note is now counted whole and built only where the clamp keeps it, and a quoted block is parsed as far as the last line the frame draws, so an arrival costs a screenful |
+| All 25 open Shelf items ([#16](https://github.com/breferrari/vigia/issues/16), [#17](https://github.com/breferrari/vigia/issues/17), [#19](https://github.com/breferrari/vigia/issues/19), [#48](https://github.com/breferrari/vigia/issues/48), [#50](https://github.com/breferrari/vigia/issues/50), [#72](https://github.com/breferrari/vigia/issues/72), [#73](https://github.com/breferrari/vigia/issues/73), [#74](https://github.com/breferrari/vigia/issues/74), [#89](https://github.com/breferrari/vigia/issues/89), [#108](https://github.com/breferrari/vigia/issues/108), [#141](https://github.com/breferrari/vigia/issues/141), [#145](https://github.com/breferrari/vigia/issues/145), [#188](https://github.com/breferrari/vigia/issues/188), [#237](https://github.com/breferrari/vigia/issues/237), [#264](https://github.com/breferrari/vigia/issues/264), [#265](https://github.com/breferrari/vigia/issues/265), [#284](https://github.com/breferrari/vigia/issues/284), [#312](https://github.com/breferrari/vigia/issues/312), [#332](https://github.com/breferrari/vigia/issues/332), [#393](https://github.com/breferrari/vigia/issues/393), [#441](https://github.com/breferrari/vigia/issues/441), [#444](https://github.com/breferrari/vigia/issues/444), [#504](https://github.com/breferrari/vigia/issues/504), [#515](https://github.com/breferrari/vigia/issues/515), [#661](https://github.com/breferrari/vigia/issues/661)) | Shelf → Phases 11 to 14, 2026-10-19 | Reader, 2026-10-19: the shelf is retired and every open issue sits in a phase. #524 closed the same day, resolved by #611. |
+| Class every prose path as docs ([#667](https://github.com/breferrari/vigia/issues/667)) | Phase 14, 2026-10-19 | Reader, 2026-10-19: taken before #659. |
 
 ---
 

@@ -41,8 +41,8 @@ sh .claude/skills/take-next/preflight.sh       # does the spec still agree with 
 `next.sh` selects the earliest eligible milestone:
 
 - **Order is the phase number at the start of the title.** Due dates are null, and a null sort returns API order. A title without `Phase <n>` sorts last and does not disappear. So a renamed milestone goes last, silently. Pre-flight check 6 finds this.
-- **A description that starts with `Shelf:` is never selected.** A shelf stays open and is never next. Take from a shelf only as a deliberate choice. First, read its dated reason for the deferral again.
-- **A milestone with no open issues is skipped.** Thus a finished phase that is still open is never selected. An empty answer means that the rest is shelved, finished, or empty. Find out which before you act.
+- **A description that starts with `Shelf:` is never selected.** There is no shelf (retired 2026-10-19), and the rule stays so that a milestone marked that way cannot become next.
+- **A milestone with no open issues is skipped.** Thus a finished phase that is still open is never selected. An empty answer means that the rest is finished or empty. Find out which before you act.
 
 After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/take-next/selftest.sh`. When you finish the last issue in a milestone, close the milestone.
 
@@ -60,12 +60,12 @@ First, the script makes sure that the whole board arrived. A truncated fetch cau
 3. The mark on each roadmap row agrees with the state of its issue, and the issue exists.
 4. Each open issue has a milestone, or `next.sh` never sees it.
 5. The open bullets in `SPEC.md` §10 are printed for you to read. A bullet with ordering words (*before*, *first*, *until*, *blocked*) and no issue is a blocker. File an issue for it. Then decide whether it is in scope or goes first. Do this before you plan.
-6. The answer from `next.sh` agrees with the section order in the roadmap. Each open milestone with work, except the Shelf, has a `## Phase <n>` section.
+6. The answer from `next.sh` agrees with the section order in the roadmap. Each open milestone with work has a `## Phase <n>` section, unless its description starts with `Shelf:`.
 7. Each issue, open or closed, has a roadmap row.
 8. Given an issue number, no worktree, branch or plan comment names it.
-9. Open shelf rows whose reason cites a closed issue, retired invariant or closed phase. Reread each reason.
+9. Open rows of a `## Deferral shelf` table whose reason cites a closed issue, retired invariant or closed phase. Reread each reason. The retired shelf's record is not one, so this reports nothing while no shelf exists.
 
-A false positive means that the check is wrong: fix it, never skip it. A command in this file can stop doing what the file says. Fix it in the pass that finds it. That is a correction, not instrument work, so the Shelf rule in step 4 does not apply.
+A false positive means that the check is wrong: fix it, never skip it. A command in this file can stop doing what the file says. Fix it in the pass that finds it. That is a correction, not instrument work, so the filing rule in step 4 does not apply.
 
 Take the **topmost unstarted row** in the `ROADMAP.md` section of that phase. If a later task blocks it, say so and take the blocker. Then run `preflight.sh <n>`: another session can hold a ⬜ row.
 
@@ -129,7 +129,7 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 - **A change to the frame path runs the budget gate.**
 - **Add no dependency that `SPEC.md` does not name.** First, propose it in the spec, in its own commit.
 - **If reality contradicts the spec, stop (stop 1).** Say which one you think is wrong, and wait. After the reader answers, change that one in its own commit. If reality contradicts the plan, decide which is wrong. If the plan is wrong, write the deviation and its reason on the issue at that time. Then correct the plan comment. Step 6 then compares against the plan as it is now.
-- **Each issue that you file gets a milestone and a roadmap row.** Fix in-scope findings in this PR. Do not move an in-scope finding to a new issue to close the PR. An out-of-scope finding goes to the Shelf. Give it a row in the Shelf table of `ROADMAP.md`. Put its dated reason in the Deferral shelf table. Use `gh issue create --title "..." --body-file f.md --milestone "Shelf"`. A defect in a gate, a check, a skill or a workflow also goes to the Shelf. If that work blocks a product pass, do it, and make it as small as the blockage. Otherwise, leave it on the Shelf.
+- **Each issue that you file gets a milestone and a roadmap row.** Fix in-scope findings in this PR. Do not move an in-scope finding to a new issue to close the PR. An out-of-scope finding goes to the phase it belongs in. Give it a row in that phase's table in `ROADMAP.md`, put its dated reason on the issue, and use `gh issue create --title "..." --body-file f.md --milestone "<that phase's title>"`. When no phase fits, it goes to a new phase after the last one, with a milestone and a section. A defect in a gate, a check, a skill or a workflow goes the same way. There is no shelf (retired 2026-10-19). If that work blocks a product pass, do it, and make it as small as the blockage.
 
 ## 5. Scope the checks
 
@@ -192,7 +192,7 @@ When the latest run is green on the PR head and every comment has a reply, merge
 Do items 2 and 3 on the branch before step 7, so that they merge with the PR. Do items 1 and 4 after the merge.
 
 1. **Issue.** Close it with the commit, the test count and the numbers.
-2. **`ROADMAP.md`.** Change the status of the row. Add a row for each issue that this pass filed or closed. If this pass moved an issue to the Shelf, add its rows to the Shelf and Deferral shelf tables. If it took an issue from the Shelf, add a line to the Pull-forward log.
+2. **`ROADMAP.md`.** Change the status of the row. Add a row for each issue that this pass filed or closed, in the phase it belongs to. If it took an issue into an earlier phase than its milestone planned, add a line to the Pull-forward log.
 3. **`SPEC.md`.** If the contract changed, change it in its own commit on the branch.
 4. **Vault.** Use `record_work` for what happened. Use `remember` for a lesson that helps another project.
 

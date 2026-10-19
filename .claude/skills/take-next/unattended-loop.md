@@ -17,10 +17,10 @@ The reader invoked `/take-next unattended-loop`. That invocation is plan approva
 ## The queue
 
 1. `next.sh`, in its own order.
-2. When it is dry, the Shelf, product items only: work that changes what the pane does or costs. Skip items labelled `decision`, items labelled `good first issue`, items with an open PR by someone else, and gate, CI, skill and workflow work. The reader chose this scope on 2026-09-30. One exception: an issue that makes `bump and release` fail on a PR this loop merged is taken whatever its kind (ruled 2026-09-30, session). Each pull gets a line in the Pull-forward log.
-3. Re-read an item's dated deferral reason before taking it. A reason that still holds, or an item that needs a refactor across many call sites, goes to the report with one line, and the loop moves on.
+2. When it is dry, stop. There is no shelf: the reader retired it on 2026-10-19, moving its items into Phases 11 to 14, and the loop takes those phases in order like any other. This replaces the 2026-09-30 ruling on which shelf items the loop takes. A pass that concludes an item should be declined still stops that item and reports it, per stop 4 of `SKILL.md`.
+3. Re-read an item's dated reason on its issue before taking it. A reason that still holds, or an item that needs a refactor across many call sites, goes to the report with one line, and the loop moves on.
 4. Read the queue again when a pass ends and before calling it dry: issues are filed while the loop runs. When nothing is eligible, tell the reader, with one line per skipped item and its reason.
 
 ## Done when
 
-`next.sh` is dry, every product item left on the Shelf is skipped with a reason or waiting on the reader, and every PR of the loop is merged or reported red. Report once, per `SKILL.md` step 9, with the counts: PRs opened, merged and red, items skipped, and the questions waiting on the reader.
+`next.sh` is dry, every item it offered is merged, skipped with a reason or waiting on the reader, and every PR of the loop is merged or reported red. Report once, per `SKILL.md` step 9, with the counts: PRs opened, merged and red, items skipped, and the questions waiting on the reader.
