@@ -166,7 +166,7 @@ fn process_peak() -> Option<u64> {
     // SAFETY: a pseudo-handle that needs no close, and a live local of the
     // type the call writes, whose size it is told.
     let ok = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &raw mut counters, size) } != 0;
-    ok.then(|| counters.PeakWorkingSetSize as u64 >> 20)
+    ok.then_some(counters.PeakWorkingSetSize as u64 >> 20)
 }
 
 #[cfg(not(any(unix, windows)))]
