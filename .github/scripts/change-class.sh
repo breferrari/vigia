@@ -15,7 +15,9 @@
 # `assets/syntaxes` are code: the grammar dump is what the coverage suite reads.
 # A markdown file under `crates/` is code too: `NOTICE.md` ships in the archive
 # and a test reads it. `.claude/scripts` are the guards that run on every
-# commit and publish, and they are code.
+# commit and publish, and they are code. `.claude/take-next` holds the
+# rules the skill reads, and `docs/research` holds notes and their images;
+# no build or code suite reads either, but a script beside the images is code.
 #
 # `CI_FULL=true` in the environment answers full whatever the paths, for a
 # pull request that carries the `full-ci` label. A partial run that turns out
@@ -41,8 +43,10 @@ fi
 code=$(printf '%s\n' "$paths" | grep -Ev \
     -e '^[^/]+\.md$' \
     -e '^docs/[^/]+\.md$' \
+    -e '^docs/research/.*\.(md|png|jpg|jpeg|gif|svg)$' \
     -e '^\.github/PULL_REQUEST_TEMPLATE\.md$' \
     -e '^\.claude/skills/' \
+    -e '^\.claude/take-next/' \
     -e '^\.claude/settings\.json$' \
     -e '^LICENSE$' \
     -e '^\.github/ISSUE_TEMPLATE/' \
