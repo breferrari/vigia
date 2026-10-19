@@ -16,10 +16,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 30;
+const ESCAPING_FILES: usize = 31;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "thirty";
+const ESCAPING_FILES_SPELLED: &str = "thirty-one";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {

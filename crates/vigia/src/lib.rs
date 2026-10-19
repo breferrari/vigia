@@ -25,6 +25,9 @@ pub mod menu;
 /// safe to ship.
 pub mod motion;
 mod notes;
+/// `SPEC.md` §11.1's pictures of a changed image. Public because the suite
+/// builds them as the pane does.
+pub mod pictures;
 /// `SPEC.md` §11.1's position list. Public for [`menu`]'s reason: the suite drives the
 /// overlay as the loop does.
 pub mod positions;
@@ -122,6 +125,8 @@ enum Wake {
     Signalled,
     /// A warm finished, so a hunk that drew plain can draw in colour.
     Warmed,
+    /// A changed image's pictures were built, so the rows held for them can draw.
+    Pictured,
     /// A newer version exists, so the footer can name it.
     Update(String),
     /// The notes store changed under another process's hand.
@@ -330,8 +335,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let wanted = theme::wants_colours(|key| std::env::var(key).ok());
     let reply = terminal::ask(std::time::Duration::from_millis(150), wanted);
     let colours = terminal::colours_of(&reply);
+    let depth = Depth::detect()?;
     let theme = theme::from_env(
-        Depth::detect()?,
+        depth,
         |key| std::env::var(key).ok(),
         terminal::background_of(&reply),
         colours.as_ref(),
@@ -378,7 +384,28 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Before the terminal is taken, which is the whole point of it being here.
     let armed = signal::forward(tx.clone());
 
+    // What a transparent pixel shows and the mask dims toward: the pane, as the
+    // terminal said it is, or as dark or light as it said.
+    let canvas = colours.as_ref().map_or_else(
+        || match terminal::background_of(&reply) {
+            Some(Background::Light) => (255, 255, 255),
+            _ => (0, 0, 0),
+        },
+        |colours| colours.background,
+    );
+    let changed = match theme.removed_bar.bg {
+        Some(ratatui::style::Color::Rgb(r, g, b)) => (r, g, b),
+        _ => (0xf8, 0x51, 0x49),
+    };
+    let pictured = tx.clone();
+    let pictures = pictures::Pictures::new(
+        pictures::Inks { canvas, changed },
+        Box::new(move || {
+            let _ = pictured.send(Wake::Pictured);
+        }),
+    );
     let mut shell = Shell {
+        pictures,
         session: Session::enter()?,
         app: App::configured(&config),
         hide: config.hide.clone(),
@@ -429,6 +456,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         alerts: Alerts::default(),
         effects_ran: false,
     };
+
+    // A half-block is a background, and below 24-bit a background is dropped.
+    shell.app.draw_pictures(depth == Depth::Truecolor);
 
     // The arming from above, reported now that there is somewhere to report it. A
     // signal that arrived before this point is not lost: it waits in the channel
@@ -807,7 +837,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.app.warn(message);
                 }
                 // Deliberately nothing.
-                Wake::Warmed => {}
+                Wake::Warmed | Wake::Pictured => {}
                 Wake::Update(version) => {
                     shell.say(
                         format!("vigia {version} is available"),
@@ -1004,6 +1034,8 @@ fn drain(batch: &mut Vec<Wake>, first: Wake, rx: &Receiver<Wake>, cap: usize) {
 
 /// The terminal and everything drawn onto it that outlives one frame.
 struct Shell {
+    /// A changed image's built pictures, and the worker that builds them.
+    pictures: pictures::Pictures,
     session: Session,
     app: App,
     /// The footer's messages, clipped to the footer.
@@ -2081,7 +2113,10 @@ impl Shell {
             .app
             .view(frame, &mut self.highlighter, &self.history, body)
         {
-            Ok(view) => self.screen = view,
+            Ok(view) => {
+                self.screen = view;
+                self.pictures.attach(&mut self.screen.rows, frame);
+            }
             // The wash goes too: this frame resolved nothing, and keeping the last
             // frame's answer would leave one standing over rows it no longer covers.
             Err(e) => {

@@ -32,9 +32,9 @@ fn drawn(view: &View) -> Vec<String> {
             Row::Line { text, .. } | Row::Wrap { text, .. } | Row::Note { text, .. } => {
                 text.clone()
             }
-            Row::Reason(note) => note.clone(),
+            Row::Reason(note) | Row::Sized { line: note, .. } => note.clone(),
             Row::Hunk { .. } => "@@".to_owned(),
-            Row::Box { .. } | Row::Gap => String::new(),
+            Row::Box { .. } | Row::Gap | Row::Picture { .. } => String::new(),
         })
         .collect()
 }

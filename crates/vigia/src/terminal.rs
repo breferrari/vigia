@@ -988,7 +988,7 @@ mod tests {
     fn no_exit_path_in_the_shell_skips_the_destructors() {
         // The structural half of "the terminal is restored on every exit". What makes
         // that true is that every exit drops `Shell`, which owns the `Session`.
-        const SOURCES: [(&str, &str); 24] = [
+        const SOURCES: [(&str, &str); 25] = [
             ("lib.rs", include_str!("lib.rs")),
             ("main.rs", include_str!("main.rs")),
             ("app.rs", include_str!("app.rs")),
@@ -1003,6 +1003,7 @@ mod tests {
             ("menu.rs", include_str!("menu.rs")),
             ("motion.rs", include_str!("motion.rs")),
             ("notes.rs", include_str!("notes.rs")),
+            ("pictures.rs", include_str!("pictures.rs")),
             ("positions.rs", include_str!("positions.rs")),
             ("post.rs", include_str!("post.rs")),
             ("quote.rs", include_str!("quote.rs")),

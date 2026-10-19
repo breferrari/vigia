@@ -127,6 +127,9 @@ fn flips(at: usize) -> Option<Action> {
 /// The shell's state.
 #[derive(Debug, Clone)]
 pub struct App {
+    /// Whether a changed image may draw its pictures, which the shell sets once
+    /// from the terminal's colour depth.
+    pictures: bool,
     /// Top of the viewport.
     position: Position,
     /// What the footer should say instead of the key hints.
@@ -239,6 +242,7 @@ impl Default for App {
     /// Hand-written because [`Samples`] takes its capacity at construction.
     fn default() -> Self {
         Self {
+            pictures: false,
             position: Position::default(),
             notice: None,
             flash: None,
@@ -422,6 +426,11 @@ impl App {
     /// Drop the current message, because the frame it described has passed.
     pub fn clear_notice(&mut self) {
         self.notice = None;
+    }
+
+    /// Let a changed image draw its pictures, or stop it.
+    pub fn draw_pictures(&mut self, pictures: bool) {
+        self.pictures = pictures;
     }
 
     /// Whether the reader has asked for the staged run.
@@ -1350,6 +1359,7 @@ impl App {
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].
                 highlight: self.paint != Paint::Never,
+                pictures: self.pictures,
             },
             &self.notes,
             self.notes_shown,

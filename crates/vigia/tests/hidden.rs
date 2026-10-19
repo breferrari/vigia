@@ -112,6 +112,7 @@ fn the_collected_view_carries_what_the_walk_hid() {
         measured: true,
         landing: false,
         single: false,
+        pictures: false,
         highlight: false,
     };
 
