@@ -48,6 +48,11 @@ impl Fingerprint {
     pub(crate) fn len(self) -> u64 {
         self.len
     }
+
+    /// The file's modification time.
+    pub(crate) fn mtime(self) -> SystemTime {
+        self.mtime
+    }
 }
 
 /// Whether a config at `now` asks for a reload over the one loaded at `loaded`.
@@ -72,7 +77,7 @@ const SETTLE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Whether a modification time observed by a read starting at `read_started`
 /// identifies the bytes that read returned.
-fn settled(mtime: SystemTime, read_started: SystemTime) -> bool {
+pub(crate) fn settled(mtime: SystemTime, read_started: SystemTime) -> bool {
     // Subtraction rather than addition on purpose: adding the margin to `mtime`
     // needs an overflow arm no filesystem can reach, where a future modification
     // time is an `Err` and reachable.
@@ -1015,6 +1020,7 @@ mod tests {
             // These unit tests are over [`reusable`], which does not consult it:
             // the field decides how a file is *read*, and nothing here reads one.
             maybe_symlink: false,
+            mode_changed: false,
         }
     }
 
@@ -1027,6 +1033,7 @@ mod tests {
             before,
             after: after.map(Side::Blob),
             maybe_symlink: true,
+            mode_changed: false,
         }
     }
 

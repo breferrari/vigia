@@ -365,6 +365,7 @@ fn racy_lfs_size_first() {
 fn racy_lfs_compare_cached() {
     let object = b"real image bytes\n".repeat(10);
     let scratch = lfs_content("attr-lfs-cached", &object, &object, true);
+    settle(&scratch, "a.png");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
@@ -402,5 +403,109 @@ fn driver_after_reload() {
     assert!(
         !marker.exists(),
         "a driver named after the walk opened ran on the reloaded walk"
+    );
+}
+
+/// Move `rela`'s modification time well behind the settle margin, which a write
+/// a moment ago has not reached.
+fn settle(scratch: &Scratch, rela: &str) {
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .open(scratch.path_of(rela))
+        .expect("open to settle");
+    let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+    file.set_modified(past).expect("set the modification time");
+}
+
+#[test]
+fn racy_lfs_unsettled() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-unsettled", &object, &object, true);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    frame.advance().expect("advance again");
+    assert_eq!(
+        worktree.lfs_compares(),
+        2,
+        "a verdict taken on a fingerprint inside the settle margin was kept"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn lfs_mode_change() {
+    use std::os::unix::fs::PermissionsExt;
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-mode", &object, &object, true);
+    std::fs::set_permissions(
+        scratch.path_of("a.png"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .expect("make it executable");
+    assert_eq!(
+        listed(&scratch),
+        ["a.png", "notes.txt"],
+        "a mode change on an LFS file equal to its object was dropped"
+    );
+}
+
+#[test]
+fn lfs_attribute_removed() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-unfiltered", &object, &object, true);
+    settle(&scratch, "a.png");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(
+        frame.files().iter().all(|c| c.path != "a.png"),
+        "the setup listed the LFS file"
+    );
+    scratch.write(".gitattributes", "*.txt text\n");
+    frame.advance().expect("advance after the attribute went");
+    assert!(
+        frame.files().iter().any(|c| c.path == "a.png"),
+        "a file no longer under filter=lfs stayed hidden by its cached verdict"
+    );
+}
+
+#[test]
+fn lfs_walk_budget() {
+    let first = vec![1u8; 10 * 1024 * 1024];
+    let second = vec![2u8; 10 * 1024 * 1024];
+    let scratch = Scratch::new("attr-lfs-budget");
+    scratch.write(
+        ".gitattributes",
+        "*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let objects = [("a.png", &first, 0xa1), ("b.png", &second, 0xb2)];
+    for (rela, object, seed) in objects {
+        let (_, pointer) = support::lfs_pointer(object, seed);
+        scratch.write(rela, pointer);
+    }
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    for (rela, object, seed) in objects {
+        let (oid, _) = support::lfs_pointer(object, seed);
+        scratch.write(
+            &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
+            object,
+        );
+        scratch.write(rela, object);
+        settle(&scratch, rela);
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        1,
+        "one walk compared more than its 16 MiB budget"
+    );
+    frame.advance().expect("advance again");
+    assert!(
+        frame.files().is_empty(),
+        "the file the first walk could not afford was not compared on the next"
     );
 }

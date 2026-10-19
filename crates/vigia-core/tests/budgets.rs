@@ -1241,7 +1241,7 @@ fn lfs_compare_repo(name: &str, content: bool) -> Scratch {
 /// I9 over a cold frame that compares one 16 MiB LFS file with its object,
 /// interleaved with the same frame where nothing has to be compared.
 #[test]
-fn lfs_compare_holds_the_frame() {
+fn lfs_compare_frame() {
     let compared = lfs_compare_repo("budget-lfs-compare", true);
     let plain = lfs_compare_repo("budget-lfs-plain", false);
     let cold = |scratch: &Scratch, compares: u64| {
