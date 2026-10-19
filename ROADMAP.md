@@ -334,6 +334,8 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 | ⬜ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
 | ⬜ | Decoder panic stops the pane. **Found by review on #643** | [#645](https://github.com/breferrari/vigia/issues/645) |
 | ⬜ | macOS background query blocks. **Found while building #635** | [#646](https://github.com/breferrari/vigia/issues/646) |
+| ⬜ | Protocol images under overlays. **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
+| ⬜ | Cell size fixed at startup. **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
 
 ## Phase 10 — current Rust
 
