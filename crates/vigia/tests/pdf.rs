@@ -667,13 +667,13 @@ fn pdf_ascii85_bomb() {
 
 #[test]
 fn pdf_predictor_row() {
-    // A row two TiB long, over 64 bytes of data: the pane draws on.
+    // A row 128 TiB long, over 64 bytes of data: the pane draws on.
     let drawn = drawn(
         "pdf-predictor",
         Some(&icon_pdf(1)),
         &image_page(
             &format!(
-                "{GREY} /Filter /FlateDecode /DecodeParms << /Predictor 2 /BitsPerComponent 16 /Colors 1 /Columns 2199023255552 >>"
+                "{GREY} /Filter /FlateDecode /DecodeParms << /Predictor 2 /BitsPerComponent 16 /Colors 1 /Columns 70368744177664 >>"
             ),
             &zlib_zeros(64),
         ),

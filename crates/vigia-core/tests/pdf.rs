@@ -256,10 +256,10 @@ fn pdf_image_stream_sized() {
 
 #[test]
 fn pdf_predictor_row_frame() {
-    // An index stream whose rows claim two TiB each: the frame path goes on.
+    // An index stream whose rows claim 128 TiB each: the frame path goes on.
     let bomb = pdf_xref_stream_with(
         &zlib_zeros(64),
-        "/DecodeParms << /Predictor 2 /BitsPerComponent 16 /Colors 1 /Columns 2199023255552 >> ",
+        "/DecodeParms << /Predictor 2 /BitsPerComponent 16 /Colors 1 /Columns 70368744177664 >> ",
     );
     let diff = changed("pdf-predictor-frame", &icon_pdf(1), &bomb);
     assert!(diff.binary, "{diff:?}");
