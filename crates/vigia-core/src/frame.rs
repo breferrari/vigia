@@ -113,9 +113,12 @@ impl Taken {
     }
 }
 
+/// How many sizes the worker found the frame keeps, at most.
+const SIZES_KEPT: usize = 4096;
+
 /// Give each unsized side of `picture` the size `sizes` holds for its stamp,
 /// and say whether any was given.
-fn learned(sizes: &HashMap<u64, (u32, u32)>, picture: &mut crate::Picture) -> bool {
+fn apply_sizes(sizes: &HashMap<u64, (u32, u32)>, picture: &mut crate::Picture) -> bool {
     let mut given = false;
     for side in [picture.before.as_mut(), picture.after.as_mut()]
         .into_iter()
@@ -609,13 +612,13 @@ impl<'w> Frame<'w> {
     /// again.
     pub fn learn_size(&mut self, stamp: u64, width: u32, height: u32) {
         // Kept bounded: an old version's stamp is never asked for again.
-        if self.sizes.len() >= 4096 {
+        if self.sizes.len() >= SIZES_KEPT {
             self.sizes.clear();
         }
         self.sizes.insert(stamp, (width, height));
         for cached in self.cached.runs.iter_mut().flat_map(HashMap::values_mut) {
             if let Some(picture) = cached.diff.picture.as_mut()
-                && learned(&self.sizes, picture)
+                && apply_sizes(&self.sizes, picture)
             {
                 cached.derived = None;
             }
@@ -933,7 +936,7 @@ impl<'w> Frame<'w> {
         let diff = match computed {
             Ok(mut diff) => {
                 if let Some(picture) = diff.picture.as_mut() {
-                    learned(&self.sizes, picture);
+                    apply_sizes(&self.sizes, picture);
                 }
                 diff
             }

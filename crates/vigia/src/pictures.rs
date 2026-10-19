@@ -241,7 +241,7 @@ pub struct Built {
     /// The ids of its Kitty images, which the terminal holds until told to drop them.
     pub kitty: Vec<u32>,
     /// Which page of a PDF was drawn, and whether the page count changed.
-    pub page: Option<String>,
+    pub page_note: Option<String>,
     /// The sizes found for sides the frame path left unsized, by their stamp.
     pub sizes: Vec<(u64, u32, u32)>,
 }
@@ -250,7 +250,7 @@ impl Built {
     /// What the size line adds once the comparison is done.
     pub fn suffix(&self) -> Option<String> {
         let found = self.found();
-        match (&self.page, found) {
+        match (&self.page_note, found) {
             (Some(page), Some(found)) => Some(format!("{page} · {found}")),
             (page, found) => page.clone().or(found),
         }
@@ -476,8 +476,8 @@ pub struct Pictures {
     picker: Option<mpsc::Sender<Picker>>,
     /// How many images this cache's worker has decoded.
     decoded: Arc<AtomicU64>,
-    /// Sizes the worker found since [`Pictures::learned`] last took them.
-    learned: Vec<(u64, u32, u32)>,
+    /// Sizes the worker found since [`Pictures::found_sizes`] last took them.
+    found: Vec<(u64, u32, u32)>,
 }
 
 /// A Kitty image id no other picture, nor another pane on the same terminal,
@@ -522,7 +522,7 @@ fn undecoded() -> Built {
         verdict: Verdict::Undecoded,
         profiles_differ: false,
         kitty: Vec::new(),
-        page: None,
+        page_note: None,
         sizes: Vec::new(),
     }
 }
@@ -585,15 +585,15 @@ impl Pictures {
             tmux: false,
             picker: Some(picked),
             decoded,
-            learned: Vec::new(),
+            found: Vec::new(),
         }
     }
 
     /// The sizes the worker found for sides the frame path left unsized, by
     /// stamp, since the last call. The frame takes them with
     /// [`vigia_core::Frame::learn_size`].
-    pub fn learned(&mut self) -> Vec<(u64, u32, u32)> {
-        std::mem::take(&mut self.learned)
+    pub fn found_sizes(&mut self) -> Vec<(u64, u32, u32)> {
+        std::mem::take(&mut self.found)
     }
 
     /// How many images this cache's worker has decoded, every picture it has
@@ -647,7 +647,7 @@ impl Pictures {
         while let Ok((key, built)) = self.done.try_recv() {
             self.pending.remove(&key);
             if let Some(built) = built {
-                self.learned.extend(&built.sizes);
+                self.found.extend(&built.sizes);
                 self.built.insert(key, Ready(Arc::new(built)));
             }
         }
@@ -1153,14 +1153,15 @@ fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>)> {
 /// the long side: 1.4 MiB at 1024 pixels. Measured, a page from 3 to 20 MB
 /// of content takes 0.29 to 0.51 seconds on the worker.
 const PDF_BUDGET: f64 = 1.4 * 1024.0 * 1024.0 * 1024.0;
-/// The most objects one page's resources are read through to fingerprint it.
-const PDF_OBJECTS: usize = 10_000;
+/// The most objects one page may reach before it is refused: the walk that
+/// fingerprints it reads each.
+const PDF_OBJECTS: usize = 100_000;
 /// The most one page's content and images may decode to, together, before
 /// it is refused.
 const PDF_DECODED: u64 = 256 * 1024 * 1024;
 
-/// Each content stream of `page`, decoded one at a time, with `budget`
-/// spent on each; `None` once the budget is spent.
+/// Each content stream of `page`, decoded one at a time, its length taken
+/// from the one `budget`; `None` once the budget is spent.
 fn page_contents<'a>(
     page: &hayro::hayro_syntax::page::Page<'a>,
     budget: &mut usize,
@@ -1225,8 +1226,12 @@ fn walk<'a>(
         match value {
             MaybeRef::Ref(reference) => {
                 let id = (reference.obj_number, reference.gen_number);
-                if seen.len() > PDF_OBJECTS || !seen.insert(id) {
+                if !seen.insert(id) {
                     return meet(Met::Again(id.0, id.1));
+                }
+                // Past it, a change could go unread, so the page is refused.
+                if seen.len() > PDF_OBJECTS {
+                    return None;
                 }
                 match xref.get::<Object<'a>>(reference.into()) {
                     Some(object) => walk(object, xref, seen, meet),
@@ -1837,7 +1842,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         verdict,
         profiles_differ,
         kitty,
-        page,
+        page_note: page,
         sizes: Vec::new(),
     }
 }
@@ -2453,7 +2458,7 @@ mod tests {
             verdict,
             profiles_differ,
             kitty: Vec::new(),
-            page: None,
+            page_note: None,
             sizes: Vec::new(),
         };
         assert_eq!(

@@ -128,9 +128,12 @@ pub(crate) fn pdf_unsized(bytes: u64) -> ImageSide {
     }
 }
 
+/// How far into a file a PDF's `%PDF-` may start.
+pub(crate) const PDF_HEAD: usize = 1024;
+
 /// Whether `head`, a file's first bytes, starts a PDF.
 pub(crate) fn pdf_headed(head: &[u8]) -> bool {
-    head[..head.len().min(1024)]
+    head[..head.len().min(PDF_HEAD)]
         .windows(5)
         .any(|w| w == b"%PDF-")
 }
@@ -173,9 +176,7 @@ fn pdf_size(bytes: Vec<u8>) -> Option<(u32, u32)> {
     crate::armed(crate::Stage::Header);
     let pdf = hayro_syntax::Pdf::new(std::sync::Arc::new(bytes)).ok()?;
     let (width, height) = pdf.pages().first()?.render_dimensions();
-    let side = |length: f32| {
-        (length.is_finite() && length > 0.0).then(|| length.ceil().min(u32::MAX as f32) as u32)
-    };
+    let side = |length: f32| (length.is_finite() && length > 0.0).then(|| length.ceil() as u32);
     Some((side(width)?, side(height)?))
 }
 

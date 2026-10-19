@@ -3487,9 +3487,9 @@ fn pdf_frame_read() {
         .iter()
         .filter(|row| matches!(row, Row::Sized { .. }))
         .count();
-    assert!(
-        sized >= 1,
-        "no PDF drew a size line, so this would time nothing"
+    assert_eq!(
+        sized, 5,
+        "not every PDF drew a size line, so this would time less"
     );
     eprintln!("note: the first frame with {sized} changed 16 MiB PDFs on screen took {cold:?}");
     // Read once more when they settle, as every file read inside the margin is.

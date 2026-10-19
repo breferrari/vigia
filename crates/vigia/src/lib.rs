@@ -2168,7 +2168,7 @@ impl Shell {
                 self.screen = view;
                 self.pictures.attach(&mut self.screen.rows, frame);
                 // A size the worker found lays its file out again, in this frame.
-                let learned = self.pictures.learned();
+                let learned = self.pictures.found_sizes();
                 if !learned.is_empty() {
                     for (stamp, width, height) in learned {
                         frame.learn_size(stamp, width, height);

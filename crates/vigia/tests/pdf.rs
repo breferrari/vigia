@@ -100,7 +100,7 @@ fn drawn(name: &str, old: Option<&[u8]>, new: &[u8]) -> Drawn {
             "the pictures were not built"
         );
         let view = view_of(&mut app, &mut pictures, &mut frame);
-        let sizes = pictures.learned();
+        let sizes = pictures.found_sizes();
         if sizes.is_empty() {
             break view;
         }
@@ -276,6 +276,11 @@ fn pdf_other_aspect_rows() {
             .as_deref()
             .is_some_and(|said| said.starts_with("page 3 of 3")),
         "{drawn:?}"
+    );
+    // Fitted into the first page's shape, 1024 tall by 512 wide.
+    assert!(
+        matches!(drawn.verdict, Some(Verdict::Changed { total, .. }) if total == 512 * 1024),
+        "the changed page was not fitted into the first page's shape: {drawn:?}"
     );
 }
 

@@ -792,7 +792,7 @@ mod tests {
                     .view(&mut frame, &mut highlighter, &history, body)
                     .expect("view");
                 pictures.attach(&mut drawn.rows, &frame);
-                let sizes = pictures.learned();
+                let sizes = pictures.found_sizes();
                 if sizes.is_empty() {
                     break drawn;
                 }

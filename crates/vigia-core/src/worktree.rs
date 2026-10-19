@@ -876,7 +876,7 @@ impl Worktree {
                     let mut head = Vec::new();
                     std::fs::File::open(&path)
                         .ok()?
-                        .take(1024)
+                        .take(picture::PDF_HEAD as u64)
                         .read_to_end(&mut head)
                         .ok()?;
                     *cost += head.len() as u64;
