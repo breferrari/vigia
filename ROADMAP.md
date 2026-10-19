@@ -325,7 +325,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 |---|---|---|
 | 🔨 | A changed image draws pictures instead of the word binary. **Split into the rows below** | [#632](https://github.com/breferrari/vigia/issues/632) |
 | ✅ | Image size line | [#633](https://github.com/breferrari/vigia/issues/633) |
-| 🔨 | Half-block image panels | [#634](https://github.com/breferrari/vigia/issues/634) |
+| ✅ | Half-block image panels | [#634](https://github.com/breferrari/vigia/issues/634) |
 | ⬜ | Real-pixel image protocols | [#635](https://github.com/breferrari/vigia/issues/635) |
 | ⬜ | SVG image panels | [#637](https://github.com/breferrari/vigia/issues/637) |
 | ⬜ | PDF image panels | [#638](https://github.com/breferrari/vigia/issues/638) |
