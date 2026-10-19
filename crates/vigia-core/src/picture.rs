@@ -109,6 +109,8 @@ pub(crate) fn svg_named(path: &str) -> bool {
 /// One SVG side from the start of its document, which is `bytes` long: its
 /// size from the root tag, or `None`.
 pub(crate) fn svg_side(head: &[u8], bytes: u64) -> Option<ImageSide> {
+    // A blob arrives whole, and reads as far as a worktree side does.
+    let head = &head[..head.len().min(SVG_HEAD as usize)];
     // A document an agent wrote must not be able to close the pane.
     let (width, height) = crate::caught(|| svg_size(head)).flatten()?;
     Some(ImageSide {
@@ -136,30 +138,32 @@ fn svg_size(head: &[u8]) -> Option<(u32, u32)> {
             .find(|(key, _)| *key == name)
             .map(|(_, value)| *value)
     };
-    let pixels = |name: &str| {
-        let length: svgtypes::Length = value(name)?.parse().ok()?;
-        matches!(
-            length.unit,
-            svgtypes::LengthUnit::None | svgtypes::LengthUnit::Px
-        )
-        .then_some(length.number)
+    let view: Option<svgtypes::ViewBox> = value("viewBox").and_then(|view| view.parse().ok());
+    // As usvg sizes it: a percentage, or a missing side, is a share of the view
+    // box. Units other than pixels take the view box's side.
+    let length = |name: &str, of: Option<f64>| -> Option<f64> {
+        let Some(given) = value(name) else {
+            return of;
+        };
+        match given.parse::<svgtypes::Length>().ok()? {
+            svgtypes::Length {
+                number,
+                unit: svgtypes::LengthUnit::None | svgtypes::LengthUnit::Px,
+            } => Some(number),
+            svgtypes::Length {
+                number,
+                unit: svgtypes::LengthUnit::Percent,
+            } => Some(of? * number / 100.0),
+            _ => of,
+        }
     };
-    let view = || -> Option<svgtypes::ViewBox> { value("viewBox")?.parse().ok() };
-    // As usvg sizes it: one side given, the other from the view box's aspect.
-    let (width, height) = match (pixels("width"), pixels("height")) {
-        (Some(width), Some(height)) => (width, height),
-        (Some(width), None) => {
-            let view = view()?;
-            (width, width * view.h / view.w)
-        }
-        (None, Some(height)) => {
-            let view = view()?;
-            (height * view.w / view.h, height)
-        }
-        (None, None) => {
-            let view = view()?;
-            (view.w, view.h)
-        }
+    let width = length("width", view.map(|view| view.w))?;
+    let height = length("height", view.map(|view| view.h))?;
+    // One side given and the other missing: the other from the view box's aspect.
+    let (width, height) = match (view, value("width"), value("height")) {
+        (Some(view), Some(_), None) => (width, width * view.h / view.w),
+        (Some(view), None, Some(_)) => (height * view.w / view.h, height),
+        _ => (width, height),
     };
     let side = |length: f64| {
         (length.is_finite() && length > 0.0).then(|| length.ceil().min(f64::from(u32::MAX)) as u32)

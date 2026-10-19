@@ -70,6 +70,14 @@ fn svg_size_line() {
             r#"<svg xmlns="http://www.w3.org/2000/svg" height="10" viewBox="0 0 30 15">"#,
             (20, 10),
         ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="50%" viewBox="0 0 10 30">"#,
+            (5, 15),
+        ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="50%" viewBox="0 0 10 30">"#,
+            (40, 15),
+        ),
     ] {
         let diff = changed("svg-size", &icon(root, "red"), &icon(root, "blue"));
         let side = Some((Format::Svg, want.0, want.1));
@@ -238,9 +246,9 @@ fn svg_rename_drawn() {
 fn svg_no_pictures_text() {
     let root = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#;
     let scratch = Scratch::new("svg-no-pictures");
-    scratch.write("icon.svg", &icon(root, "red"));
+    scratch.write("icon.svg", icon(root, "red"));
     scratch.commit_all("initial");
-    scratch.write("icon.svg", &icon(root, "blue"));
+    scratch.write("icon.svg", icon(root, "blue"));
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     // Settled, so the drawn diff is cached and the switch has to drop it.
@@ -261,5 +269,20 @@ fn svg_no_pictures_text() {
         drawn(&mut frame),
         (true, true, 0),
         "the SVG was not drawn again"
+    );
+}
+
+#[test]
+fn svg_blob_head_only() {
+    let root = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#;
+    let late = format!("<!--{}-->{}", "x".repeat(70 * 1024), icon(root, "red"));
+    let scratch = Scratch::new("svg-blob-head");
+    scratch.write("icon.svg", &late);
+    scratch.commit_all("initial");
+    std::fs::remove_file(scratch.path_of("icon.svg")).expect("remove");
+    let diff = diff_of(&scratch, "icon.svg");
+    assert!(
+        diff.picture.is_none(),
+        "a committed SVG was sized from past the head a worktree side reads"
     );
 }
