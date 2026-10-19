@@ -480,8 +480,8 @@ pub fn lzw_zeros(length: u64) -> Vec<u8> {
     };
     let width = |size: u64| match size + 1 {
         ..512 => 9,
-        ..1024 => 10,
-        ..2048 => 11,
+        512..1024 => 10,
+        1024..2048 => 11,
         _ => 12,
     };
     let mut written = 0;
@@ -503,7 +503,7 @@ pub fn lzw_zeros(length: u64) -> Vec<u8> {
     out
 }
 
-/// `length` zeros, rounded up to whole runs, as RunLength: 128 a run.
+/// `length` zeros, rounded up to whole runs, as `RunLength`: 128 a run.
 pub fn run_length_zeros(length: u64) -> Vec<u8> {
     let mut out = [129u8, 0].repeat(length.div_ceil(128) as usize);
     out.push(128);
