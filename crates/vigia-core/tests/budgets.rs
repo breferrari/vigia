@@ -1247,7 +1247,7 @@ fn lfs_compare_holds_the_frame() {
     let cold = |scratch: &Scratch, compares: u64| {
         let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
         let mut frame = worktree.frame();
-        let took = time(|| frame.advance().expect("advance"));
+        let took = time_cpu(|| frame.advance().expect("advance"));
         assert!(
             frame.files().is_empty(),
             "a 16 MiB LFS file equal to its object was listed"
@@ -1267,8 +1267,8 @@ fn lfs_compare_holds_the_frame() {
     }
     let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
     for _ in 0..LFS_FRAMES {
-        with.push(cold(&compared, 1));
-        without.push(cold(&plain, 0));
+        with.push(cold(&compared, 1).0);
+        without.push(cold(&plain, 0).0);
     }
     let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
     eprintln!(
@@ -1278,10 +1278,11 @@ fn lfs_compare_holds_the_frame() {
         at(&without, 0.5),
         at(&without, 0.99)
     );
-    assert!(
-        at(&with, 0.99) <= budget(I9_FRAME),
-        "I9: a cold frame comparing a 16 MiB LFS file took p99 {:?}, over {:?}",
-        at(&with, 0.99),
-        budget(I9_FRAME)
+    holds_p99(
+        "I9: a cold frame comparing a 16 MiB LFS file with its object",
+        budget(I9_FRAME),
+        &with,
+        String::new,
+        || cold(&compared, 1),
     );
 }
