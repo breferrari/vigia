@@ -3287,28 +3287,16 @@ fn arrival_holds_the_budget() {
 /// I9 with a changed image's pictures on screen: a settled frame repaints the
 /// built panels and decodes nothing. `SPEC.md` §11.1.
 #[test]
-fn a_frame_with_pictures_holds_the_frame_budget() {
+fn pictures_frame_budget() {
     use vigia::pictures::{self, Inks, Pictures};
 
     let scratch = Scratch::new("i9-pictures");
-    let screen = |accent: u8| {
-        image::RgbaImage::from_fn(1170, 2532, |x, y| {
-            image::Rgba([accent, (x % 251) as u8, (y % 241) as u8, 255])
-        })
-    };
-    let encoded = |image: &image::RgbaImage| {
-        let mut bytes = std::io::Cursor::new(Vec::new());
-        image
-            .write_to(&mut bytes, image::ImageFormat::Png)
-            .expect("encode");
-        bytes.into_inner()
-    };
-    scratch.write("a/screen.png", encoded(&screen(10)));
+    scratch.write("a/screen.png", support::screen_png(10));
     for file in 0..20 {
         scratch.write(&format!("b/file_{file}.rs"), support::numbered_lines(200));
     }
     scratch.commit_all("baseline");
-    scratch.write("a/screen.png", encoded(&screen(200)));
+    scratch.write("a/screen.png", support::screen_png(200));
     for file in 0..20 {
         scratch.edit_line(&format!("b/file_{file}.rs"), 5, "fn changed() {}");
     }

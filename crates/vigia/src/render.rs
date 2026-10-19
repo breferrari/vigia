@@ -4746,7 +4746,6 @@ impl Painter<'_> {
         );
     }
 
-    /// Draw the body: the pinned list, the rule and the diff.
     /// A built picture's panels in `area`, `part` rows of them above its top, and
     /// the bar of an added or deleted image in its first column.
     fn picture(
@@ -4783,6 +4782,7 @@ impl Painter<'_> {
         }
     }
 
+    /// Draw the body: the pinned list, the rule and the diff.
     fn body(&mut self, area: Rect, view: &View, pane: Rect, empty: &str) {
         // `line_row` paints the left bar in `self.inset` and `content_span` insets
         // from the pane, so a painter built for another pane bars the wrong column.
@@ -4961,12 +4961,12 @@ impl Painter<'_> {
                     key, part, ready, ..
                 } => {
                     let first = offset == 0
-                        || !matches!(&view.rows[offset - 1], Row::Picture { key: above, .. } if above == key);
+                        || !matches!(&view.rows[offset - 1], Row::Picture { key: above, .. } if std::sync::Arc::ptr_eq(above, key));
                     if first && let Some(ready) = ready {
                         let rows = view.rows[offset..shown.min(view.rows.len())]
                             .iter()
                             .take_while(
-                                |row| matches!(row, Row::Picture { key: own, .. } if own == key),
+                                |row| matches!(row, Row::Picture { key: own, .. } if std::sync::Arc::ptr_eq(own, key)),
                             )
                             .count();
                         self.picture(

@@ -308,8 +308,8 @@ pub enum Row {
         file: usize,
         /// Both sides, as the core read them.
         picture: vigia_core::Picture,
-        /// What names the pictures.
-        key: crate::pictures::Key,
+        /// What names the pictures, shared by all their rows.
+        key: std::sync::Arc<crate::pictures::Key>,
         /// The pictures, once the shell has them built.
         ready: Option<crate::pictures::Ready>,
     },
@@ -321,8 +321,8 @@ pub enum Row {
         file: usize,
         /// Both sides, as the core read them.
         picture: vigia_core::Picture,
-        /// What names the pictures.
-        key: crate::pictures::Key,
+        /// What names the pictures, shared by all their rows.
+        key: std::sync::Arc<crate::pictures::Key>,
         /// Which row of the pictures this is, from their top.
         part: u16,
         /// The pictures, once the shell has them built.
@@ -1547,8 +1547,6 @@ fn gap_rows(index: usize, files: usize) -> usize {
     usize::from(index + 1 < files)
 }
 
-/// Rows the block of the file at `index` occupies: the file's own rows and the
-/// blank that closes it.
 /// Display rows a changed image's pictures take under its size line in `room`.
 fn picture_rows(kind: &ChangeKind, diff: &FileDiff, room: Option<(u16, u16)>) -> usize {
     match (room, &diff.picture) {
@@ -1560,6 +1558,8 @@ fn picture_rows(kind: &ChangeKind, diff: &FileDiff, room: Option<(u16, u16)>) ->
     }
 }
 
+/// Rows the block of the file at `index` occupies: the file's own rows and the
+/// blank that closes it.
 fn block_of(kind: &ChangeKind, diff: &FileDiff, index: usize, files: usize) -> usize {
     span_of(kind, diff) + gap_rows(index, files)
 }
@@ -2956,7 +2956,9 @@ impl View {
                     });
                     match shaped {
                         Some((picture, shape)) => {
-                            let key = crate::pictures::Key::of(&diff.path, &picture, shape);
+                            let key = std::sync::Arc::new(crate::pictures::Key::of(
+                                &diff.path, &picture, shape,
+                            ));
                             hung.push(Hung {
                                 row: self.rows.len(),
                                 rows: usize::from(key.shape.rows),
@@ -3087,7 +3089,7 @@ struct Hung {
     /// Both sides, as the core read them.
     picture: vigia_core::Picture,
     /// What names them.
-    key: crate::pictures::Key,
+    key: std::sync::Arc<crate::pictures::Key>,
 }
 
 /// Where a note landed: the logical row of its last line, the word it carries

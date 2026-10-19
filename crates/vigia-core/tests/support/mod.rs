@@ -1271,21 +1271,33 @@ impl Scratch {
     }
 }
 
-/// An image of `width` by `height` in `format`, every pixel from `seed`.
-pub fn encoded(format: image::ImageFormat, width: u32, height: u32, seed: u8) -> Vec<u8> {
-    let image = image::RgbaImage::from_fn(width, height, |x, y| {
-        image::Rgba([seed, (x % 256) as u8, (y % 256) as u8, 255])
-    });
+/// `image` encoded as `format`. JPEG has no alpha channel to encode.
+pub fn encode_image(image: &image::RgbaImage, format: image::ImageFormat) -> Vec<u8> {
     let mut bytes = std::io::Cursor::new(Vec::new());
     match format {
-        // JPEG has no alpha channel to encode.
-        image::ImageFormat::Jpeg => image::DynamicImage::ImageRgba8(image)
+        image::ImageFormat::Jpeg => image::DynamicImage::ImageRgba8(image.clone())
             .to_rgb8()
             .write_to(&mut bytes, format),
         _ => image.write_to(&mut bytes, format),
     }
     .expect("encode the fixture");
     bytes.into_inner()
+}
+
+/// An image of `width` by `height` in `format`, every pixel from `seed`.
+pub fn encoded(format: image::ImageFormat, width: u32, height: u32, seed: u8) -> Vec<u8> {
+    let image = image::RgbaImage::from_fn(width, height, |x, y| {
+        image::Rgba([seed, (x % 256) as u8, (y % 256) as u8, 255])
+    });
+    encode_image(&image, format)
+}
+
+/// A phone-sized screenshot as a PNG, its colours from `accent`.
+pub fn screen_png(accent: u8) -> Vec<u8> {
+    let image = image::RgbaImage::from_fn(1170, 2532, |x, y| {
+        image::Rgba([accent, (x % 251) as u8, (y % 241) as u8, 255])
+    });
+    encode_image(&image, image::ImageFormat::Png)
 }
 
 pub fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {

@@ -144,9 +144,7 @@ fn sized(view: &View) -> Option<(String, Option<String>, Kind, usize)> {
 }
 
 fn encode(image: &RgbaImage, format: ImageFormat) -> Vec<u8> {
-    let mut bytes = Cursor::new(Vec::new());
-    image.write_to(&mut bytes, format).expect("encode");
-    bytes.into_inner()
+    support::encode_image(image, format)
 }
 
 /// A screen-like picture: bands of colour and a box in the middle.

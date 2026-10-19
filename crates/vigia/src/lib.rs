@@ -384,22 +384,13 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Before the terminal is taken, which is the whole point of it being here.
     let armed = signal::forward(tx.clone());
 
-    // What a transparent pixel shows and the mask dims toward: the pane, as the
-    // terminal said it is, or as dark or light as it said.
-    let canvas = colours.as_ref().map_or_else(
-        || match terminal::background_of(&reply) {
-            Some(Background::Light) => (255, 255, 255),
-            _ => (0, 0, 0),
-        },
-        |colours| colours.background,
-    );
-    let changed = match theme.removed_bar.bg {
-        Some(ratatui::style::Color::Rgb(r, g, b)) => (r, g, b),
-        _ => (0xf8, 0x51, 0x49),
-    };
     let pictured = tx.clone();
     let pictures = pictures::Pictures::new(
-        pictures::Inks { canvas, changed },
+        pictures::Inks::of(
+            &theme,
+            colours.as_ref().map(|colours| colours.background),
+            terminal::background_of(&reply) == Some(Background::Light),
+        ),
         Box::new(move || {
             let _ = pictured.send(Wake::Pictured);
         }),

@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 
 use image::{DynamicImage, ImageFormat, Rgb, RgbImage, RgbaImage};
 use ratatui::layout::Size;
@@ -231,9 +231,22 @@ pub struct Inks {
     pub changed: (u8, u8, u8),
 }
 
+impl Inks {
+    /// The pane's colour as the terminal said it is, or as dark or light as it
+    /// said, and the theme's removed bar.
+    pub fn of(theme: &crate::Theme, pane: Option<(u8, u8, u8)>, light: bool) -> Self {
+        let canvas = pane.unwrap_or(if light { (255, 255, 255) } else { (0, 0, 0) });
+        let changed = match theme.removed_bar.bg {
+            Some(ratatui::style::Color::Rgb(r, g, b)) => (r, g, b),
+            _ => (0xf8, 0x51, 0x49),
+        };
+        Self { canvas, changed }
+    }
+}
+
 /// One picture to build.
 struct Job {
-    key: Key,
+    key: Arc<Key>,
     sources: Sources,
     formats: (Option<Format>, Option<Format>),
 }
@@ -241,10 +254,14 @@ struct Job {
 /// Built pictures, kept while their image is on screen, and the worker that
 /// builds them.
 pub struct Pictures {
-    built: HashMap<Key, Ready>,
-    pending: HashSet<Key>,
+    built: HashMap<Arc<Key>, Ready>,
+    pending: HashSet<Arc<Key>>,
+    /// What is on screen, shared with the worker so it skips a job scrolled away
+    /// before its turn.
+    shown: Arc<Mutex<HashSet<Arc<Key>>>>,
     jobs: mpsc::Sender<Job>,
-    done: mpsc::Receiver<(Key, Option<Built>)>,
+    /// Each finished job, with `None` for one skipped.
+    done: mpsc::Receiver<(Arc<Key>, Option<Built>)>,
 }
 
 /// Pictures decoded since the process started, on any thread.
@@ -265,17 +282,34 @@ pub fn decodes_off_worker() -> u64 {
     OFF_WORKER.load(Ordering::Relaxed)
 }
 
+/// What stands in for a picture that will not be drawn.
+fn undecoded() -> Built {
+    Built {
+        panels: Vec::new(),
+        verdict: Verdict::Undecoded,
+        profiles_differ: false,
+    }
+}
+
 impl Pictures {
     /// A cache whose worker builds in `inks` and calls `wake` after each picture.
     pub fn new(inks: Inks, wake: Box<dyn Fn() + Send>) -> Self {
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel();
+        let shown = Arc::new(Mutex::new(HashSet::new()));
+        let still = Arc::clone(&shown);
         // Detached: it ends when the cache, and with it the sender, is dropped.
         let _ = std::thread::Builder::new()
             .name(WORKER.to_owned())
             .spawn(move || {
                 for job in inbox {
-                    let built = build(&job, inks);
+                    let wanted = still.lock().map_or(
+                        true,
+                        |shown: std::sync::MutexGuard<'_, HashSet<Arc<Key>>>| {
+                            shown.contains(&job.key)
+                        },
+                    );
+                    let built = wanted.then(|| build(&job, inks));
                     if outbox.send((job.key, built)).is_err() {
                         break;
                     }
@@ -285,46 +319,20 @@ impl Pictures {
         Self {
             built: HashMap::new(),
             pending: HashSet::new(),
+            shown,
             jobs,
             done,
         }
     }
 
     /// Take in what the worker finished since the last call.
-    pub fn collect(&mut self) {
+    fn collect(&mut self) {
         while let Ok((key, built)) = self.done.try_recv() {
             self.pending.remove(&key);
-            let built = built.unwrap_or(Built {
-                panels: Vec::new(),
-                verdict: Verdict::Undecoded,
-                profiles_differ: false,
-            });
-            self.built.insert(key, Ready(Arc::new(built)));
+            if let Some(built) = built {
+                self.built.insert(key, Ready(Arc::new(built)));
+            }
         }
-    }
-
-    /// Drop every picture whose key is not in `shown`.
-    pub fn keep(&mut self, shown: &HashSet<Key>) {
-        self.built.retain(|key, _| shown.contains(key));
-    }
-
-    /// Whether `key` is neither built, being built, nor known to fail.
-    pub fn wants(&self, key: &Key) -> bool {
-        !self.built.contains_key(key) && !self.pending.contains(key)
-    }
-
-    /// Build `key` from `sources` on the worker.
-    pub fn queue(&mut self, key: Key, sources: Sources, picture: &Picture) {
-        let formats = (
-            picture.before.map(|side| side.format),
-            picture.after.map(|side| side.format),
-        );
-        self.pending.insert(key.clone());
-        let _ = self.jobs.send(Job {
-            key,
-            sources,
-            formats,
-        });
     }
 
     /// The built picture for `key`, if it is ready.
@@ -342,14 +350,8 @@ impl Pictures {
     /// rows. Only images on screen are ever read past their header.
     pub fn attach(&mut self, rows: &mut [Row], frame: &vigia_core::Frame<'_>) {
         self.collect();
-        let shown: HashSet<Key> = rows
-            .iter()
-            .filter_map(|row| match row {
-                Row::Sized { key, .. } | Row::Picture { key, .. } => Some(key.clone()),
-                _ => None,
-            })
-            .collect();
-        self.keep(&shown);
+        // One entry per picture: its rows share one key, side by side.
+        let mut hung: Vec<(&Arc<Key>, usize, &Picture)> = Vec::new();
         for row in rows.iter() {
             if let Row::Sized {
                 key, file, picture, ..
@@ -357,11 +359,42 @@ impl Pictures {
             | Row::Picture {
                 key, file, picture, ..
             } = row
-                && self.wants(key)
-                && let Ok(sources) = frame.image_sources(*file)
+                && hung
+                    .last()
+                    .is_none_or(|(last, _, _)| !Arc::ptr_eq(last, key))
             {
-                self.queue(key.clone(), sources, picture);
+                hung.push((key, *file, picture));
             }
+        }
+        let shown: HashSet<Arc<Key>> = hung.iter().map(|(key, _, _)| Arc::clone(key)).collect();
+        self.built.retain(|key, _| shown.contains(key));
+        for (key, file, picture) in hung {
+            if self.built.contains_key(&**key) || self.pending.contains(&**key) {
+                continue;
+            }
+            match frame.image_sources(file) {
+                Ok(sources) => {
+                    let formats = (
+                        picture.before.map(|side| side.format),
+                        picture.after.map(|side| side.format),
+                    );
+                    self.pending.insert(Arc::clone(key));
+                    let _ = self.jobs.send(Job {
+                        key: Arc::clone(key),
+                        sources,
+                        formats,
+                    });
+                }
+                // Remembered, so a side that cannot be read is not read again
+                // every frame.
+                Err(_) => {
+                    self.built
+                        .insert(Arc::clone(key), Ready(Arc::new(undecoded())));
+                }
+            }
+        }
+        if let Ok(mut on_screen) = self.shown.lock() {
+            *on_screen = shown;
         }
         for row in rows.iter_mut() {
             if let Row::Sized { key, ready, .. } | Row::Picture { key, ready, .. } = row {
@@ -413,8 +446,13 @@ fn image_format(format: Format) -> ImageFormat {
     }
 }
 
-/// One side decoded: its pixels and its colour profile. The first frame only.
-fn decode(source: &Source, format: Format) -> Option<(RgbaImage, Option<Vec<u8>>)> {
+/// One side decoded and laid over the pane, with its colour profile. The first
+/// frame only.
+fn decode(
+    source: &Source,
+    format: Format,
+    canvas: (u8, u8, u8),
+) -> Option<(RgbImage, Option<Vec<u8>>)> {
     use image::ImageDecoder;
     let bytes = match source {
         Source::Bytes(bytes) => std::borrow::Cow::Borrowed(bytes.as_slice()),
@@ -433,21 +471,13 @@ fn decode(source: &Source, format: Format) -> Option<(RgbaImage, Option<Vec<u8>>
     reader.limits(limits);
     let mut decoder = reader.into_decoder().ok()?;
     let profile = decoder.icc_profile().ok().flatten();
-    let image = DynamicImage::from_decoder(decoder).ok()?;
-    Some((image.to_rgba8(), profile))
-}
-
-/// `image` over the pane, so a transparent pixel shows what is behind it.
-fn flatten(image: &RgbaImage, canvas: (u8, u8, u8)) -> RgbImage {
+    let image = DynamicImage::from_decoder(decoder).ok()?.to_rgba8();
+    // Over the pane, so a transparent pixel shows what is behind it.
     let (r, g, b) = canvas;
-    RgbImage::from_fn(image.width(), image.height(), |x, y| {
-        let [pr, pg, pb, alpha] = image.get_pixel(x, y).0;
-        let over = |p: u8, c: u8| {
-            let a = u16::from(alpha);
-            ((u16::from(p) * a + u16::from(c) * (255 - a)) / 255) as u8
-        };
-        Rgb([over(pr, r), over(pg, g), over(pb, b)])
-    })
+    let mut flat =
+        RgbaImage::from_pixel(image.width(), image.height(), image::Rgba([r, g, b, 255]));
+    image::imageops::overlay(&mut flat, &image, 0, 0);
+    Some((DynamicImage::ImageRgba8(flat).to_rgb8(), profile))
 }
 
 /// pixelmatch's colour distance, squared, in YIQ; 35215 is its largest.
@@ -471,48 +501,26 @@ const THRESHOLD: f32 = 0.1 * 0.1 * 35_215.0;
 fn changed(old: &RgbImage, new: &RgbImage) -> Vec<bool> {
     old.pixels()
         .zip(new.pixels())
-        .map(|(a, b)| distance(*a, *b) > THRESHOLD)
+        .map(|(a, b)| a != b && distance(*a, *b) > THRESHOLD)
         .collect()
 }
 
-/// `image` shrunk to `width` by `height` pixels, each one the average of the
-/// pixels under it, with `mask` marking a pixel when any pixel under it is set.
-fn pool(image: &RgbImage, mask: Option<&[bool]>, width: u32, height: u32) -> (RgbImage, Vec<bool>) {
-    let (iw, ih) = image.dimensions();
-    let mut out = RgbImage::new(width, height);
-    let mut hit = vec![false; (width * height) as usize];
-    for gy in 0..height {
-        let (y0, y1) = (
-            gy * ih / height,
-            ((gy + 1) * ih / height).max(gy * ih / height + 1).min(ih),
-        );
-        for gx in 0..width {
-            let (x0, x1) = (
-                gx * iw / width,
-                ((gx + 1) * iw / width).max(gx * iw / width + 1).min(iw),
-            );
-            let mut sum = [0u64; 3];
-            let mut any = false;
-            for y in y0..y1 {
-                for x in x0..x1 {
-                    let p = image.get_pixel(x, y).0;
-                    for c in 0..3 {
-                        sum[c] += u64::from(p[c]);
-                    }
-                    if let Some(mask) = mask {
-                        any |= mask[(y * iw + x) as usize];
-                    }
-                }
+/// `mask`, of an image `width` by `height`, shrunk to `to_width` by `to_height`:
+/// a pixel is set when any pixel under it is.
+fn lit(mask: &[bool], (width, height): (u32, u32), (to_width, to_height): (u32, u32)) -> Vec<bool> {
+    let mut out = vec![false; (to_width * to_height) as usize];
+    for y in 0..height {
+        let row = (y * to_height / height) * to_width;
+        for x in 0..width {
+            if mask[(y * width + x) as usize] {
+                out[(row + x * to_width / width) as usize] = true;
             }
-            let n = u64::from((y1 - y0) * (x1 - x0)).max(1);
-            out.put_pixel(gx, gy, Rgb(sum.map(|s| (s / n) as u8)));
-            hit[(gy * width + gx) as usize] = any;
         }
     }
-    (out, hit)
+    out
 }
 
-/// How a panel's pixels are painted from the pooled picture.
+/// How a panel's pixels are painted from the shrunk picture.
 #[derive(Clone, Copy)]
 enum Paint {
     /// As they are.
@@ -523,42 +531,41 @@ enum Paint {
     Mask,
 }
 
-/// One panel: `image` fitted into `slot` and painted, encoded as half-blocks.
+/// One panel: `image`, already shrunk to the slot's pixels, painted and encoded
+/// as half-blocks.
 fn panel(
-    image: &RgbImage,
-    mask: Option<&[bool]>,
+    mut image: RgbImage,
+    hit: Option<&[bool]>,
     slot: Slot,
     paint: Paint,
     inks: Inks,
 ) -> Option<SlicedProtocol> {
-    let (width, height) = (u32::from(slot.width), u32::from(slot.rows) * 2);
-    let (mut out, hit) = pool(image, mask, width, height);
     let (cr, cg, cb) = inks.canvas;
     let canvas = [cr, cg, cb].map(f32::from);
-    for (i, pixel) in out.pixels_mut().enumerate() {
+    // Toward the pane and away from it by lightness, hard enough that a light
+    // screen does not become a slab beside the changed ink.
+    let toward = if canvas.iter().sum::<f32>() > 382.0 {
+        -38.0
+    } else {
+        38.0
+    };
+    for (i, pixel) in image.pixels_mut().enumerate() {
         let p = pixel.0.map(f32::from);
         pixel.0 = match paint {
             Paint::Plain => pixel.0,
             Paint::Dim => [0, 1, 2].map(|c| (p[c] * 0.45 + canvas[c] * 0.55) as u8),
-            Paint::Mask if hit[i] => {
+            Paint::Mask if hit.is_some_and(|hit| hit[i]) => {
                 let (r, g, b) = inks.changed;
                 [r, g, b]
             }
             Paint::Mask => {
                 let light = (p[0] * 0.299 + p[1] * 0.587 + p[2] * 0.114) / 255.0;
-                // Toward the pane and away from it by its lightness, hard enough that
-                // a light screen does not become a slab beside the changed ink.
-                let toward = if canvas.iter().sum::<f32>() > 382.0 {
-                    -38.0
-                } else {
-                    38.0
-                };
                 canvas.map(|c| (c + light * toward).clamp(0.0, 255.0) as u8)
             }
         };
     }
     let halfblocks = Halfblocks::new(
-        DynamicImage::ImageRgb8(out),
+        DynamicImage::ImageRgb8(image),
         Size::new(slot.width, slot.rows),
     )
     .ok()?;
@@ -566,18 +573,21 @@ fn panel(
 }
 
 /// Build one picture: read and decode both sides, compare them, and encode each
-/// panel. `None` when a side does not decode.
-fn build(job: &Job, inks: Inks) -> Option<Built> {
+/// panel. A side that does not decode builds nothing to draw.
+fn build(job: &Job, inks: Inks) -> Built {
     let side = |source: &Option<Source>, format: Option<Format>| match (source, format) {
-        (Some(source), Some(format)) => decode(source, format).map(Some),
+        (Some(source), Some(format)) => decode(source, format, inks.canvas).map(Some),
         (None, None) => Some(None),
         _ => None,
     };
-    let old = side(&job.sources.before, job.formats.0)?;
-    let new = side(&job.sources.after, job.formats.1)?;
+    let (Some(old), Some(new)) = (
+        side(&job.sources.before, job.formats.0),
+        side(&job.sources.after, job.formats.1),
+    ) else {
+        return undecoded();
+    };
     let profiles_differ = matches!((&old, &new), (Some((_, a)), Some((_, b))) if a != b);
-    let old = old.map(|(image, _)| flatten(&image, inks.canvas));
-    let new = new.map(|(image, _)| flatten(&image, inks.canvas));
+    let (old, new) = (old.map(|(image, _)| image), new.map(|(image, _)| image));
     let mask = match (&old, &new) {
         (Some(old), Some(new)) if old.dimensions() == new.dimensions() => Some(changed(old, new)),
         _ => None,
@@ -592,34 +602,53 @@ fn build(job: &Job, inks: Inks) -> Option<Built> {
         },
         None => Verdict::Uncompared,
     };
-    let shape = &job.key.shape;
-    let paints: Vec<(&RgbImage, Paint)> = match shape.kind {
-        Kind::Three => vec![
-            (old.as_ref()?, Paint::Plain),
-            (new.as_ref()?, Paint::Plain),
-            (new.as_ref()?, Paint::Mask),
+    let paints: &[(bool, Paint)] = match job.key.shape.kind {
+        Kind::Three => &[
+            (false, Paint::Plain),
+            (true, Paint::Plain),
+            (true, Paint::Mask),
         ],
-        Kind::Mask => vec![(new.as_ref()?, Paint::Mask)],
-        Kind::Pair => vec![(old.as_ref()?, Paint::Plain), (new.as_ref()?, Paint::Plain)],
-        Kind::New | Kind::Added => vec![(new.as_ref()?, Paint::Plain)],
-        Kind::Deleted => vec![(old.as_ref()?, Paint::Dim)],
+        Kind::Mask => &[(true, Paint::Mask)],
+        Kind::Pair => &[(false, Paint::Plain), (true, Paint::Plain)],
+        Kind::New | Kind::Added => &[(true, Paint::Plain)],
+        Kind::Deleted => &[(false, Paint::Dim)],
     };
-    let panels = shape
-        .slots
-        .iter()
-        .zip(paints)
-        .map(|(&slot, (image, paint))| {
-            let mask = matches!(paint, Paint::Mask)
-                .then_some(())
-                .and(mask.as_deref());
-            panel(image, mask, slot, paint, inks).map(|protocol| (slot, protocol))
-        })
-        .collect::<Option<Vec<_>>>()?;
-    Some(Built {
+    // Each side shrunk once per panel size, so the new picture and its mask
+    // share one pass.
+    let mut shrunk: HashMap<(bool, u32, u32), RgbImage> = HashMap::new();
+    let mut panels = Vec::new();
+    for (&slot, &(newer, paint)) in job.key.shape.slots.iter().zip(paints) {
+        let Some(image) = (if newer { new.as_ref() } else { old.as_ref() }) else {
+            return undecoded();
+        };
+        let to = (u32::from(slot.width), u32::from(slot.rows) * 2);
+        let small = shrunk
+            .entry((newer, to.0, to.1))
+            .or_insert_with(|| {
+                // Averaged on the way down; kept sharp on the way up, so an icon
+                // smaller than its panel stays a picture of pixels.
+                let filter = if to.0 < image.width() {
+                    image::imageops::FilterType::Triangle
+                } else {
+                    image::imageops::FilterType::Nearest
+                };
+                image::imageops::resize(image, to.0, to.1, filter)
+            })
+            .clone();
+        let hit = match (paint, &mask) {
+            (Paint::Mask, Some(mask)) => Some(lit(mask, image.dimensions(), to)),
+            _ => None,
+        };
+        let Some(protocol) = panel(small, hit.as_deref(), slot, paint, inks) else {
+            return undecoded();
+        };
+        panels.push((slot, protocol));
+    }
+    Built {
         panels,
         verdict,
         profiles_differ,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -722,7 +751,7 @@ mod tests {
         let mut new = old.clone();
         new.put_pixel(503, 497, Rgb([0, 0, 0]));
         let mask = changed(&old, &new);
-        let (_, hit) = pool(&new, Some(&mask), 20, 20);
+        let hit = lit(&mask, new.dimensions(), (20, 20));
         assert_eq!(
             hit.iter().filter(|hit| **hit).count(),
             1,

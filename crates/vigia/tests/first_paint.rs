@@ -459,26 +459,14 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
 /// I7 with a changed PNG first: the first frame draws its size line and the
 /// rows held for its pictures, and decodes nothing. `SPEC.md` §11.1.
 #[test]
-fn a_png_first_paints_without_decoding() {
+fn png_first_paint() {
     use vigia::pictures::{self, Inks, Pictures};
 
     let scratch = Scratch::new("first-paint-png");
-    let screen = |accent: u8| {
-        image::RgbaImage::from_fn(1170, 2532, |x, y| {
-            image::Rgba([accent, (x % 251) as u8, (y % 241) as u8, 255])
-        })
-    };
-    let encoded = |image: &image::RgbaImage| {
-        let mut bytes = std::io::Cursor::new(Vec::new());
-        image
-            .write_to(&mut bytes, image::ImageFormat::Png)
-            .expect("encode");
-        bytes.into_inner()
-    };
-    scratch.write("a.png", encoded(&screen(10)));
+    scratch.write("a.png", support::screen_png(10));
     scratch.write("b.txt", support::numbered_lines(50));
     scratch.commit_all("baseline");
-    scratch.write("a.png", encoded(&screen(200)));
+    scratch.write("a.png", support::screen_png(200));
     scratch.write("b.txt", support::numbered_lines(60));
     let pane = Rect::new(0, 0, 120, 40);
 
@@ -515,7 +503,14 @@ fn a_png_first_paints_without_decoding() {
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
     pictures.attach(&mut view.rows, &frame);
-    render(&mut buf, pane, &view, &Theme::dark(), Glyphs::default(), &chrome);
+    render(
+        &mut buf,
+        pane,
+        &view,
+        &Theme::dark(),
+        Glyphs::default(),
+        &chrome,
+    );
     let first = began.elapsed();
 
     assert_eq!(
