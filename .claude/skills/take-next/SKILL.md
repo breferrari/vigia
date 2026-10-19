@@ -132,7 +132,7 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 ## 5. Scope the checks
 
 ```sh
-git diff --name-only <base>..HEAD | sh .github/scripts/change-class.sh | tail -1
+git diff --name-only --no-renames <base>..HEAD | sh .github/scripts/change-class.sh | tail -1
 ```
 
 `docs` means the diff is docs-only. Then skip the suite, the benches and the budget gates, and run the suites that CI's documents job runs: `cargo nextest run -p vigia --test package --test register --test sheet --test theme_docs` and `cargo nextest run -p vigia-core --test coverage`. Running cargo's code suites on a prose-only diff spends minutes and gives no signal. `full` is code. In the PR body, write which scope you chose.
@@ -174,9 +174,9 @@ gh run view <id> --json conclusion --jq .conclusion
 
 Watch the run, not `gh pr checks`. List only the runs that started after the ready call. The run of the draft has the same `headSha`, a green conclusion and no jobs run. If the list is empty, the ready run is not in the queue yet. List again. The `headSha` of the run must be the head of the PR. Use `conclusion` as the gate, because `gh run watch` can exit 0 on a failed run. After each fix push, watch the new run the same way.
 
-**A docs-only rebase merges without fresh CI.** A PR that was green on its previous head may merge right after a rebase with no fresh CI, if the rebase changed only `ROADMAP.md` or `CHANGELOG.md` and `git range-diff` shows its own commits otherwise unchanged. Then watch main's CI on the merge commit, and fix forward if it goes red. Ruled 2026-10-19, reader. User-facing: none.
+**After a rebase that changed only `ROADMAP.md` or `CHANGELOG.md`, with `git range-diff` showing the PR's own commits unchanged: no re-review and no local suites.** Merge as soon as `ci complete` is green on the new head. Ruled 2026-10-19, reader. User-facing: none.
 
-No external review is configured: read and answer any review comment a person left, then, once the post-ready run is green on the head or a docs-only rebase allows it, merge with `gh pr merge <n> --squash --delete-branch`. Ruled 2026-10-19, PO for the reader: Copilot review is off on his account. User-facing: none. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
+No external review is configured: read and answer any review comment a person left, then, once the post-ready run is green on the head, merge with `gh pr merge <n> --squash --delete-branch`. Ruled 2026-10-19, PO for the reader: Copilot review is off on his account. User-facing: none. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
 
 ## 8. Close the loop
 

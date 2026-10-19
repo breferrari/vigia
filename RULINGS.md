@@ -556,3 +556,11 @@ Ruled 2026-10-19, reader, relayed by the coordinator session. A picture whose de
 
 **What unwinding costs, measured 2026-10-19 on cbece20, release, macOS aarch64:** 14,553,056 bytes against 16,976,000, +2,422,944 (+16.6%). User-facing: a malformed image that crashes its decoder no longer closes the pane.
 
+
+## #667 — a rebase that changed only the roadmap
+
+Ruled 2026-10-19, reader, relayed by the coordinator session. A pull request that was green, then rebased with only `ROADMAP.md` or `CHANGELOG.md` changed and `git range-diff` showing its own commits unchanged, gets no re-review and no local suites, and merges as soon as `ci complete` is green on the new head (take-next step 7).
+
+**Merging past the required check with `gh pr merge --admin` was not taken.** It is what "merge without fresh CI" needs, because `main` requires `ci complete` on the head and a rebase makes a new head. It bypasses a protection the reader configured, and a session holds his token.
+
+**Changing the branch protection was not taken.** Making `ci complete` optional, or required only for a code class, would let a docs-only rebase merge at once, and it would also let any pull request merge before its run. User-facing: none.
