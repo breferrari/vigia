@@ -116,8 +116,44 @@ fn key_during_silent_query() {
     );
 }
 
-/// [`asked_in_pty`] with the answer sent `late` after the query arrives.
-fn asked_after(answer: Option<&[u8]>, late: Duration) -> String {
+#[test]
+fn piped_picker_silent() {
+    // `/dev/tty` is all the query could use, and on macOS it cannot read it.
+    let mut child = Command::new(std::env::current_exe().expect("this test"));
+    child
+        .args(["--exact", "silent_child", "--nocapture", "--test-threads=1"])
+        .env(CHILD, "1")
+        .env("TERM", "xterm-256color")
+        .env_remove("TERM_PROGRAM")
+        .env_remove(vigia::pictures::PICTURES_VAR);
+    let text = pty::run(
+        child,
+        pty::Script {
+            marker: "[5n",
+            answer: None,
+            delay: Duration::ZERO,
+            piped: true,
+            detached: false,
+        },
+    );
+    assert!(
+        text.contains("got z"),
+        "the key after the query was lost: {text}"
+    );
+    assert!(
+        asked_line(&text).contains("Halfblocks"),
+        "a piped stdin chose a protocol: {text}"
+    );
+    if cfg!(target_os = "macos") {
+        assert!(
+            !text.contains("_Gi=31"),
+            "the picture query was sent where its answer cannot be read: {text}"
+        );
+    }
+}
+
+/// [`asked_in_pty`] with the answer sent `delay` after the query arrives.
+fn asked_after(answer: Option<&[u8]>, delay: Duration) -> String {
     let mut child = Command::new(std::env::current_exe().expect("this test"));
     child
         .args(["--exact", "silent_child", "--nocapture", "--test-threads=1"])
@@ -130,7 +166,7 @@ fn asked_after(answer: Option<&[u8]>, late: Duration) -> String {
         pty::Script {
             marker: "[5n",
             answer,
-            delay: late,
+            delay,
             piped: false,
             detached: false,
         },

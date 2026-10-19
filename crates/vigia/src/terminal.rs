@@ -380,15 +380,17 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
                     &input,
                     rustix::event::PollFlags::IN,
                 )];
+                let wait = (deadline - now).try_into().ok()?;
                 let waited =
-                    rustix::event::poll(&mut fds, Some(&(deadline - now).try_into().ok()?)).ok()?;
+                    rustix::io::retry_on_intr(|| rustix::event::poll(&mut fds, Some(&wait)))
+                        .ok()?;
                 if waited == 0 {
                     continue;
                 }
                 let revents = fds[0].revents();
                 if revents.contains(rustix::event::PollFlags::NVAL) {
-                    // macOS on `/dev/tty`, opened fresh for this query, so the
-                    // flag reaches nothing else: read without blocking instead.
+                    // macOS on `/dev/tty`: read without blocking instead. The
+                    // flag is cleared again below, since stdin can share it.
                     rustix::io::ioctl_fionbio(&input, true).ok()?;
                     polling = false;
                     continue;
@@ -398,7 +400,7 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
                 }
             }
             let mut buffer = [0u8; 256];
-            let read = match rustix::io::read(&input, &mut buffer) {
+            let read = match rustix::io::retry_on_intr(|| rustix::io::read(&input, &mut buffer)) {
                 Ok(0) => return Some(()),
                 Ok(read) => read,
                 Err(rustix::io::Errno::AGAIN) => {
@@ -413,6 +415,7 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
             }
         }
     })();
+    let _ = rustix::io::ioctl_fionbio(&input, false);
     if !raw {
         let _ = ratatui::crossterm::terminal::disable_raw_mode();
     }
@@ -433,7 +436,7 @@ pub fn ask(_timeout: std::time::Duration, _palette: bool) -> Vec<u8> {
 pub const PICTURES_WAIT: std::time::Duration = if cfg!(unix) {
     ANSWERING
 } else {
-    std::time::Duration::from_millis(150)
+    BACKGROUND_WAIT
 };
 
 /// Ask the terminal which image protocol it draws and its cell size in pixels,
@@ -444,7 +447,10 @@ pub const PICTURES_WAIT: std::time::Duration = if cfg!(unix) {
 pub fn picker(ask: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
     use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
     let unknown = || (Picker::halfblocks(), crate::pictures::Answer::default());
-    if !ask {
+    // On macOS the crate's query cannot read `/dev/tty`, so its answer would
+    // be left for the event reader.
+    let terminal = io::stdin().is_terminal() && stdout().is_terminal();
+    if !ask || (cfg!(target_os = "macos") && !terminal) {
         return unknown();
     }
     debug_assert!(
@@ -482,7 +488,7 @@ pub fn picker(ask: bool) -> (ratatui_image::picker::Picker, crate::pictures::Ans
 
 /// The descriptors the startup queries read and write: the terminal's own when
 /// both ends are one, else `/dev/tty`. macOS answers `poll` on `/dev/tty` with
-/// `POLLNVAL`, so there a query gets nothing through it.
+/// `POLLNVAL`, which [`ask`] reads around and the picture query cannot.
 #[cfg(unix)]
 fn query_stdio() -> Option<(std::os::fd::OwnedFd, std::os::fd::OwnedFd)> {
     use std::os::fd::AsFd;

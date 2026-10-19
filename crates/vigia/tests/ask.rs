@@ -11,12 +11,10 @@ use std::time::{Duration, Instant};
 
 /// Set in the child this test starts inside a fresh terminal.
 const CHILD: &str = "VIGIA_ASK_CHILD";
+/// Set in the child when its stdin is `/dev/tty` itself.
+const DEVTTY: &str = "VIGIA_ASK_DEVTTY";
 /// Set in the child when it asks for the palette too.
 const PALETTE: &str = "VIGIA_ASK_PALETTE";
-/// The background query's wait, as `run` passes it.
-const WAIT: Duration = vigia::BACKGROUND_WAIT;
-/// How long a palette answer that has begun is given to finish.
-const ANSWERING: Duration = vigia::ANSWERING;
 /// Room for a loaded machine past a bound.
 const SLACK: Duration = Duration::from_millis(200);
 
@@ -27,13 +25,22 @@ fn ask_child() {
     if std::env::var_os(CHILD).is_none() {
         return;
     }
+    if std::env::var_os(DEVTTY).is_some() {
+        use std::os::fd::AsRawFd;
+        let tty = std::fs::File::open("/dev/tty").expect("the child has a terminal");
+        // SAFETY: both descriptors are open; stdin is replaced by a copy of the tty.
+        unsafe { libc::dup2(tty.as_raw_fd(), 0) };
+    }
     let began = Instant::now();
-    let reply = vigia::ask(WAIT, std::env::var_os(PALETTE).is_some());
+    let reply = vigia::ask(vigia::BACKGROUND_WAIT, std::env::var_os(PALETTE).is_some());
     let waited = began.elapsed();
+    // SAFETY: fcntl on stdin, which is open.
+    let flags = unsafe { libc::fcntl(0, libc::F_GETFL) };
     println!(
-        "asked {:.3} {}",
+        "asked {:.3} {} blocking={}",
         waited.as_secs_f64() * 1000.0,
-        String::from_utf8_lossy(&reply).escape_debug()
+        String::from_utf8_lossy(&reply).escape_debug(),
+        flags & libc::O_NONBLOCK == 0
     );
     std::io::stdout().flush().expect("flush");
     let mut byte = [0u8; 1];
@@ -50,7 +57,7 @@ fn ask_child() {
 fn silent_ask_bounded() {
     let text = asked(Ask::default());
     assert_typed(&text);
-    assert_within(&text, WAIT);
+    assert_within(&text, vigia::BACKGROUND_WAIT);
 }
 
 #[test]
@@ -73,7 +80,7 @@ fn piped_stdin_ask() {
         ..Ask::default()
     });
     assert_typed(&text);
-    assert_within(&text, WAIT);
+    assert_within(&text, vigia::BACKGROUND_WAIT);
 }
 
 #[test]
@@ -89,6 +96,7 @@ fn piped_answered_ask() {
         pty::asked_line(&text).contains("]11;rgb:"),
         "an answer through /dev/tty was not read: {text}"
     );
+    assert_within(&text, vigia::BACKGROUND_WAIT);
 }
 
 #[test]
@@ -107,6 +115,22 @@ fn detached_answered_ask() {
 }
 
 #[test]
+fn devtty_stdin_blocking() {
+    // macOS cannot poll `/dev/tty`, and stdin shares this one's flags.
+    let text = asked(Ask {
+        answer: Some(b"\x1b]11;rgb:0000/0000/0000\x1b\\"),
+        devtty: true,
+        ..Ask::default()
+    });
+    assert_typed(&text);
+    let line = pty::asked_line(&text);
+    assert!(
+        line.contains("]11;rgb:") && line.contains("blocking=true"),
+        "stdin was left non-blocking, or the answer was lost: {line}"
+    );
+}
+
+#[test]
 fn partial_palette_ask() {
     // The background and no more: the palette has begun and never ends.
     let text = asked(Ask {
@@ -115,7 +139,7 @@ fn partial_palette_ask() {
         ..Ask::default()
     });
     assert_typed(&text);
-    assert_within(&text, ANSWERING);
+    assert_within(&text, vigia::ANSWERING);
 }
 
 /// How the terminal behaves toward one child.
@@ -129,6 +153,8 @@ struct Ask {
     piped: bool,
     /// The child has no controlling terminal.
     detached: bool,
+    /// The child's stdin is `/dev/tty` itself.
+    devtty: bool,
 }
 
 fn assert_typed(text: &str) {
@@ -155,6 +181,9 @@ fn asked(ask: Ask) -> String {
         .env(CHILD, "1");
     if ask.palette {
         child.env(PALETTE, "1");
+    }
+    if ask.devtty {
+        child.env(DEVTTY, "1");
     }
     pty::run(
         child,

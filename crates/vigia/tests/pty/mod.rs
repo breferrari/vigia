@@ -27,7 +27,7 @@ pub struct Script<'a> {
 /// Run `command` in a fresh terminal under `script`, wait for its `asked`
 /// line, then type a byte. Everything the terminal showed.
 pub fn run(mut command: Command, script: Script<'_>) -> String {
-    let (mut master, slave) = open();
+    let (terminal, slave) = open();
     command
         .stdout(Stdio::from(slave.try_clone().expect("dup")))
         .stderr(Stdio::null());
@@ -49,6 +49,9 @@ pub fn run(mut command: Command, script: Script<'_>) -> String {
     }
     let _child = Reaped(command.spawn().expect("spawn the child"));
     drop(slave);
+    // Declared after the child, so it is closed first on every way out: a
+    // child exiting on a terminal waits for its output to drain.
+    let mut master = terminal;
 
     let mut seen = Vec::new();
     if let Some(answer) = script.answer {
@@ -66,9 +69,6 @@ pub fn run(mut command: Command, script: Script<'_>) -> String {
     // The child reads its terminal in line mode, so the byte needs its line.
     master.write_all(b"z\n").expect("type a byte");
     read_until(&mut master, &mut seen, "got z", Duration::from_secs(10));
-    // Closed before the child is reaped: one exiting on a terminal waits for
-    // its output to drain.
-    drop(master);
     String::from_utf8_lossy(&seen).into_owned()
 }
 
