@@ -549,6 +549,8 @@ fn lfs_store_linked() {
     let _ = std::fs::remove_dir_all(&elsewhere);
     store(&elsewhere, &oid, &old);
     let lfs = scratch.root().join(".git").join("lfs");
+    // An installed git-lfs makes its store on its own, as it does on CI runners.
+    let _ = std::fs::remove_dir_all(&lfs);
     std::os::unix::fs::symlink(&elsewhere, &lfs).expect("link the store");
     let linked_store = diff_of(&scratch, "a.png").picture;
 
