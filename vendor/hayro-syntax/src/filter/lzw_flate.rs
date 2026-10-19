@@ -15,32 +15,15 @@ pub(crate) mod flate {
         use flate2::read::{DeflateDecoder, ZlibDecoder};
         use std::io::Read;
 
-        // Read no further than the decode limit allows: one byte past it is
-        // enough to know it was passed.
-        fn capped(decoder: impl Read) -> Result<Vec<u8>, bool> {
+        // Read no further than one byte past the decode limit. A result that
+        // long is refused where `Stream` counts it, and is not retried below.
+        fn capped(decoder: impl Read) -> Option<Vec<u8>> {
             let cap = crate::limit::left().map_or(u64::MAX, |left| left.saturating_add(1));
             let mut result = Vec::new();
-            match decoder.take(cap).read_to_end(&mut result) {
-                Ok(_) if crate::limit::admits(result.len() as u64) => Ok(result),
-                Ok(_) => Err(true),
-                Err(_) => Err(false),
-            }
+            decoder.take(cap).read_to_end(&mut result).ok().map(|_| result)
         }
 
-        let over = |result: &Result<Vec<u8>, bool>| matches!(result, Err(true));
-        let zlib = capped(ZlibDecoder::new(data));
-        if over(&zlib) {
-            return None;
-        }
-        let deflate = || capped(DeflateDecoder::new(data));
-        let decoded = match zlib {
-            Ok(decoded) => Some(decoded),
-            Err(_) => match deflate() {
-                Ok(decoded) => Some(decoded),
-                Err(true) => return None,
-                Err(false) => None,
-            },
-        };
+        let decoded = capped(ZlibDecoder::new(data)).or_else(|| capped(DeflateDecoder::new(data)));
         let decoded = decoded
             .or_else(|| {
                 warn!("flate stream is broken, decoding with fallback");
