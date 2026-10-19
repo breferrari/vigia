@@ -1663,6 +1663,11 @@ fn change_class_decides() {
         ("docs/research/assets/probe.py\n", "full"),
         ("docs/research/assets/a.svg\ndocs/research/b.jpeg\n", "docs"),
         (".claude/take-next/check.sh\n", "full"),
+        ("assets/proposals/167-keys-overlay.svg\n", "docs"),
+        (".techpack/templates/notes.md\n", "docs"),
+        (".techpack/hooks/pending.sh\n", "full"),
+        // A rename lists both names, and the one it came from decides.
+        ("crates/vigia/src/x.rs\ndocs/x.md\n", "full"),
         (
             ".github/ISSUE_TEMPLATE/report.md\n.github/PULL_REQUEST_TEMPLATE.md\n.github/release.yml\n",
             "docs",
@@ -1684,6 +1689,58 @@ fn change_class_decides() {
         change_class_forced("README.md\n"),
         "full",
         "the full-ci label did not force the full run"
+    );
+}
+
+/// A grep that fails is not a grep that matched nothing: a pattern grep rejects
+/// fails the script rather than classing every path as docs.
+#[cfg(unix)]
+#[test]
+fn change_class_error() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let script = repo_file(".github/scripts/change-class.sh");
+    let broken = script.replacen("    -e '^LICENSE$' \\\n", "    -e '(' \\\n", 1);
+    assert_ne!(
+        broken, script,
+        "the script has no LICENSE pattern to replace"
+    );
+    let dir = std::env::temp_dir().join(format!("change-class-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a scratch directory");
+    let path = dir.join("change-class.sh");
+    std::fs::write(&path, broken).expect("the broken copy");
+    let mut child = std::process::Command::new("sh")
+        .arg(&path)
+        .env("CI_FULL", "")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run the broken copy");
+    child
+        .stdin
+        .take()
+        .expect("the child's stdin is a pipe")
+        .write_all(b"crates/vigia/src/lib.rs\n")
+        .expect("the paths reach the script");
+    let out = child.wait_with_output().expect("the script exits");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        !out.status.success(),
+        "a pattern grep rejects did not fail the script, which printed {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+/// The paths a pull request changed include the name a renamed file had, so
+/// moving code into a docs path is still classed as code.
+#[test]
+fn renames_listed_twice() {
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    assert!(
+        ci.contains("previous_filename"),
+        "ci.yml lists a pull request's paths without the name a rename came from"
     );
 }
 
