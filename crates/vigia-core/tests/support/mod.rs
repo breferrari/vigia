@@ -1300,6 +1300,14 @@ pub fn screen_png(accent: u8) -> Vec<u8> {
     encode_image(&image, image::ImageFormat::Png)
 }
 
+/// An icon-shaped SVG: a gradient circle and a stroked path, its colours
+/// moved by `seed`.
+pub fn icon_svg(seed: u8) -> String {
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#{seed:02x}0000"/><stop offset="1" stop-color="#0000ff"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="url(#g)"/><path d="M7 12l3 3 7-7" stroke="#fff" stroke-width="2" fill="none"/></svg>"##
+    )
+}
+
 pub fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
     encoded(image::ImageFormat::Png, width, height, seed)
 }

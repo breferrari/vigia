@@ -3312,15 +3312,35 @@ fn pictures_frame_iterm2() {
 }
 
 fn pictures_frame(protocol: ProtocolType) {
+    pictures_frame_of(
+        protocol,
+        "a/screen.png",
+        support::screen_png(10),
+        support::screen_png(200),
+    );
+}
+
+/// The same with a changed SVG's pictures on screen.
+#[test]
+fn pictures_frame_svg() {
+    pictures_frame_of(
+        ProtocolType::Halfblocks,
+        "a/icon.svg",
+        support::icon_svg(1).into_bytes(),
+        support::icon_svg(2).into_bytes(),
+    );
+}
+
+fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<u8>) {
     use vigia::pictures::{self, Inks, Pictures};
 
     let scratch = Scratch::new(&format!("i9-pictures-{protocol:?}"));
-    scratch.write("a/screen.png", support::screen_png(10));
+    scratch.write(path, &old);
     for file in 0..20 {
         scratch.write(&format!("b/file_{file}.rs"), support::numbered_lines(200));
     }
     scratch.commit_all("baseline");
-    scratch.write("a/screen.png", support::screen_png(200));
+    scratch.write(path, &new);
     for file in 0..20 {
         scratch.edit_line(&format!("b/file_{file}.rs"), 5, "fn changed() {}");
     }

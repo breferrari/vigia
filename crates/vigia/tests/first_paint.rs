@@ -460,13 +460,28 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
 /// rows held for its pictures, and decodes nothing. `SPEC.md` §11.1.
 #[test]
 fn png_first_paint() {
+    picture_first_paint("a.png", support::screen_png(10), support::screen_png(200));
+}
+
+#[test]
+fn svg_first_paint() {
+    picture_first_paint(
+        "a.svg",
+        support::icon_svg(1).into_bytes(),
+        support::icon_svg(2).into_bytes(),
+    );
+}
+
+/// I7 with a changed picture first: `path` committed as `old` and rewritten
+/// as `new`, and the first frame decodes nothing.
+fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
     use vigia::pictures::{self, Inks, Pictures};
 
-    let scratch = Scratch::new("first-paint-png");
-    scratch.write("a.png", support::screen_png(10));
+    let scratch = Scratch::new("first-paint-picture");
+    scratch.write(path, old);
     scratch.write("b.txt", support::numbered_lines(50));
     scratch.commit_all("baseline");
-    scratch.write("a.png", support::screen_png(200));
+    scratch.write(path, new);
     scratch.write("b.txt", support::numbered_lines(60));
     let pane = Rect::new(0, 0, 120, 40);
 
@@ -536,7 +551,7 @@ fn png_first_paint() {
     }
     assert!(
         first < budget(I7_STARTUP),
-        "I7: first paint with a changed PNG first took {first:?}, over {:?}",
+        "I7: first paint with a changed {path} first took {first:?}, over {:?}",
         budget(I7_STARTUP)
     );
 }
