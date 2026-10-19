@@ -1994,8 +1994,8 @@ fn shrink_under_step() {
 }
 
 #[test]
-fn page_up_span() {
-    // Three files of different spans, so a top the page up moves out of the first
+fn step_up_span() {
+    // Three files of different spans, so a top the step up moves out of the first
     // file is clamped against the wrong one if the bar keeps the first one's span.
     let height = body();
     let scratch = Scratch::new("scroll-note-span");
@@ -2028,11 +2028,17 @@ fn page_up_span() {
     let mut highlighter = Highlighter::eager();
     stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
     stepped(&mut app, &mut frame, &mut highlighter, Action::File(2));
-    let up = stepped(&mut app, &mut frame, &mut highlighter, Action::Page(-1));
+    // A screenful less one, as steps: a page from this short screen would be three.
+    let up = stepped(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Scroll(-isize::try_from(height - 1).expect("rows")),
+    );
     assert_eq!(
         (up.top.file, up.top.row),
         (1, 7),
-        "the page up did not open inside the second file's note: {:?}",
+        "the step up did not open inside the second file's note: {:?}",
         up.top
     );
     assert!(
