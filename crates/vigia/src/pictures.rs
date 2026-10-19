@@ -1460,6 +1460,14 @@ mod tests {
 
     #[test]
     fn fallback_follows_hints() {
+        assert!(
+            !sans_hint(&face("Sansita Swashed", false)),
+            "a display face was hinted sans-serif for the letters in its name"
+        );
+        assert!(
+            !serif_hint(&face("Serifa", false)),
+            "a face was hinted serif for the letters in its name"
+        );
         let serif = [face("Arimo", false), face("Gentium Serif", false)];
         assert_eq!(
             fallback(&serif, &[], serif_hint, |_| true).as_deref(),
