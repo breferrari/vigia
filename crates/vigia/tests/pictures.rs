@@ -720,3 +720,70 @@ fn tiny_pair_cells() {
         .collect();
     insta::assert_snapshot!(cells.join("\n"));
 }
+
+/// Moving to an image lands on its heading.
+#[test]
+fn landing_on_heading() {
+    let scratch = Scratch::new("pictures-landing");
+    scratch.write("a.txt", support::numbered_lines(80));
+    scratch.write("b.png", png(120, 260, 1));
+    scratch.commit_all("baseline");
+    scratch.write("a.txt", support::numbered_lines(160));
+    scratch.write("b.png", png(120, 260, 2));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut pane = Pane::new(100, 30);
+    pane.view(&mut frame);
+    let height = pane.body(&frame).diff;
+    pane.app
+        .apply(Action::File(1), &mut frame, height)
+        .expect("next file");
+
+    let view = pane.view(&mut frame);
+    assert_eq!(
+        (view.top.file, view.top.row),
+        (1, 0),
+        "moving to the image did not land on its heading"
+    );
+    assert!(
+        matches!(view.rows.first(), Some(Row::File(entry)) if entry.path == "b.png"),
+        "the image's heading is not the first row"
+    );
+}
+
+/// A picture scrolled off screen before the worker reaches it is not built.
+#[test]
+fn worker_skips_hidden() {
+    let scratch = Scratch::new("pictures-skip");
+    let names: Vec<String> = (0..12).map(|n| format!("s{n:02}.png")).collect();
+    for (n, name) in names.iter().enumerate() {
+        scratch.write(name, support::screen_png(n as u8));
+    }
+    scratch.commit_all("baseline");
+    for (n, name) in names.iter().enumerate() {
+        scratch.write(name, support::screen_png(100 + n as u8));
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    // Tall enough for every picture to be queued at once.
+    let mut pane = Pane::new(100, 400);
+    let decoded = pictures::decodes();
+    pane.view(&mut frame);
+    // And then nothing on screen, at once.
+    let mut nothing: Vec<Row> = Vec::new();
+    pane.pictures.attach(&mut nothing, &frame);
+    assert!(
+        pane.pictures.settle(Duration::from_secs(120)),
+        "the worker never finished"
+    );
+
+    let decodes = pictures::decodes() - decoded;
+    assert!(
+        decodes < 2 * names.len() as u64,
+        "{decodes} sides were decoded for {} pictures nobody could see",
+        names.len()
+    );
+    assert_eq!(pane.pictures.kept(), 0, "a picture off screen was kept");
+}

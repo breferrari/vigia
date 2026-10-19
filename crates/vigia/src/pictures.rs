@@ -37,6 +37,48 @@ pub enum Kind {
     Deleted,
 }
 
+/// Which bar stands in a picture's first column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bar {
+    /// An added image's.
+    Added,
+    /// A deleted image's.
+    Removed,
+}
+
+/// Which side of the change a panel draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Side {
+    Old,
+    New,
+}
+
+impl Kind {
+    /// The bar in the first column, if this kind has one.
+    pub fn bar(self) -> Option<Bar> {
+        match self {
+            Self::Added => Some(Bar::Added),
+            Self::Deleted => Some(Bar::Removed),
+            _ => None,
+        }
+    }
+
+    /// Each panel's side and paint, left to right.
+    fn paints(self) -> &'static [(Side, Paint)] {
+        match self {
+            Self::Three => &[
+                (Side::Old, Paint::Plain),
+                (Side::New, Paint::Plain),
+                (Side::New, Paint::Mask),
+            ],
+            Self::Mask => &[(Side::New, Paint::Mask)],
+            Self::Pair => &[(Side::Old, Paint::Plain), (Side::New, Paint::Plain)],
+            Self::New | Self::Added => &[(Side::New, Paint::Plain)],
+            Self::Deleted => &[(Side::Old, Paint::Dim)],
+        }
+    }
+}
+
 /// One panel's place: columns from the picture's left edge, and its size in cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Slot {
@@ -345,9 +387,8 @@ impl Pictures {
         self.built.len()
     }
 
-    /// Take in what the worker built, drop what is no longer on screen, queue
-    /// what is on screen and not yet built, and hand the built pictures to their
-    /// rows. Only images on screen are ever read past their header.
+    /// Bring `rows`' pictures up to date with the worker. Only images on screen
+    /// are ever read past their header.
     pub fn attach(&mut self, rows: &mut [Row], frame: &vigia_core::Frame<'_>) {
         self.collect();
         // One entry per picture: its rows share one key, side by side.
@@ -411,7 +452,7 @@ impl Pictures {
     }
 
     /// Wait up to `limit` for every queued picture, for a caller that cannot
-    /// take a wake. Whether nothing is still being built.
+    /// take a wake. `false` when some are still being built.
     pub fn settle(&mut self, limit: std::time::Duration) -> bool {
         let until = std::time::Instant::now() + limit;
         loop {
@@ -507,7 +548,11 @@ fn changed(old: &RgbImage, new: &RgbImage) -> Vec<bool> {
 
 /// `mask`, of an image `width` by `height`, shrunk to `to_width` by `to_height`:
 /// a pixel is set when any pixel under it is.
-fn lit(mask: &[bool], (width, height): (u32, u32), (to_width, to_height): (u32, u32)) -> Vec<bool> {
+fn shrink_mask(
+    mask: &[bool],
+    (width, height): (u32, u32),
+    (to_width, to_height): (u32, u32),
+) -> Vec<bool> {
     let mut out = vec![false; (to_width * to_height) as usize];
     for y in 0..height {
         let row = (y * to_height / height) * to_width;
@@ -534,12 +579,22 @@ enum Paint {
 /// One panel: `image`, already shrunk to the slot's pixels, painted and encoded
 /// as half-blocks.
 fn panel(
-    mut image: RgbImage,
+    image: RgbImage,
     hit: Option<&[bool]>,
     slot: Slot,
     paint: Paint,
     inks: Inks,
 ) -> Option<SlicedProtocol> {
+    let halfblocks = Halfblocks::new(
+        DynamicImage::ImageRgb8(painted(image, hit, paint, inks)),
+        Size::new(slot.width, slot.rows),
+    )
+    .ok()?;
+    Some(SlicedProtocol::Halfblocks(halfblocks))
+}
+
+/// `image`'s pixels in `paint`, with `hit` marking the changed ones for a mask.
+fn painted(mut image: RgbImage, hit: Option<&[bool]>, paint: Paint, inks: Inks) -> RgbImage {
     let (cr, cg, cb) = inks.canvas;
     let canvas = [cr, cg, cb].map(f32::from);
     // Toward the pane and away from it by lightness, hard enough that a light
@@ -564,12 +619,7 @@ fn panel(
             }
         };
     }
-    let halfblocks = Halfblocks::new(
-        DynamicImage::ImageRgb8(image),
-        Size::new(slot.width, slot.rows),
-    )
-    .ok()?;
-    Some(SlicedProtocol::Halfblocks(halfblocks))
+    image
 }
 
 /// Build one picture: read and decode both sides, compare them, and encode each
@@ -602,28 +652,21 @@ fn build(job: &Job, inks: Inks) -> Built {
         },
         None => Verdict::Uncompared,
     };
-    let paints: &[(bool, Paint)] = match job.key.shape.kind {
-        Kind::Three => &[
-            (false, Paint::Plain),
-            (true, Paint::Plain),
-            (true, Paint::Mask),
-        ],
-        Kind::Mask => &[(true, Paint::Mask)],
-        Kind::Pair => &[(false, Paint::Plain), (true, Paint::Plain)],
-        Kind::New | Kind::Added => &[(true, Paint::Plain)],
-        Kind::Deleted => &[(false, Paint::Dim)],
-    };
     // Each side shrunk once per panel size, so the new picture and its mask
     // share one pass.
-    let mut shrunk: HashMap<(bool, u32, u32), RgbImage> = HashMap::new();
+    let mut shrunk: HashMap<(Side, u32, u32), RgbImage> = HashMap::new();
     let mut panels = Vec::new();
-    for (&slot, &(newer, paint)) in job.key.shape.slots.iter().zip(paints) {
-        let Some(image) = (if newer { new.as_ref() } else { old.as_ref() }) else {
+    for (&slot, &(side, paint)) in job.key.shape.slots.iter().zip(job.key.shape.kind.paints()) {
+        let image = match side {
+            Side::Old => old.as_ref(),
+            Side::New => new.as_ref(),
+        };
+        let Some(image) = image else {
             return undecoded();
         };
         let to = (u32::from(slot.width), u32::from(slot.rows) * 2);
         let small = shrunk
-            .entry((newer, to.0, to.1))
+            .entry((side, to.0, to.1))
             .or_insert_with(|| {
                 // Averaged on the way down; kept sharp on the way up, so an icon
                 // smaller than its panel stays a picture of pixels.
@@ -636,7 +679,7 @@ fn build(job: &Job, inks: Inks) -> Built {
             })
             .clone();
         let hit = match (paint, &mask) {
-            (Paint::Mask, Some(mask)) => Some(lit(mask, image.dimensions(), to)),
+            (Paint::Mask, Some(mask)) => Some(shrink_mask(mask, image.dimensions(), to)),
             _ => None,
         };
         let Some(protocol) = panel(small, hit.as_deref(), slot, paint, inks) else {
@@ -751,11 +794,39 @@ mod tests {
         let mut new = old.clone();
         new.put_pixel(503, 497, Rgb([0, 0, 0]));
         let mask = changed(&old, &new);
-        let hit = lit(&mask, new.dimensions(), (20, 20));
+        let hit = shrink_mask(&mask, new.dimensions(), (20, 20));
         assert_eq!(
             hit.iter().filter(|hit| **hit).count(),
             1,
             "one changed pixel lit no cell, or more than one"
+        );
+    }
+
+    #[test]
+    fn dim_and_mask_paints() {
+        let inks = Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        };
+        let image = RgbImage::from_pixel(2, 1, Rgb([200, 200, 200]));
+        let dim = painted(image.clone(), None, Paint::Dim, inks);
+        assert!(
+            dim.get_pixel(0, 0).0.iter().all(|c| *c < 200),
+            "a deleted picture was not dimmed toward the pane"
+        );
+        let mask = painted(image, Some(&[true, false]), Paint::Mask, inks);
+        assert_eq!(
+            mask.get_pixel(0, 0).0,
+            [0xf8, 0x51, 0x49],
+            "a changed pixel is not in the changed ink"
+        );
+        let quiet = mask.get_pixel(1, 0).0;
+        assert!(
+            quiet
+                .iter()
+                .zip([0x0d, 0x11, 0x17])
+                .all(|(c, pane)| c.abs_diff(pane) <= 38),
+            "an unchanged pixel of the mask is {quiet:?}, not near the pane"
         );
     }
 

@@ -4767,11 +4767,10 @@ impl Painter<'_> {
             let room = Rect { x, width, ..area };
             SlicedImage::new(protocol, (0, -above).into()).render(room, self.buf);
         }
-        let bar = match key.shape.kind {
-            crate::pictures::Kind::Added => Some(self.theme.added_bar),
-            crate::pictures::Kind::Deleted => Some(self.theme.removed_bar),
-            _ => None,
-        };
+        let bar = key.shape.kind.bar().map(|bar| match bar {
+            crate::pictures::Bar::Added => self.theme.added_bar,
+            crate::pictures::Bar::Removed => self.theme.removed_bar,
+        });
         if let (Some(bar), Some(slot)) = (bar, built.panels.first().map(|(slot, _)| slot)) {
             let rows = slot.rows.saturating_sub(part).min(area.height);
             for y in area.y..area.y + rows {
@@ -4960,14 +4959,11 @@ impl Painter<'_> {
                 Row::Picture {
                     key, part, ready, ..
                 } => {
-                    let first = offset == 0
-                        || !matches!(&view.rows[offset - 1], Row::Picture { key: above, .. } if std::sync::Arc::ptr_eq(above, key));
+                    let first = offset == 0 || !view.rows[offset - 1].pictures(key);
                     if first && let Some(ready) = ready {
                         let rows = view.rows[offset..shown.min(view.rows.len())]
                             .iter()
-                            .take_while(
-                                |row| matches!(row, Row::Picture { key: own, .. } if std::sync::Arc::ptr_eq(own, key)),
-                            )
+                            .take_while(|row| row.pictures(key))
                             .count();
                         self.picture(
                             Rect {

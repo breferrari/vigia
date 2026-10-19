@@ -417,6 +417,11 @@ pub enum BoxPart {
 }
 
 impl Row {
+    /// Whether this is a display row of the pictures `key` names.
+    pub fn pictures(&self, key: &std::sync::Arc<crate::pictures::Key>) -> bool {
+        matches!(self, Self::Picture { key: own, .. } if std::sync::Arc::ptr_eq(own, key))
+    }
+
     /// Whether this row continues the line above rather than starting one.
     pub fn is_wrap(&self) -> bool {
         matches!(self, Self::Wrap { .. })
