@@ -121,7 +121,7 @@ fn learned(sizes: &HashMap<u64, (u32, u32)>, picture: &mut crate::Picture) -> bo
         .into_iter()
         .flatten()
     {
-        if side.width == 0
+        if !side.sized()
             && let Some(&(width, height)) = sizes.get(&side.stamp)
         {
             (side.width, side.height) = (width, height);

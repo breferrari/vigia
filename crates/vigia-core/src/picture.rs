@@ -91,6 +91,14 @@ pub struct ImageSide {
     pub stamp: u64,
 }
 
+impl ImageSide {
+    /// Whether its size is known: a PDF side the frame path left to the
+    /// worker is not, until the worker has sized it.
+    pub fn sized(&self) -> bool {
+        self.width > 0
+    }
+}
+
 /// Both sides of a changed image. A side is `None` where the change has none:
 /// an added image has no old side and a deleted one no new side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,8 +137,13 @@ pub(crate) fn pdf_headed(head: &[u8]) -> bool {
 
 /// Whether `path` is named as a PDF.
 pub(crate) fn pdf_named(path: &str) -> bool {
+    named(path, "pdf")
+}
+
+/// Whether `path` ends in `.extension`, in any case.
+fn named(path: &str, extension: &str) -> bool {
     path.rsplit_once('.')
-        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("pdf"))
+        .is_some_and(|(_, found)| found.eq_ignore_ascii_case(extension))
 }
 
 /// One PDF side, held whole: its first page's size in points, or `None`
@@ -171,8 +184,7 @@ pub(crate) const SVG_HEAD: u64 = 64 * 1024;
 
 /// Whether `path` is named as an SVG.
 pub(crate) fn svg_named(path: &str) -> bool {
-    path.rsplit_once('.')
-        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("svg"))
+    named(path, "svg")
 }
 
 /// One SVG side from the start of its document, which is `bytes` long: its

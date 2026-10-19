@@ -148,7 +148,7 @@ pub fn shape(picture: &Picture, width: u16, rows: u16, truecolour: bool) -> Opti
     if [picture.before, picture.after]
         .iter()
         .flatten()
-        .any(|side| side.width == 0)
+        .any(|side| !side.sized())
     {
         return Some(Shape {
             kind: Kind::New,
@@ -748,6 +748,11 @@ const MAX_SIDE: u32 = 16_384;
 /// The most one decode may allocate.
 const MAX_ALLOC: u64 = 512 * 1024 * 1024;
 
+/// Whether an image of `width` by `height` is within what a decode may take.
+fn decodable(width: u32, height: u32) -> bool {
+    width <= MAX_SIDE && height <= MAX_SIDE && u64::from(width) * u64::from(height) * 4 <= MAX_ALLOC
+}
+
 fn image_format(format: Format) -> Option<ImageFormat> {
     Some(match format {
         Format::Png => ImageFormat::Png,
@@ -763,11 +768,11 @@ fn image_format(format: Format) -> Option<ImageFormat> {
     })
 }
 
-/// The long side an SVG is rendered at, which every panel is shrunk from,
-/// unless its filters cost more than [`FILTER_BUDGET`] there.
-const SVG_LONG_SIDE: f32 = 1024.0;
-/// The shortest long side an SVG is rendered at before it is refused.
-const SVG_SHORTEST: f32 = 64.0;
+/// The long side an SVG or a PDF page is rendered at, which every panel is
+/// shrunk from, unless what it draws costs more than its budget there.
+const LONG_SIDE: f32 = 1024.0;
+/// The shortest long side one is rendered at before it is refused.
+const SHORTEST_SIDE: f32 = 64.0;
 /// What one SVG's filters may cost, in kernel cells times pixels. Sixty-four
 /// blurs at 256 pixels a side, about 250ms.
 const FILTER_BUDGET: f64 = 1024.0 * 256.0 * 256.0;
@@ -982,8 +987,7 @@ fn embedded(
         .ok()?
         .into_dimensions()
         .ok()?;
-    if width > MAX_SIDE || height > MAX_SIDE || u64::from(width) * u64::from(height) * 4 > MAX_ALLOC
-    {
+    if !decodable(width, height) {
         return refuse();
     }
     (resvg::usvg::ImageHrefResolver::default_data_resolver())(mime, data, options)
@@ -1049,24 +1053,24 @@ fn filter_cost(prices: &[Price], size: f32, long: f32) -> f64 {
     cells * f64::from(long) * f64::from(long)
 }
 
-/// The longest side, up to [`SVG_LONG_SIDE`], at which every side's filters
+/// The longest side, up to [`LONG_SIDE`], at which every side's filters
 /// cost no more than [`FILTER_BUDGET`], or `None` when even
-/// [`SVG_SHORTEST`] costs more.
+/// [`SHORTEST_SIDE`] costs more.
 fn long_side(sides: &[(Vec<Price>, f32)]) -> Option<f32> {
     let fits = |long: f32| {
         sides
             .iter()
             .all(|(prices, size)| filter_cost(prices, *size, long) <= FILTER_BUDGET)
     };
-    if fits(SVG_LONG_SIDE) {
-        return Some(SVG_LONG_SIDE);
+    if fits(LONG_SIDE) {
+        return Some(LONG_SIDE);
     }
-    if !fits(SVG_SHORTEST) {
+    if !fits(SHORTEST_SIDE) {
         return None;
     }
     // The cost only grows with the side, so the longest that fits is found by
     // halving.
-    let (mut fit, mut over) = (SVG_SHORTEST as u32, SVG_LONG_SIDE as u32);
+    let (mut fit, mut over) = (SHORTEST_SIDE as u32, LONG_SIDE as u32);
     while over - fit > 1 {
         let middle = (fit + over) / 2;
         if fits(middle as f32) {
@@ -1145,9 +1149,6 @@ fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>)> {
     Some((render(old)?, render(new)?))
 }
 
-/// The long side a PDF page is rendered at, unless its content costs more
-/// than [`PDF_BUDGET`] there.
-const PDF_LONG_SIDE: f32 = 1024.0;
 /// What one PDF page may cost, in bytes of content stream times pixels on
 /// the long side: 1.4 MiB at 1024 pixels. Measured, a page from 3 to 20 MB
 /// of content takes 0.29 to 0.51 seconds on the worker.
@@ -1205,7 +1206,7 @@ enum Met<'a, 'b> {
     Name(&'b [u8]),
     /// An object met before, by its number.
     Again(i32, i32),
-    Leaf(String),
+    Leaf(&'b hayro::hayro_syntax::object::Object<'a>),
     Stream(&'b hayro::hayro_syntax::object::Stream<'a>),
 }
 
@@ -1255,7 +1256,7 @@ fn walk<'a>(
             meet(Met::Stream(&stream))?;
             walk(Object::Dict(stream.dict().clone()), xref, seen, meet)?;
         }
-        other => meet(Met::Leaf(format!("{other}")))?,
+        other => meet(Met::Leaf(&other))?,
     }
     Some(())
 }
@@ -1310,12 +1311,23 @@ fn page_print(page: &hayro::hayro_syntax::page::Page<'_>) -> Option<u64> {
             match met {
                 Met::Name(name) => name.hash(&mut hasher),
                 Met::Again(number, generation) => (number, generation).hash(&mut hasher),
-                Met::Leaf(leaf) => leaf.hash(&mut hasher),
+                Met::Leaf(leaf) => {
+                    // Its text, written into the hash without a string between.
+                    struct Hashed<'h>(&'h mut std::collections::hash_map::DefaultHasher);
+                    impl std::fmt::Write for Hashed<'_> {
+                        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+                            self.0.write(text.as_bytes());
+                            Ok(())
+                        }
+                    }
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut Hashed(&mut hasher),
+                        format_args!("{leaf}"),
+                    );
+                }
                 Met::Stream(stream) => {
                     if let Some((width, height)) = image_size(stream)
-                        && (width > MAX_SIDE
-                            || height > MAX_SIDE
-                            || u64::from(width) * u64::from(height) * 4 > MAX_ALLOC)
+                        && !decodable(width, height)
                     {
                         return None;
                     }
@@ -1447,7 +1459,7 @@ fn pdf_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, Option<Stri
     let (old_prints, new_prints) = (prints(&old)?, prints(&new)?);
     let (index, note) = chosen_page(old_prints.as_deref(), new_prints.as_deref());
     // Past the length the floor refuses, a page is not decoded further.
-    let refused = (PDF_BUDGET / f64::from(SVG_SHORTEST)) as usize;
+    let refused = (PDF_BUDGET / f64::from(SHORTEST_SIDE)) as usize;
     let mut cost = 0;
     for pdf in [&old, &new].into_iter().flatten() {
         let pages = pdf.pages();
@@ -1460,8 +1472,8 @@ fn pdf_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, Option<Stri
         images_decoded(page, PDF_DECODED.checked_sub(content as u64)?)?;
         cost = cost.max(content);
     }
-    let long = (PDF_BUDGET / cost.max(1) as f64).min(f64::from(PDF_LONG_SIDE)) as f32;
-    if long < SVG_SHORTEST {
+    let long = (PDF_BUDGET / cost.max(1) as f64).min(f64::from(LONG_SIDE)) as f32;
+    if long < SHORTEST_SIDE {
         return None;
     }
     let render = |pdf: Option<hayro::hayro_syntax::Pdf>| -> Option<Option<Decoded>> {

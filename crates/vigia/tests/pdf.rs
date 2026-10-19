@@ -356,14 +356,9 @@ fn imaged(images: usize, (width, height): (u32, u32), zeros: u64) -> Vec<u8> {
     )
 }
 
-/// This process's resident memory, in MiB, where `ps` can say.
+/// This process's resident memory, in MiB, where the platform says.
 fn resident() -> Option<u64> {
-    let out = std::process::Command::new("ps")
-        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
-        .output()
-        .ok()?;
-    let kib: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
-    Some(kib / 1024)
+    vigia::memory::resident().map(|bytes| bytes >> 20)
 }
 
 #[test]

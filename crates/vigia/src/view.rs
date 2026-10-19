@@ -1495,7 +1495,7 @@ fn size_line(picture: &Picture) -> Option<String> {
     let waiting = [&picture.before, &picture.after]
         .into_iter()
         .flatten()
-        .find(|side| side.width == 0);
+        .find(|side| !side.sized());
     if let Some(side) = waiting {
         let sizes = match (&picture.before, &picture.after) {
             (Some(old), Some(new)) if old.bytes != new.bytes => {

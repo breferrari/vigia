@@ -36,11 +36,11 @@ pub fn streams_fit(bytes: &[u8], budget: u64) -> bool {
         let Some(data) = stream_start(bytes, at) else {
             continue;
         };
-        let dict = normalised(dictionary_before(bytes, at));
-        if is_image(&dict) {
+        let tokens = tokens(&normalised(dictionary_before(bytes, at)));
+        if is_image(&tokens) {
             continue;
         }
-        let filters = filters_of(&dict);
+        let filters = filters_of(&tokens);
         let decoded = match filters.as_slice() {
             [] => Some(0),
             [only] if only == "FlateDecode" || only == "Fl" => {
@@ -137,15 +137,14 @@ fn tokens(dict: &str) -> Vec<String> {
     tokens
 }
 
-fn is_image(dict: &str) -> bool {
-    tokens(dict)
+fn is_image(tokens: &[String]) -> bool {
+    tokens
         .windows(2)
         .any(|pair| pair[0] == "/Subtype" && pair[1] == "/Image")
 }
 
 /// The filters a dictionary names, without their slashes.
-fn filters_of(dict: &str) -> Vec<String> {
-    let tokens = tokens(dict);
+fn filters_of(tokens: &[String]) -> Vec<String> {
     let Some(at) = tokens.iter().position(|token| token == "/Filter") else {
         return Vec::new();
     };
@@ -170,8 +169,8 @@ mod tests {
     fn escaped_names_read() {
         let dict = normalised(b"<< /Type/Obj#53tm % a comment\n /Filter /Fl#61teDecode >>");
         assert!(tokens(&dict).contains(&"/ObjStm".to_owned()), "{dict}");
-        assert_eq!(filters_of(&dict), ["FlateDecode"]);
-        assert!(is_image(&normalised(b"<</Subtype/Im#61ge>>")));
-        assert!(!is_image(&normalised(b"<< /Subtype /Form >>")));
+        assert_eq!(filters_of(&tokens(&dict)), ["FlateDecode"]);
+        assert!(is_image(&tokens(&normalised(b"<</Subtype/Im#61ge>>"))));
+        assert!(!is_image(&tokens(&normalised(b"<< /Subtype /Form >>"))));
     }
 }
