@@ -545,3 +545,14 @@ Two failures acquitted a short tail of real work. Credit transfer let the off-CP
 **Rejected: per-sample deficit everywhere, with a one-tick allowance per frame.** On Windows the tick is about the 16ms budget, so a genuine stall frame with a few milliseconds of work sits within one tick of its excess, and nearly every real stall would fail. The whole-round sum is what cancels the rounding there, because consecutive readings telescope and the error totals about two ticks, not one per frame.
 
 **What remains.** On Windows a short real stall, under twenty ticks of breaching wall time, still fails closed. That is the one case the coarse clock cannot resolve.
+
+## #645 — a decoder panic, and the two ways not taken
+
+Ruled 2026-10-19, reader, relayed by the coordinator session. A picture whose decoder panics used to abort the process, because the release profile set `panic = "abort"` and the picture worker decodes whatever bytes an agent writes. The rust-fuzz trophy case lists past `image` panics found by fuzzing, and a truncated write in the middle of an edit is ordinary input here. The ruling is to unwind, catch the panic on the worker, and keep aborting everywhere else (SPEC §11.1).
+
+**Decoding in a child process was not taken.** It keeps `panic = "abort"` and the binary size. It costs a process per session, its lifecycle and respawn, an IPC that carries about 23MB of decoded pixels for a 1170x2532 pair, a hidden CLI mode for SPEC to name, and parity on Windows: several hundred lines against about thirty.
+
+**Accepting the risk was not taken.** It is free, and it leaves a pane meant to run for days with nothing pressed able to close on ordinary agent output.
+
+**What unwinding costs, measured 2026-10-19 on cbece20, release, macOS aarch64:** 14,553,056 bytes against 16,976,000, +2,422,944 (+16.6%).
+
