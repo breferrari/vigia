@@ -1666,7 +1666,7 @@ fn change_class_decides() {
         ("assets/proposals/167-keys-overlay.svg\n", "docs"),
         (".techpack/templates/notes.md\n", "docs"),
         (".techpack/hooks/pending.sh\n", "full"),
-        // A rename lists both names, and the one it came from decides.
+        // A rename arrives as both names, and the code one decides.
         ("crates/vigia/src/x.rs\ndocs/x.md\n", "full"),
         (
             ".github/ISSUE_TEMPLATE/report.md\n.github/PULL_REQUEST_TEMPLATE.md\n.github/release.yml\n",
@@ -1726,9 +1726,10 @@ fn change_class_error() {
         .expect("the paths reach the script");
     let out = child.wait_with_output().expect("the script exits");
     let _ = std::fs::remove_dir_all(&dir);
-    assert!(
-        !out.status.success(),
-        "a pattern grep rejects did not fail the script, which printed {:?}",
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "a pattern grep rejects did not fail the script with grep's status, which printed {:?}",
         String::from_utf8_lossy(&out.stdout)
     );
 }
@@ -1739,7 +1740,7 @@ fn change_class_error() {
 fn renames_listed_twice() {
     let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
     assert!(
-        ci.contains("previous_filename"),
+        ci.contains("git diff --name-only --no-renames HEAD^1 HEAD"),
         "ci.yml lists a pull request's paths without the name a rename came from"
     );
 }

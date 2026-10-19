@@ -174,7 +174,7 @@ gh run view <id> --json conclusion --jq .conclusion
 
 Watch the run, not `gh pr checks`. List only the runs that started after the ready call. The run of the draft has the same `headSha`, a green conclusion and no jobs run. If the list is empty, the ready run is not in the queue yet. List again. The `headSha` of the run must be the head of the PR. Use `conclusion` as the gate, because `gh run watch` can exit 0 on a failed run. After each fix push, watch the new run the same way.
 
-**After a rebase that changed only `ROADMAP.md` or `CHANGELOG.md`, with `git range-diff` showing the PR's own commits unchanged: no re-review and no local suites.** Merge as soon as `ci complete` is green on the new head. Ruled 2026-10-19, reader. User-facing: none.
+**After a rebase that changed only `ROADMAP.md` or `CHANGELOG.md`, with `git range-diff` showing the PR's own commits otherwise unchanged: no re-review and no local suites.** Merge as soon as `ci complete` is green on the new head. Ruled 2026-10-19, reader. User-facing: none.
 
 No external review is configured: read and answer any review comment a person left, then, once the post-ready run is green on the head, merge with `gh pr merge <n> --squash --delete-branch`. Ruled 2026-10-19, PO for the reader: Copilot review is off on his account. User-facing: none. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
 

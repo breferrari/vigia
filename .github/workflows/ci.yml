@@ -59,13 +59,16 @@ jobs:
     outputs:
       class: ${{ steps.class.outputs.class }}
     steps:
+      # The pull request's merge commit and its first parent, the base, so the
+      # paths come from the commit under test and a rename lists both names.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
       - id: class
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-              --jq '.[] | .filename, (.previous_filename // empty)' > changed
+            git diff --name-only --no-renames HEAD^1 HEAD > changed
           else
             : > changed
           fi
