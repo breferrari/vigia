@@ -522,19 +522,24 @@ Everything is pure Rust on purpose: a genuinely static Linux binary needs no cro
 
 ## 🗺️ Status
 
-`🚧` **Early, and released.** The install lines above are live. The surface is one optional path, `--version`, and the word `mcp` for the notes server, on purpose, and look and feel is where the work is.
+`🚧` **Early, and released.** The install lines above are live. The surface is one optional path, `--version`, and the word `mcp` for the notes server, on purpose. The work now is pictures: a changed image shown as what changed, which lands in 1.2.0.
 
-| | Phase | |
-|---|---|---|
-| ✅ | **1. Core engine** | Watch, coalesce, diff, incremental re-diff. No UI |
-| ✅ | **2. Minimum monitor** | The TUI: follow mode, scroll, mouse, layout, clean exit |
-| ✅ | **3. Glanceability** | Sparklines, heat bars, live counters, the status bar, theming |
-| ✅ | **4. The artifacts tell the truth** | README, mockup, spec and tracker agree with each other |
-| ✅ | **6. Measured, not assumed** | Claims that outran their evidence get the measurement that settles them |
-| ✅ | **7. Distribution** | crates.io, Homebrew tap, prebuilt binaries |
-| ✅ | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees |
-
-There is no Phase 5. That number belonged to the list of deferred work, which is no longer a phase.
+| | Phase | | Release |
+|---|---|---|---|
+| ✅ | **1. Core engine** | Watch, coalesce, diff, incremental re-diff. No UI | released |
+| ✅ | **2. Minimum monitor** | The TUI: follow mode, scroll, mouse, layout, clean exit | released |
+| ✅ | **3. Glanceability** | Sparklines, heat bars, live counters, the status bar, theming | released |
+| ✅ | **4. The artifacts tell the truth** | README, mockup, spec and tracker agree with each other | released |
+| ✅ | **6. Measured, not assumed** | Claims that outran their evidence get the measurement that settles them | released |
+| ✅ | **7. Distribution** | crates.io, Homebrew tap, prebuilt binaries | released |
+| ✅ | **7.5. Notes to the agent** | Pin a note to a line, and the agent beside you reads it | released |
+| ✅ | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees | released |
+| 🔨 | **9. Pictures** | A changed image, SVG or PDF shows what changed, in any terminal | 1.2.0 |
+| ⬜ | **10. Current Rust** | The code uses what the newest stable Rust offers | 1.2.0 |
+| ⬜ | **11. Off the paint** | Work that grows with a file or a repository moves off drawing the screen | 1.3.0 |
+| ⬜ | **12. Correct at the edges** | Every file, path, terminal, theme and note is drawn and reported right | 1.4.0 |
+| ⬜ | **13. Testable by construction** | Every gesture and table can be tested, and is derived rather than checked by hand | internal |
+| ⬜ | **14. The instruments** | Releases and the project's own tooling hold by mechanism, not by care | internal |
 
 Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and is written *before* the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked. [`CHANGELOG.md`](CHANGELOG.md) is every released version and what moved in it.
 
