@@ -233,3 +233,32 @@ fn svg_rename_drawn() {
         );
     }
 }
+
+#[test]
+fn svg_no_pictures_text() {
+    let root = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#;
+    let scratch = Scratch::new("svg-no-pictures");
+    scratch.write("icon.svg", &icon(root, "red"));
+    scratch.commit_all("initial");
+    scratch.write("icon.svg", &icon(root, "blue"));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let drawn = |frame: &mut vigia_core::Frame| {
+        let (_, diff) = frame.diff(0).expect("diff");
+        (diff.binary, diff.picture.is_some(), diff.added)
+    };
+    assert_eq!(drawn(&mut frame), (true, true, 0), "a drawn SVG");
+    frame.draw_svg(false);
+    assert_eq!(
+        drawn(&mut frame),
+        (false, false, 1),
+        "an SVG in a pane that draws no picture lost its text diff"
+    );
+    frame.draw_svg(true);
+    assert_eq!(
+        drawn(&mut frame),
+        (true, true, 0),
+        "the SVG was not drawn again"
+    );
+}

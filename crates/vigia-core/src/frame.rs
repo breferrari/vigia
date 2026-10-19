@@ -342,6 +342,8 @@ pub struct Frame<'w> {
     failure: Option<FileDiff>,
     /// Whether the staged run is drawn beside the unstaged one.
     staged: bool,
+    /// Whether a changed SVG is drawn as pictures rather than diffed as text.
+    svg: bool,
     /// Where in the history this frame is standing.
     standing: Standing,
     /// Paths the reader asked to keep out of the pane, and how many the last walk
@@ -384,6 +386,7 @@ impl<'w> Frame<'w> {
             reloads: worktree.reloads(),
             failure: None,
             staged: false,
+            svg: true,
             standing: Standing::default(),
             hide: None,
             hidden: 0,
@@ -562,6 +565,18 @@ impl<'w> Frame<'w> {
         self.cached.clear();
         self.spans.clear();
         self.settles_at = None;
+    }
+
+    /// Draw a changed SVG as pictures, or diff it as text, as a pane that can
+    /// draw no picture needs.
+    pub fn draw_svg(&mut self, svg: bool) {
+        if self.svg == svg {
+            return;
+        }
+        self.svg = svg;
+        self.stats.evicted += self.cached.len() as u64;
+        self.cached.clear();
+        self.spans.clear();
     }
 
     /// The changed files, in the order status reported them.
@@ -752,7 +767,7 @@ impl<'w> Frame<'w> {
         // folded into the same counter as the fingerprints. Added before the
         // `match`, so a failed read still reports the probe it took.
         let mut probes = 0;
-        let measured = self.worktree.measure_counted(change, &mut probes);
+        let measured = self.worktree.measure_counted(change, self.svg, &mut probes);
         self.stats.probes += probes;
         let (span, taken) = match measured {
             Ok(span) => {
@@ -857,7 +872,7 @@ impl<'w> Frame<'w> {
         // Counted before the `?`, so a failed read still reports the probe it
         // took. See `Worktree::diff_counted`.
         let mut probes = 0;
-        let computed = self.worktree.diff_counted(change, &mut probes);
+        let computed = self.worktree.diff_counted(change, self.svg, &mut probes);
         self.stats.probes += probes;
         let diff = match computed {
             Ok(diff) => diff,

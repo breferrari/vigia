@@ -459,6 +459,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Half-blocks until the picture query has answered, after the first paint.
     let truecolour = depth == Depth::Truecolor;
     shell.app.draw_pictures(truecolour);
+    frame.draw_svg(truecolour);
 
     // The arming from above, reported now that there is somewhere to report it. A
     // signal that arrived before this point is not lost: it waits in the channel
@@ -506,9 +507,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     picker.set_protocol_type(pictures::protocol_of(forced, answer, &|key: &str| {
         std::env::var(key).ok()
     }));
-    shell
-        .app
-        .draw_pictures(pictures::drawn(truecolour, picker.protocol_type()));
+    let drawn = pictures::drawn(truecolour, picker.protocol_type());
+    shell.app.draw_pictures(drawn);
+    frame.draw_svg(drawn);
     shell.pictures.pick(picker);
     if ask {
         // On Windows the query drops a resize that came in during it, and it is

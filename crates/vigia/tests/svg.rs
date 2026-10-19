@@ -256,3 +256,133 @@ fn svg_use_bomb_bounded() {
         drawn.took
     );
 }
+
+/// `bytes` as base64, for a `data:` URI.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let word = chunk.iter().enumerate().fold(0u32, |word, (at, &byte)| {
+            word | u32::from(byte) << (16 - 8 * at)
+        });
+        for at in 0..4 {
+            out.push(if at <= chunk.len() {
+                char::from(ALPHABET[(word >> (18 - 6 * at)) as usize & 63])
+            } else {
+                '='
+            });
+        }
+    }
+    out
+}
+
+/// A PNG of `width` by `height` noise, which does not compress.
+fn noise_png(width: u32, height: u32) -> Vec<u8> {
+    let mut seed = 0x9e37_79b9_u32;
+    let image = image::RgbaImage::from_fn(width, height, |_, _| {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        image::Rgba(seed.to_le_bytes())
+    });
+    let mut png = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .expect("encode");
+    png
+}
+
+/// `leaf` copied `fan` times at each of `levels` levels by `<use>`.
+fn fanned(leaf: &str, fan: usize, levels: usize) -> String {
+    let mut body = format!("<defs>{leaf}");
+    for level in 1..=levels {
+        body.push_str(&format!(r#"<g id="l{level}">"#));
+        for _ in 0..fan {
+            body.push_str(&format!(r##"<use xlink:href="#l{}"/>"##, level - 1));
+        }
+        body.push_str("</g>");
+    }
+    body.push_str(&format!(r##"</defs><use xlink:href="#l{levels}"/>"##));
+    body
+}
+
+/// The verdict on `body` drawn over a plain square.
+fn verdict_of(name: &str, body: &str) -> Option<Verdict> {
+    drawn(
+        name,
+        Some(&svg(r#"<rect width="2" height="2"/>"#)),
+        &svg(body),
+    )
+    .verdict
+}
+
+#[test]
+fn svg_image_copies_bounded() {
+    let png = base64(&noise_png(32, 32));
+    let leaf = format!(
+        r#"<image id="l0" width="1" height="1" xlink:href="data:image/png;base64,{png}"/>"#
+    );
+    assert_eq!(
+        verdict_of("svg-image-copies", &fanned(&leaf, 10, 4)),
+        Some(Verdict::Undecoded),
+        "ten thousand copies of an embedded image were drawn"
+    );
+    let one = format!(r#"<image width="8" height="8" xlink:href="data:image/png;base64,{png}"/>"#);
+    assert!(
+        changed(verdict_of("svg-image-one", &one)),
+        "one embedded image was refused"
+    );
+}
+
+#[test]
+fn svg_image_size_bounded() {
+    let png = base64(&noise_png(16_385, 1));
+    let body = format!(r#"<image width="8" height="8" xlink:href="data:image/png;base64,{png}"/>"#);
+    assert_eq!(
+        verdict_of("svg-image-wide", &body),
+        Some(Verdict::Undecoded),
+        "an embedded image wider than any picture was drawn"
+    );
+}
+
+#[test]
+fn svg_nested_svg_refused() {
+    let inner = base64(svg(&fanned(r#"<rect id="l0" width="1" height="1"/>"#, 10, 5)).as_bytes());
+    let body =
+        format!(r#"<image width="8" height="8" xlink:href="data:image/svg+xml;base64,{inner}"/>"#);
+    assert_eq!(
+        verdict_of("svg-nested", &body),
+        Some(Verdict::Undecoded),
+        "an SVG embedded in an SVG was drawn"
+    );
+}
+
+#[test]
+fn svg_filter_copies_bounded() {
+    let filter = r#"<filter id="blur"><feGaussianBlur stdDeviation="1"/></filter>"#;
+    let leaf =
+        format!(r#"{filter}<g id="l0" filter="url(#blur)"><rect width="2" height="2"/></g>"#);
+    assert_eq!(
+        verdict_of("svg-filters", &fanned(&leaf, 10, 2)),
+        Some(Verdict::Undecoded),
+        "a hundred filtered copies were drawn"
+    );
+    let few = format!(r#"{filter}<g filter="url(#blur)"><rect width="8" height="8"/></g>"#);
+    assert!(
+        changed(verdict_of("svg-filter-one", &few)),
+        "one filtered group was refused"
+    );
+}
+
+#[test]
+fn svg_convolve_bounded() {
+    let kernel = vec!["1"; 33 * 33].join(" ");
+    let body = format!(
+        r#"<filter id="big"><feConvolveMatrix order="33" kernelMatrix="{kernel}"/></filter><rect width="8" height="8" filter="url(#big)"/>"#
+    );
+    assert_eq!(
+        verdict_of("svg-convolve", &body),
+        Some(Verdict::Undecoded),
+        "a 33x33 convolution was drawn"
+    );
+}

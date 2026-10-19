@@ -739,14 +739,96 @@ fn fonts() -> std::sync::Arc<resvg::usvg::fontdb::Database> {
         .clone()
 }
 
+/// The most encoded bytes one SVG's embedded images may hold, every `<use>`
+/// copy counted, before the document is refused.
+const EMBEDDED_BUDGET: u64 = 32 * 1024 * 1024;
+/// The most groups one SVG may filter: each is drawn again for every copy.
+const MAX_FILTERED: usize = 64;
+/// The most cells a convolution matrix may hold: its cost is per pixel.
+const MAX_KERNEL: u32 = 32 * 32;
+
+/// An embedded image, as usvg reads it, once its share of `budget` and its
+/// size are known to fit. A nested SVG is refused: it would bring its own
+/// million nodes. Any refusal sets `over`.
+fn embedded(
+    mime: &str,
+    data: std::sync::Arc<Vec<u8>>,
+    options: &resvg::usvg::Options,
+    budget: &AtomicU64,
+    over: &std::sync::atomic::AtomicBool,
+) -> Option<resvg::usvg::ImageKind> {
+    let refuse = || {
+        over.store(true, Ordering::Relaxed);
+        None
+    };
+    if mime == "image/svg+xml" {
+        return refuse();
+    }
+    let size = data.len() as u64;
+    if budget
+        .try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+            left.checked_sub(size)
+        })
+        .is_err()
+    {
+        return refuse();
+    }
+    let fits = image::ImageReader::new(std::io::Cursor::new(&**data))
+        .with_guessed_format()
+        .ok()
+        .and_then(|reader| reader.into_dimensions().ok())
+        .is_some_and(|(width, height)| {
+            width <= MAX_SIDE
+                && height <= MAX_SIDE
+                && u64::from(width) * u64::from(height) * 4 <= MAX_ALLOC
+        });
+    if !fits {
+        return refuse();
+    }
+    (resvg::usvg::ImageHrefResolver::default_data_resolver())(mime, data, options)
+}
+
+/// Whether `group` asks more of the render than one picture may take: too
+/// many filtered groups, or a convolution too large.
+fn too_heavy(tree: &resvg::usvg::Tree) -> bool {
+    use resvg::usvg::{Group, Node, filter::Kind};
+    fn weigh(group: &Group, filtered: &mut usize, kernel: &mut u32) {
+        if !group.filters().is_empty() {
+            *filtered += 1;
+        }
+        for filter in group.filters() {
+            for primitive in filter.primitives() {
+                if let Kind::ConvolveMatrix(convolve) = primitive.kind() {
+                    let matrix = convolve.matrix();
+                    *kernel = (*kernel).max(matrix.columns().saturating_mul(matrix.rows()));
+                }
+            }
+        }
+        for node in group.children() {
+            if let Node::Group(child) = node {
+                weigh(child, filtered, kernel);
+            }
+            node.subroots(|root| weigh(root, filtered, kernel));
+        }
+    }
+    let (mut filtered, mut kernel) = (0, 0);
+    weigh(tree.root(), &mut filtered, &mut kernel);
+    filtered > MAX_FILTERED || kernel > MAX_KERNEL
+}
+
 /// One SVG side rendered, its long side at [`SVG_LONG_SIDE`].
 fn render_svg(bytes: &[u8]) -> Option<RgbaImage> {
     use resvg::usvg::{ImageHrefResolver, Options, Tree};
+    let budget = std::sync::Arc::new(AtomicU64::new(EMBEDDED_BUDGET));
+    let over = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (spent, refused) = (std::sync::Arc::clone(&budget), std::sync::Arc::clone(&over));
     let mut options = Options {
         // Only what the document carries: a reference to any other file is
         // refused, so a changed SVG cannot make the pane open one.
         image_href_resolver: ImageHrefResolver {
-            resolve_data: ImageHrefResolver::default_data_resolver(),
+            resolve_data: Box::new(move |mime, data, options| {
+                embedded(mime, data, options, &spent, &refused)
+            }),
             resolve_string: Box::new(|_, _| {
                 REFUSED.fetch_add(1, Ordering::Relaxed);
                 None
@@ -754,10 +836,15 @@ fn render_svg(bytes: &[u8]) -> Option<RgbaImage> {
         },
         ..Options::default()
     };
-    if bytes.windows(5).any(|window| window == b"<text") {
+    // Loaded once for the process, so a mention outside a label costs nothing
+    // the next time.
+    if bytes.windows(4).any(|window| window == b"text") {
         options.fontdb = fonts();
     }
     let tree = Tree::from_data(bytes, &options).ok()?;
+    if over.load(Ordering::Relaxed) || too_heavy(&tree) {
+        return None;
+    }
     let size = tree.size();
     let scale = SVG_LONG_SIDE / size.width().max(size.height());
     let width = (size.width() * scale).ceil().max(1.0) as u32;

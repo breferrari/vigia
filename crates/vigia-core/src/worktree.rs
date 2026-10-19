@@ -576,11 +576,17 @@ impl Worktree {
     /// asked. [`Frame::diff`](crate::Frame::diff) draws the same failure instead,
     /// because a frame serving a screen cannot lose the entries beside it.
     pub fn diff(&self, change: &FileChange) -> Result<FileDiff> {
-        self.diff_counted(change, &mut 0)
+        self.diff_counted(change, true, &mut 0)
     }
 
-    /// [`Worktree::diff`], reporting the type probes it spent.
-    pub(crate) fn diff_counted(&self, change: &FileChange, probes: &mut u64) -> Result<FileDiff> {
+    /// [`Worktree::diff`], reporting the type probes it spent. `svg` says
+    /// whether a changed SVG is drawn rather than diffed as text.
+    pub(crate) fn diff_counted(
+        &self,
+        change: &FileChange,
+        svg: bool,
+        probes: &mut u64,
+    ) -> Result<FileDiff> {
         if !change.is_diffable() {
             // A conflict and a type change are states rather than diffs, and this
             // method deliberately reads nothing for them.
@@ -588,7 +594,7 @@ impl Worktree {
         }
 
         let diff = self.diff_attribute(change)?;
-        if let Some((mut picture, cost)) = self.drawn_svg(change, diff) {
+        if let Some((mut picture, cost)) = self.drawn_svg(change, svg, diff) {
             let mut drawn = hunk::compute(change.path.clone(), &[], &[], Some(false));
             drawn.bytes = cost;
             self.stamp(change, &mut picture);
@@ -665,8 +671,13 @@ impl Worktree {
     /// The picture of a changed SVG drawn in place of its text, and the bytes
     /// read to learn it: none when an attribute says how to diff it, or a side
     /// gives no size.
-    fn drawn_svg(&self, change: &FileChange, diff: Option<bool>) -> Option<(Picture, u64)> {
-        if diff.is_some() || !picture::svg_named(&change.path) {
+    fn drawn_svg(
+        &self,
+        change: &FileChange,
+        svg: bool,
+        diff: Option<bool>,
+    ) -> Option<(Picture, u64)> {
+        if !svg || diff.is_some() || !picture::svg_named(&change.path) {
             return None;
         }
         let mut cost = 0;
@@ -855,13 +866,14 @@ impl Worktree {
     ///
     /// Either side cannot be read, as [`Worktree::diff`].
     pub fn measure(&self, change: &FileChange) -> Result<hunk::FileSpan> {
-        self.measure_counted(change, &mut 0)
+        self.measure_counted(change, true, &mut 0)
     }
 
     /// [`Worktree::measure`], reporting the type probes it spent.
     pub(crate) fn measure_counted(
         &self,
         change: &FileChange,
+        svg: bool,
         probes: &mut u64,
     ) -> Result<hunk::FileSpan> {
         if !change.is_diffable() {
@@ -869,7 +881,7 @@ impl Worktree {
         }
 
         let diff = self.diff_attribute(change)?;
-        if let Some((_, cost)) = self.drawn_svg(change, diff) {
+        if let Some((_, cost)) = self.drawn_svg(change, svg, diff) {
             let mut drawn = hunk::measure(&[], &[], Some(false));
             drawn.bytes = cost;
             return Ok(drawn);
