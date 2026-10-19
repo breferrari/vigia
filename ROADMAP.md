@@ -337,6 +337,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10)
 | ⬜ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
 | ⬜ | Kitty image lost on reattach. **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
 | ⬜ | Cell size fixed at startup. **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
+| ⬜ | Changed binary rename unpaired. **Found while building #655** | [#658](https://github.com/breferrari/vigia/issues/658) |
 
 ## Phase 10 — current Rust
 
