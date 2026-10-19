@@ -1203,3 +1203,85 @@ fn breach_over_pairs() {
         "two breaching frames of 30ms wall and 10ms CPU are 60ms, 40ms of it off-CPU"
     );
 }
+
+/// Frames sampled for the LFS compare gate, each on a fresh worktree.
+const LFS_FRAMES: usize = 40;
+
+/// A repository holding one 16 MiB file under `filter=lfs` whose stored blob
+/// is a pointer and whose object is fetched, rewritten after the index so the
+/// walk reads it again. With `content` the worktree holds the object's bytes,
+/// which the walk compares with the object; without, it holds the pointer,
+/// which needs no compare.
+fn lfs_compare_repo(name: &str, content: bool) -> Scratch {
+    let scratch = Scratch::new(name);
+    let object: Vec<u8> = (0..16 * 1024 * 1024)
+        .map(|i: u32| (i % 251) as u8)
+        .collect();
+    scratch.write(
+        ".gitattributes",
+        "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let (oid, pointer) = support::lfs_pointer(&object, 0x5a);
+    scratch.write("big.bin", &pointer);
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    scratch.write(
+        &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
+        &object,
+    );
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    if content {
+        scratch.write("big.bin", &object);
+    } else {
+        scratch.write("big.bin", &pointer);
+    }
+    scratch
+}
+
+/// I9 over a cold frame that compares one 16 MiB LFS file with its object,
+/// interleaved with the same frame where nothing has to be compared.
+#[test]
+fn lfs_compare_holds_the_frame() {
+    let compared = lfs_compare_repo("budget-lfs-compare", true);
+    let plain = lfs_compare_repo("budget-lfs-plain", false);
+    let cold = |scratch: &Scratch, compares: u64| {
+        let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
+        let mut frame = worktree.frame();
+        let took = time(|| frame.advance().expect("advance"));
+        assert!(
+            frame.files().is_empty(),
+            "a 16 MiB LFS file equal to its object was listed"
+        );
+        assert_eq!(
+            worktree.lfs_compares(),
+            compares,
+            "the frame did not compare as the fixture intends"
+        );
+        took
+    };
+    // Every sample is checked, so the gate measures the compare it names.
+    cold(&compared, 1);
+    cold(&plain, 0);
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
+    for _ in 0..LFS_FRAMES {
+        with.push(cold(&compared, 1));
+        without.push(cold(&plain, 0));
+    }
+    let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
+    eprintln!(
+        "lfs compare: cold frame p50 {:?} p99 {:?}, without a compare p50 {:?} p99 {:?}",
+        at(&with, 0.5),
+        at(&with, 0.99),
+        at(&without, 0.5),
+        at(&without, 0.99)
+    );
+    assert!(
+        at(&with, 0.99) <= budget(I9_FRAME),
+        "I9: a cold frame comparing a 16 MiB LFS file took p99 {:?}, over {:?}",
+        at(&with, 0.99),
+        budget(I9_FRAME)
+    );
+}
