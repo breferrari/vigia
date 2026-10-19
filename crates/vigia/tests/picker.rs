@@ -99,9 +99,8 @@ fn asked_in_pty(answer: Option<&[u8]>) -> String {
 
 #[test]
 fn late_answer_read() {
-    // Past the background query's own wait, where a fixed wait used to give up
-    // and leave the rest of the answer for the reader. The query now ends on the
-    // status reply, which this answer carries last.
+    // Past the background query's own wait. The query ends on the status reply,
+    // which this answer carries last.
     let text = asked_after(
         Some(b"\x1b_Gi=31;OK\x1b\\\x1b[6;20;10t\x1b[0n"),
         Duration::from_millis(250),
