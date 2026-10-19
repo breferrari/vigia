@@ -1401,12 +1401,9 @@ impl App {
                 self.sheet = Some(page.min(pages - 1));
             }
         }
-        // Owed only to the position the step left, so anything that moved the
-        // viewport since drops it.
         let rise = self
             .rise
             .take()
-            .filter(|(_, _, left)| *left == self.position)
             .map(|(anchor, by, _)| (anchor, by))
             .or_else(|| (self.kept == Some(self.position)).then_some((self.position, 0)));
         let view = View::collect_noted(

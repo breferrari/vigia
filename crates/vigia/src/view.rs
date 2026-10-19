@@ -2027,7 +2027,6 @@ impl View {
                 if landing && !view.landed {
                     skip = landing_of(&change.kind, diff, height, landing_content);
                     view.landed = true;
-                    aim = Aim::default();
                 }
 
                 if !placed {
@@ -2438,18 +2437,6 @@ impl View {
             }
             _ => 0,
         };
-        if aim.under == 0 && aim.rise.is_none() {
-            let mut under: usize = if drawn {
-                walked.pins.iter().map(|pin| pin.count(content)).sum()
-            } else {
-                0
-            };
-            if let Some(boxed) = &walked.boxed {
-                under += box_rows(boxed, content).0.len();
-            }
-            under += walked.hung.iter().map(|hung| hung.rows).sum::<usize>();
-            return under + self.rows.iter().map(|row| 1 + pieces(row)).sum::<usize>();
-        }
         let mut under = vec![0usize; self.rows.len()];
         if drawn {
             for pin in &walked.pins {
@@ -2572,7 +2559,7 @@ impl View {
 
         // Nothing on this screen wraps and nothing sits under a row, so the rows
         // are the display rows and every index already names one.
-        if total == breaks.len() && !aiming {
+        if total == breaks.len() {
             self.ended = total <= height;
             self.steps = (0..breaks.len())
                 .map(|at| position_of(blocks, at))
@@ -2597,11 +2584,11 @@ impl View {
 
         // Both clamps as display rows dropped off the front, the only thing
         // either can move.
-        // A screen opened inside a row's hung rows still fills the pane at the end.
-        let mut dropped = match (at_bottom, aiming) {
-            (true, true) => opens_at.min(total.saturating_sub(height)),
-            (true, false) => total.saturating_sub(height),
-            (false, _) => opens_at,
+        // A step's top wins over the clamp: a screen it left short has restarted.
+        let mut dropped = if aiming || !at_bottom {
+            opens_at
+        } else {
+            total.saturating_sub(height)
         };
         // A box the reader cannot see is a mode they cannot leave on purpose,
         // so the window is pulled into the span that shows one.
