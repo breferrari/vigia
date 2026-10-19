@@ -36,6 +36,7 @@ image.workspace = true
 ratatui.workspace = true
 ratatui-image.workspace = true
 resvg.workspace = true
+hayro.workspace = true
 skrifa.workspace = true
 ratatui-textarea.workspace = true
 serde_json.workspace = true

@@ -511,6 +511,8 @@ NO_COLOR=1 vigia                # every ladder collapses to something readable
 | [ratatui-image](https://github.com/ratatui/ratatui-image) | Draws a changed image's pictures, as half-blocks or a terminal image protocol (from 1.2.0, unreleased) |
 | [resvg](https://github.com/linebender/resvg) | Draws a changed SVG's pictures (from 1.2.0, unreleased) |
 | [svgtypes](https://github.com/linebender/svgtypes) | Reads an SVG's size for its size line (from 1.2.0, unreleased) |
+| [hayro](https://github.com/LaurenzV/hayro) | Draws a changed PDF's pictures (from 1.2.0, unreleased) |
+| [hayro-syntax](https://github.com/LaurenzV/hayro) | Reads a PDF's page size for its size line (from 1.2.0, unreleased) |
 | [skrifa](https://github.com/googlefonts/fontations) | Finds an installed font that can draw an SVG's text (from 1.2.0, unreleased) |
 
 The last rows draw changed images, which arrives in 1.2.0.

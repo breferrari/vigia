@@ -3465,25 +3465,58 @@ fn lock_packages(lock: &str) -> impl Iterator<Item = (&str, Option<&str>)> {
     })
 }
 
-/// How many copies of `crate_name` the lock resolves.
-fn copies_of(lock: &str, crate_name: &str) -> usize {
-    lock_packages(lock)
+/// The versions of `crate_name` the lock resolves, sorted.
+fn versions_of<'a>(lock: &'a str, crate_name: &str) -> Vec<&'a str> {
+    let mut versions: Vec<&str> = lock_packages(lock)
         .filter(|(name, _)| *name == crate_name)
-        .count()
+        .filter_map(|(_, version)| version)
+        .collect();
+    versions.sort_unstable();
+    versions
+}
+
+/// The versions SPEC §6 names for `crate_name` in its list of the font
+/// crates' copies: "`skrifa` 0.44.0 and 0.46.2".
+fn named_versions<'a>(spec: &'a str, crate_name: &str) -> Vec<&'a str> {
+    let sentence = spec
+        .split("so the lock holds exactly these copies")
+        .nth(1)
+        .and_then(|rest| rest.split(". ").next())
+        .expect("SPEC §6 names the font crates' copies");
+    let mut versions: Vec<&str> = sentence
+        .split(&format!("`{crate_name}` "))
+        .nth(1)
+        .map(|rest| {
+            rest.split(|c| c == ',' || c == '`')
+                .next()
+                .unwrap_or_default()
+                .split(" and ")
+                .map(str::trim)
+                .collect()
+        })
+        .unwrap_or_default();
+    versions.sort_unstable();
+    versions
 }
 
 #[test]
-fn one_skrifa() {
-    // `vigia` takes the requirement `usvg` declares, so the two unify.
+fn font_copies_named() {
+    // `hayro` needs a `skrifa` no `usvg` shares, so two copies are deliberate,
+    // and a third, or one nobody named, is not.
+    let (lock, spec) = (repo_file("Cargo.lock"), repo_file("SPEC.md"));
+    for crate_name in ["skrifa", "read-fonts", "fearless_simd"] {
+        let named = named_versions(&spec, crate_name);
+        assert!(!named.is_empty(), "SPEC §6 names no copy of {crate_name}");
+        assert_eq!(
+            versions_of(&lock, crate_name),
+            named,
+            "the lock's copies of {crate_name} are not the ones SPEC §6 names"
+        );
+    }
+    let three = "[[package]]\nname = \"skrifa\"\nversion = \"0.44.0\"\n\n[[package]]\nname = \"skrifa\"\nversion = \"0.45.0\"\n\n[[package]]\nname = \"skrifa\"\nversion = \"0.46.2\"\n";
     assert_eq!(
-        copies_of(&repo_file("Cargo.lock"), "skrifa"),
-        1,
-        "vigia's skrifa and usvg's no longer resolve to one copy"
-    );
-    let split = "[[package]]\nname = \"skrifa\"\nversion = \"0.44.0\"\n\n[[package]]\nname = \"skrifa\"\nversion = \"0.45.0\"\n";
-    assert_eq!(
-        copies_of(split, "skrifa"),
-        2,
-        "the check no longer sees a second copy"
+        versions_of(three, "skrifa"),
+        ["0.44.0", "0.45.0", "0.46.2"],
+        "the check no longer sees every copy"
     );
 }
