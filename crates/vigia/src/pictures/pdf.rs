@@ -117,10 +117,10 @@ fn walk<'a>(
     Some(())
 }
 
-/// What a page draws from, each under its name: its contents, and each
-/// resource its content names, those it inherits among them. A resource it
-/// does not name is left out, so a change to one another page draws does
-/// not count here.
+/// What a page draws from, each under its name: its contents and its
+/// resources. Resources it inherits are shared with other pages, so of those
+/// only the ones its content names count, and a change to one another page
+/// draws does not; reading the names decodes the content.
 fn page_roots<'a>(
     page: &hayro::hayro_syntax::page::Page<'a>,
 ) -> Vec<(
@@ -128,16 +128,19 @@ fn page_roots<'a>(
     hayro::hayro_syntax::object::MaybeRef<hayro::hayro_syntax::object::Object<'a>>,
 )> {
     use hayro::hayro_syntax::object::{MaybeRef, Object};
-    let mut named: HashSet<Vec<u8>> = HashSet::new();
-    let mut operations = page.operations();
-    while let Some(operation) = operations.next() {
-        for operand in operation.operands() {
-            if let Object::Name(name) = operand {
-                named.insert(name.as_ref().to_vec());
+    let resources = page.resources();
+    let named = (!page.raw().contains_key(b"Resources")).then(|| {
+        let mut named: HashSet<Vec<u8>> = HashSet::new();
+        let mut operations = page.operations();
+        while let Some(operation) = operations.next() {
+            for operand in operation.operands() {
+                if let Object::Name(name) = operand {
+                    named.insert(name.as_ref().to_vec());
+                }
             }
         }
-    }
-    let resources = page.resources();
+        named
+    });
     let mut roots: Vec<_> = page
         .raw()
         .get::<Object<'a>>(b"Contents")
@@ -154,7 +157,10 @@ fn page_roots<'a>(
         (b"Shading", &resources.shadings),
     ] {
         for (name, value) in dict.entries() {
-            if named.contains(name.as_ref()) {
+            if named
+                .as_ref()
+                .is_none_or(|named| named.contains(name.as_ref()))
+            {
                 roots.push((key, MaybeRef::NotRef(Object::Name(name))));
                 roots.push((key, value));
             }
@@ -177,7 +183,7 @@ fn image_size(stream: &hayro::hayro_syntax::object::Stream<'_>) -> Option<(u32, 
 /// A page's fingerprint, from its boxes, its rotation and the encoded bytes
 /// of every object it draws from, or `None` when an image it holds is larger
 /// than any image may decode, or it reaches more than [`PDF_OBJECTS`] new
-/// objects. Only its content is decoded, to read the resources it names. An
+/// objects. Its content is decoded only when its resources are inherited. An
 /// object an earlier page reached, in `seen`, counts by its number alone.
 fn page_print(
     page: &hayro::hayro_syntax::page::Page<'_>,
