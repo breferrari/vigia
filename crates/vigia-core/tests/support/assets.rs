@@ -73,11 +73,16 @@ pub fn animated_gif(frames: &[image::RgbaImage]) -> Vec<u8> {
     bytes
 }
 
-/// A PNG whose header is whole and whose pixel data is not.
+/// A PNG whose chunks are whole and whose pixel data is garbled, so its
+/// header reads and its pixels do not.
 pub fn corrupt_png(width: u32, height: u32, seed: u8) -> Vec<u8> {
     let mut bytes = png(width, height, seed);
-    // Past the signature and the IHDR chunk.
-    for byte in bytes.iter_mut().skip(33) {
+    let at = bytes
+        .windows(4)
+        .position(|window| window == b"IDAT")
+        .expect("a PNG has pixel data");
+    let length = u32::from_be_bytes(bytes[at - 4..at].try_into().expect("four bytes")) as usize;
+    for byte in &mut bytes[at + 4..at + 4 + length] {
         *byte ^= 0x5a;
     }
     bytes
@@ -106,4 +111,39 @@ pub fn labelled_svg(label: &str) -> String {
 /// `could not be decoded`.
 pub fn costly_svg() -> String {
     r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><filter id="t"><feTurbulence baseFrequency="0.5" numOctaves="100000000"/></filter><rect width="24" height="24" filter="url(#t)"/></svg>"#.to_owned()
+}
+
+/// A PNG whose header claims `width` by `height` and whose pixel data is a
+/// few bytes, so it sizes as large as it says without being that large.
+pub fn claimed_png(width: u32, height: u32) -> Vec<u8> {
+    fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut out = (data.len() as u32).to_be_bytes().to_vec();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        let mut crc = !0u32;
+        for byte in kind.iter().chain(data) {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xedb8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        out.extend_from_slice(&(!crc).to_be_bytes());
+        out
+    }
+    let mut header = width.to_be_bytes().to_vec();
+    header.extend_from_slice(&height.to_be_bytes());
+    // Eight bits, RGBA, the only compression, filter and interlace methods.
+    header.extend_from_slice(&[8, 6, 0, 0, 0]);
+    let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+    bytes.extend(chunk(b"IHDR", &header));
+    bytes.extend(chunk(
+        b"IDAT",
+        &[0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01],
+    ));
+    bytes.extend(chunk(b"IEND", &[]));
+    bytes
 }
