@@ -94,7 +94,7 @@ CI runs on Linux, macOS and Windows, with a musl leg for the artifact that Linux
 
 ## What this project will not do
 
-`ROADMAP.md`'s "Non-goals, permanent" is the list. It is permanent, not "later": staging, committing and rebasing, AI features of its own, git remote operations, and a GUI. Each is reviewer-class work or costs an invariant. The team will decline a proposal for one of those, and the decline is not a judgement on the idea.
+What this project will not do is listed in [ROADMAP.md](ROADMAP.md#non-goals-permanent).
 
 ## Licence
 
