@@ -193,7 +193,11 @@ fn check_drawable(is_terminal: bool) -> io::Result<()> {
 
 /// Chain a restore onto the panic hook, once per process.
 fn install_hook() {
-    install_hook_in(&HOOK, || restore_everything(&mut Crossterm::on_stdout()));
+    install_hook_in(
+        &HOOK,
+        || restore_everything(&mut Crossterm::on_stdout()),
+        || std::process::abort(),
+    );
 }
 
 /// Give back the whole of [`TAKEOVER`], whatever was actually taken.
@@ -201,12 +205,31 @@ fn restore_everything<C: Console>(console: &mut C) {
     give_back_all(console, TAKEOVER.len());
 }
 
-/// Chain `restore` onto the panic hook, at most once per `once`.
-fn install_hook_in(once: &Once, restore: impl Fn() + Send + Sync + 'static) {
+/// Chain `restore` and then `end` onto the panic hook, at most once per `once`.
+/// The picture worker's panics are left to its own catch.
+fn install_hook_in(
+    once: &Once,
+    restore: impl Fn() + Send + Sync + 'static,
+    end: impl Fn() + Send + Sync + 'static,
+) {
     once.call_once(|| {
         let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| on_panic(&restore, &previous, info)));
+        std::panic::set_hook(Box::new(move |info| {
+            if std::thread::current().name() == Some(crate::pictures::WORKER) {
+                return;
+            }
+            on_panic(&restore, &previous, info);
+            // The release build unwinds for the worker's sake. Anywhere else
+            // a thread that died quietly would leave a pane that looks alive.
+            end();
+        }));
     });
+}
+
+/// The panic hook `run` installs, for a test that needs it in a child.
+#[doc(hidden)]
+pub fn install_panic_hook() {
+    install_hook();
 }
 
 /// The order the panic path runs in: restore, then whatever hook was there.
@@ -888,11 +911,15 @@ mod tests {
         let once = Once::new();
         for _ in 0..2 {
             let restores = Arc::clone(&restores);
-            install_hook_in(&once, move || {
-                if std::thread::current().id() == me {
-                    *restores.lock().expect("count") += 1;
-                }
-            });
+            install_hook_in(
+                &once,
+                move || {
+                    if std::thread::current().id() == me {
+                        *restores.lock().expect("count") += 1;
+                    }
+                },
+                || {},
+            );
         }
 
         let panicked = std::panic::catch_unwind(|| panic!("on purpose")).is_err();

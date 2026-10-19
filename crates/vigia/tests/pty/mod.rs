@@ -26,33 +26,8 @@ pub struct Script<'a> {
 
 /// Run `command` in a fresh terminal under `script`, wait for its `asked`
 /// line, then type a byte. Everything the terminal showed.
-pub fn run(mut command: Command, script: Script<'_>) -> String {
-    let (terminal, slave) = open();
-    command
-        .stdout(Stdio::from(slave.try_clone().expect("dup")))
-        .stderr(Stdio::null());
-    if script.piped {
-        command.stdin(Stdio::null());
-    } else {
-        command.stdin(Stdio::from(slave.try_clone().expect("dup")));
-    }
-    let detached = script.detached;
-    // SAFETY: only async-signal-safe calls between fork and exec. The terminal
-    // is taken through stdout, which is it in every case here.
-    unsafe {
-        command.pre_exec(move || {
-            if libc::setsid() < 0 || (!detached && libc::ioctl(1, libc::TIOCSCTTY as _, 0) < 0) {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let _child = Reaped(command.spawn().expect("spawn the child"));
-    drop(slave);
-    // Declared after the child, so it is closed first on every way out: a
-    // child exiting on a terminal waits for its output to drain.
-    let mut master = terminal;
-
+pub fn run(command: Command, script: Script<'_>) -> String {
+    let (_child, mut master) = start(command, &script);
     let mut seen = Vec::new();
     if let Some(answer) = script.answer {
         read_until(
@@ -70,6 +45,35 @@ pub fn run(mut command: Command, script: Script<'_>) -> String {
     master.write_all(b"z\n").expect("type a byte");
     read_until(&mut master, &mut seen, "got z", Duration::from_secs(10));
     String::from_utf8_lossy(&seen).into_owned()
+}
+
+/// Start `command` in a fresh terminal: the child, and the terminal's master.
+/// Bind them in that order, so the master is closed first on every way out: a
+/// child exiting on a terminal waits for its output to drain.
+pub fn start(mut command: Command, script: &Script<'_>) -> (Reaped, File) {
+    let (terminal, slave) = open();
+    command
+        .stdout(Stdio::from(slave.try_clone().expect("dup")))
+        .stderr(Stdio::from(slave.try_clone().expect("dup")));
+    if script.piped {
+        command.stdin(Stdio::null());
+    } else {
+        command.stdin(Stdio::from(slave.try_clone().expect("dup")));
+    }
+    let detached = script.detached;
+    // SAFETY: only async-signal-safe calls between fork and exec. The terminal
+    // is taken through stdout, which is it in every case here.
+    unsafe {
+        command.pre_exec(move || {
+            if libc::setsid() < 0 || (!detached && libc::ioctl(1, libc::TIOCSCTTY as _, 0) < 0) {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let child = Reaped(command.spawn().expect("spawn the child"));
+    drop(slave);
+    (child, terminal)
 }
 
 /// The child's `asked` line.
@@ -115,7 +119,21 @@ fn open() -> (File, OwnedFd) {
 
 /// A child that is killed and reaped when the test is done with it, failed or
 /// not: one blocked on its terminal never exits by itself.
-struct Reaped(Child);
+pub struct Reaped(Child);
+
+impl Reaped {
+    /// How the child ended, waiting up to `limit`.
+    pub fn status(&mut self, limit: Duration) -> Option<std::process::ExitStatus> {
+        let until = Instant::now() + limit;
+        while Instant::now() < until {
+            if let Ok(Some(status)) = self.0.try_wait() {
+                return Some(status);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        None
+    }
+}
 
 impl Drop for Reaped {
     fn drop(&mut self) {
@@ -125,7 +143,7 @@ impl Drop for Reaped {
 }
 
 /// Read the terminal into `seen` until it holds `needle`, failing after `limit`.
-fn read_until(master: &mut File, seen: &mut Vec<u8>, needle: &str, limit: Duration) {
+pub fn read_until(master: &mut File, seen: &mut Vec<u8>, needle: &str, limit: Duration) {
     let deadline = Instant::now() + limit;
     while !String::from_utf8_lossy(seen).contains(needle) {
         let left = deadline.saturating_duration_since(Instant::now());

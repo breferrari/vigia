@@ -475,8 +475,38 @@ static DECODES: AtomicU64 = AtomicU64::new(0);
 /// Of those, the ones decoded anywhere but the worker, which is a paint paying
 /// for one.
 static OFF_WORKER: AtomicU64 = AtomicU64::new(0);
-/// The worker thread's name, which is how a decode knows where it runs.
-const WORKER: &str = "vigia-pictures";
+/// The worker thread's name, which is how a decode knows where it runs and how
+/// the panic hook knows to leave a panic to the worker's own catch.
+pub(crate) const WORKER: &str = "vigia-pictures";
+
+/// Where a test has asked the next picture to panic, or [`ARMED_NONE`].
+static ARMED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(ARMED_NONE);
+const ARMED_NONE: u8 = 0;
+
+/// Which part of building a picture [`panic_next`] makes panic.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    /// Reading the image.
+    Decode = 1,
+    /// Encoding a panel for the terminal.
+    Encode = 2,
+}
+
+/// Make the next picture panic at `stage`, as a malformed file would. A test
+/// seam: in release it costs one relaxed load per stage per picture.
+#[doc(hidden)]
+pub fn panic_next(stage: Stage) {
+    ARMED.store(stage as u8, Ordering::Relaxed);
+}
+
+/// Panic here if a test armed `stage`.
+fn armed(stage: Stage) {
+    if ARMED.load(Ordering::Relaxed) == stage as u8 {
+        ARMED.store(ARMED_NONE, Ordering::Relaxed);
+        panic!("a test asked {stage:?} to panic");
+    }
+}
 
 /// How many images have been decoded so far.
 pub fn decodes() -> u64 {
@@ -529,7 +559,14 @@ impl Pictures {
                             shown.contains(&job.key)
                         },
                     );
-                    let built = wanted.then(|| build(&job, inks, &picker));
+                    // Everything one picture takes, decode to encode: a file an
+                    // agent wrote must not be able to close the pane.
+                    let built = wanted.then(|| {
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            build(&job, inks, &picker)
+                        }))
+                        .unwrap_or_else(|_| undecoded())
+                    });
                     if outbox.send((job.key, built)).is_err() {
                         break;
                     }
@@ -711,6 +748,7 @@ fn image_format(format: Format) -> ImageFormat {
 fn decode(source: &Source, format: Format) -> Option<(RgbaImage, Option<Vec<u8>>)> {
     use image::ImageDecoder;
     let bytes = source.read()?;
+    armed(Stage::Decode);
     DECODES.fetch_add(1, Ordering::Relaxed);
     if std::thread::current().name() != Some(WORKER) {
         OFF_WORKER.fetch_add(1, Ordering::Relaxed);
@@ -793,6 +831,7 @@ fn panel(
 ) -> Option<(SlicedProtocol, Option<u32>)> {
     let image = DynamicImage::ImageRgb8(painted(image, hit, paint, inks));
     let size = Size::new(slot.width, slot.rows);
+    armed(Stage::Encode);
     // Direct, because the picker's fit would read the grid as font pixels.
     if picker.protocol_type() == ProtocolType::Halfblocks {
         return Some((

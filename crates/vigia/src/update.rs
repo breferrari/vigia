@@ -162,8 +162,8 @@ fn fetch() -> Option<String> {
 
 /// Whether this CPU has everything the TLS provider asserts on.
 ///
-/// The provider asserts rather than degrades, the release profile aborts rather
-/// than unwinds, and the thread this runs on is the monitor's. So a machine
+/// The provider asserts rather than degrades, a panic off the picture worker
+/// aborts, and the thread this runs on is the monitor's. So a machine
 /// below its floor, which its own source puts at roughly 2013, has to lose the
 /// check here rather than lose the pane there. The list is read from graviola
 /// 0.4.1's `verify_cpu_features`, not guessed, and `package.rs` fails when the

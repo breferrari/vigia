@@ -142,7 +142,8 @@ ureq = { version = "3.4", default-features = false, features = [
 # `rustls`, in the same repository as `graviola` itself.
 #
 # It only compiles on x86_64 and aarch64, and it asserts on CPU features that
-# `panic = "abort"` turns into a dead process rather than a failed request. Both
+# a panic outside the picture worker turns into a dead process rather than a
+# failed request, because the panic hook aborts. Both
 # are handled where it is used: the dependency is target-conditional in
 # `crates/vigia`, and `update.rs` tests the same features before touching it.
 rustls-graviola = "0.4"
@@ -259,7 +260,9 @@ lto = "thin"
 # construction, since neither moves, and the Windows gates that would notice run
 # on a shared runner with slack. Stated rather than papered over.
 codegen-units = 2
-panic = "abort"
+# Unwinds so the picture worker can catch a decoder's panic (#645). The panic
+# hook still aborts on every other thread, so that behaviour is unchanged.
+panic = "unwind"
 
 # Benchmarks and the soak test need symbols without giving up optimisation.
 # `panic` is deliberately absent: cargo ignores it for the bench profile.
