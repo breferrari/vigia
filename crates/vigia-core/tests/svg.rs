@@ -62,6 +62,14 @@ fn svg_size_line() {
             r#"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7.5 3'>"#,
             (8, 3),
         ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="48" viewBox="0 0 24 12">"#,
+            (48, 24),
+        ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" height="10" viewBox="0 0 30 15">"#,
+            (20, 10),
+        ),
     ] {
         let diff = changed("svg-size", &icon(root, "red"), &icon(root, "blue"));
         let side = Some((Format::Svg, want.0, want.1));
@@ -98,6 +106,7 @@ fn svg_unparsable_keeps_text() {
         "<svg width=\"0\" height=\"24\">",
         "<svg width=\"24\" height=\"24\"",
         "<svgx width=\"24\" height=\"24\">",
+        "<svg viewBox=\"0 0 -24 24\">",
     ] {
         let diff = changed("svg-unparsable", &icon(root, "red"), &icon(root, "blue"));
         assert!(
@@ -177,4 +186,50 @@ fn svg_measured_binary() {
         span.binary && span.hunks == 0 && span.lines == 0,
         "the height walk measured a drawn SVG as text: {span:?}"
     );
+}
+
+#[test]
+fn svg_utf16_keeps_text() {
+    let utf16 = |fill: &str| -> Vec<u8> {
+        let text = icon(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#,
+            fill,
+        );
+        [0xff, 0xfe]
+            .into_iter()
+            .chain(text.encode_utf16().flat_map(u16::to_le_bytes))
+            .collect()
+    };
+    let scratch = Scratch::new("svg-utf16");
+    scratch.write("icon.svg", utf16("red"));
+    scratch.commit_all("initial");
+    scratch.write("icon.svg", utf16("blue"));
+    let diff = diff_of(&scratch, "icon.svg");
+    assert!(
+        diff.picture.is_none(),
+        "a UTF-16 SVG, which usvg cannot read, was drawn"
+    );
+}
+
+#[test]
+fn svg_rename_drawn() {
+    let root = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#;
+    let scratch = Scratch::new("svg-rename");
+    scratch.write("old.svg", icon(root, "red"));
+    scratch.commit_all("initial");
+    std::fs::remove_file(scratch.path_of("old.svg")).expect("remove");
+    scratch.write("new.svg", icon(root, "red"));
+    scratch.git(&["add", "-A"]);
+    scratch.write("new.svg", icon(root, "blue"));
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    assert!(!changes.is_empty(), "the rename was not listed");
+    for change in &changes {
+        let diff = worktree.diff(change).expect("diff");
+        assert!(
+            diff.picture.is_some(),
+            "{} of a renamed SVG was not drawn",
+            change.path
+        );
+    }
 }

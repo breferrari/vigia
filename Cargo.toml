@@ -66,8 +66,8 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # defaults pull libchafa through pkg-config and turn image's defaults back on.
 # Pinned to the release candidate whose terminal query fits; see SPEC.md §6.
 ratatui-image = { version = "=12.0.0-rc.3", default-features = false, features = ["crossterm"] }
-# A changed SVG's pictures: `SPEC.md` section 6 names the four features, and
-# why `memmap-fonts` is not optional.
+# A changed SVG's pictures, labels included. `memmap-fonts` maps the system's
+# fonts instead of reading every face into memory.
 resvg = { version = "0.48.1", default-features = false, features = ["raster-images", "text", "system-fonts", "memmap-fonts"] }
 # An SVG root's size for the size line, without parsing the document.
 svgtypes = "0.16.1"

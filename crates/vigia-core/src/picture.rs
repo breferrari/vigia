@@ -144,10 +144,20 @@ fn svg_size(head: &[u8]) -> Option<(u32, u32)> {
         )
         .then_some(length.number)
     };
+    let view = || -> Option<svgtypes::ViewBox> { value("viewBox")?.parse().ok() };
+    // As usvg sizes it: one side given, the other from the view box's aspect.
     let (width, height) = match (pixels("width"), pixels("height")) {
         (Some(width), Some(height)) => (width, height),
-        _ => {
-            let view: svgtypes::ViewBox = value("viewBox")?.parse().ok()?;
+        (Some(width), None) => {
+            let view = view()?;
+            (width, width * view.h / view.w)
+        }
+        (None, Some(height)) => {
+            let view = view()?;
+            (height * view.w / view.h, height)
+        }
+        (None, None) => {
+            let view = view()?;
             (view.w, view.h)
         }
     };
