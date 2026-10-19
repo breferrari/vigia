@@ -2032,8 +2032,8 @@ impl View {
 
                 if !placed {
                     if skip >= span {
-                        // The offset was under a row this file does not have.
-                        aim.under = 0;
+                        // The step named a row this file does not have.
+                        aim = Aim::default();
                         if index + 1 < stop {
                             // Wholly above the window.
                             skip -= span;
@@ -2473,7 +2473,8 @@ impl View {
     }
 
     /// Turn logical rows into display rows, record the gutter, and answer the rows
-    /// the bottom clamp trimmed off the front: [`Self::top`] still names the first.
+    /// the bottom clamp trimmed off the front while [`Self::top`] still names the
+    /// first, or zero once it names the step the screen opens on.
     /// The display rows are a line's continuations and, when `drawn`, the rows of
     /// the notes pinned under it, and both are counted in the same unit.
     fn wrap_rows(
@@ -2635,7 +2636,8 @@ impl View {
         // the end moves one row; over wrapped lines alone it moves nothing stored.
         let trims_hung =
             (0..from).any(|at| costs[at].1 > 0) || above > costs.get(from).map_or(0, |c| c.0);
-        let stored = (aiming || trims_hung) && from < breaks.len();
+        let stored =
+            (aiming || (at_bottom && boxed_rows == 0 && trims_hung)) && from < breaks.len();
         if stored {
             self.top = Position {
                 under: above.saturating_sub(breaks[from].len()),
@@ -2658,8 +2660,8 @@ impl View {
                 )
             })
             .collect();
-        // [`Self::top`] is not moved, and that is what makes the end of the
-        // diff a place a reader can leave.
+        // A trim over wrapped lines alone leaves [`Self::top`] where it was,
+        // which keeps the wrapped end of the diff a place a reader can leave.
         let mut out: Vec<Row> = Vec::with_capacity(height);
         // One entry per wrapped line on this screen, which is what bounds the scan
         // `line_at` does over it.

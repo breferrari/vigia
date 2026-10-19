@@ -1411,3 +1411,38 @@ fn step_up_from_end() {
         "one step up from the end of the diff did not move the screen one row"
     );
 }
+
+#[test]
+fn steps_up_past_end() {
+    let scratch = Scratch::new("pictures-end-steps");
+    scratch.write("a.txt", support::numbered_lines(10));
+    scratch.write(
+        "z.png",
+        encode(&screen_like(120, 260, [40, 90, 200]), ImageFormat::Png),
+    );
+    scratch.commit_all("baseline");
+    scratch.write("a.txt", support::numbered_lines(40));
+    scratch.write(
+        "z.png",
+        encode(&screen_like(120, 260, [200, 90, 40]), ImageFormat::Png),
+    );
+    let mut pane = Pane::new(100, 26);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    pane.settled(&mut frame);
+    pane.scroll(&mut frame, 500);
+    let end = pane.settled(&mut frame);
+    assert!(end.ended, "the setup did not reach the end of the diff");
+    let rows = picture_rows(&end).len();
+    let mut last = end.rows[0].clone();
+    for step in 0..rows + 4 {
+        pane.scroll(&mut frame, -1);
+        let up = pane.settled(&mut frame);
+        assert_eq!(
+            up.rows[1], last,
+            "step {step} up from the end of the diff did not move the screen one row"
+        );
+        last = up.rows[0].clone();
+    }
+}
