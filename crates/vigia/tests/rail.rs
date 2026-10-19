@@ -130,7 +130,11 @@ fn beside() -> View {
         ],
         list_top: 0,
         files: 3,
-        top: Position { file: 0, row: 0 },
+        top: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         rows: vec![
             Row::file(entry(LONG)),
             Row::file(entry("Cargo.toml")),
@@ -151,7 +155,11 @@ fn streamed() -> View {
         grouped: false,
         list: Vec::new(),
         list_top: 0,
-        top: Position { file: 0, row: 0 },
+        top: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         ..beside()
     }
 }

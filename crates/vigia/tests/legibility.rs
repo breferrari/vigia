@@ -790,12 +790,20 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         total_rows: 0,
         rows_above: 0,
         files: 100,
-        top: Position { file: 41, row: 0 },
+        top: Position {
+            file: 41,
+            row: 0,
+            under: 0,
+        },
         ..every_row_kind()
     };
     // The two-region screen, which is the one a reader actually gets.
     let pinned = View {
-        top: Position { file: 1, row: 0 },
+        top: Position {
+            file: 1,
+            row: 0,
+            under: 0,
+        },
         ..pinned_and_streamed()
     };
     vec![
@@ -902,7 +910,11 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
                 list: Vec::new(),
                 list_top: 0,
                 files: 100,
-                top: Position { file: 41, row: 0 },
+                top: Position {
+                    file: 41,
+                    row: 0,
+                    under: 0,
+                },
                 ..every_row_kind()
             },
             diagnostics(),
@@ -3179,7 +3191,11 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         grouped: false,
         list: entries.iter().cloned().map(ListRow::from).collect(),
         list_top: 0,
-        top: Position { file: 1, row: 0 },
+        top: Position {
+            file: 1,
+            row: 0,
+            under: 0,
+        },
         files: 10,
         ..every_row_kind()
     };
@@ -3188,7 +3204,11 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
         grouped: false,
         list: entries.into_iter().map(ListRow::from).collect(),
         list_top: 0,
-        top: Position { file: 1, row: 0 },
+        top: Position {
+            file: 1,
+            row: 0,
+            under: 0,
+        },
         files: 3,
         ..every_row_kind()
     };
@@ -3668,7 +3688,11 @@ fn pinned_and_streamed() -> View {
             entry("Cargo.toml").into(),
         ],
         list_top: 0,
-        top: Position { file: 0, row: 0 },
+        top: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         ..every_row_kind()
     }
 }
@@ -3703,7 +3727,11 @@ fn both_runs_pinned() -> View {
             Row::file(entry("crates/vigia-core/src/frame.rs")),
             Row::file(staged("crates/vigia/src/render.rs")),
         ],
-        top: Position { file: 0, row: 0 },
+        top: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         ..every_row_kind()
     }
 }

@@ -746,7 +746,11 @@ fn collect_resolves_every_degenerate_viewport() {
                             &mut highlighter,
                             &history,
                             Viewport {
-                                position: Position { file, row: 0 },
+                                position: Position {
+                                    file,
+                                    row: 0,
+                                    under: 0,
+                                },
                                 anchored: false,
                                 diff_rows,
                                 width: 0,
@@ -1026,7 +1030,8 @@ fn clicking_a_listed_file_sends_the_diff_to_it() {
                 view.top,
                 Position {
                     file: usize::from(offset),
-                    row: 0
+                    row: 0,
+                    under: 0,
                 },
                 "at {WIDE}x{height}, a click on row {offset} did not put the diff \
                  at the top of that file"
@@ -1088,7 +1093,11 @@ fn a_digit_jumps_to_the_file_on_that_row_of_the_window() {
         app.view(&mut frame, &mut highlighter, &history, body)
             .expect("view")
             .top,
-        Position { file: 2, row: 0 },
+        Position {
+            file: 2,
+            row: 0,
+            under: 0
+        },
         "`3` did not put the diff at the third listed file"
     );
 
@@ -1114,7 +1123,8 @@ fn a_digit_jumps_to_the_file_on_that_row_of_the_window() {
             .top,
         Position {
             file: browsed.list_top + 2,
-            row: 0
+            row: 0,
+            under: 0,
         },
         "`3` resolved against the changed set rather than against the window the \
          reader can see"

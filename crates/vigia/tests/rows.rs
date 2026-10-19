@@ -300,7 +300,11 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
         &mut highlighter,
         &history,
         Viewport {
-            position: Position { file: 0, row: 0 },
+            position: Position {
+                file: 0,
+                row: 0,
+                under: 0,
+            },
             // Unanchored, because this slides a window and compares it against slices
             // of the whole.
             anchored: false,
@@ -332,6 +336,7 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
                 position: Position {
                     file: 0,
                     row: offset,
+                    under: 0,
                 },
                 anchored: false,
                 wrap: false,
@@ -352,7 +357,8 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
             window.top,
             Position {
                 file: 0,
-                row: offset
+                row: offset,
+                under: 0,
             },
             "the window at offset {offset} reported starting somewhere else"
         );
@@ -672,7 +678,11 @@ fn the_headers_total_is_the_rows_summed() {
     let history = History::new();
 
     let viewport = |diff_rows: usize| Viewport {
-        position: Position { file: 0, row: 0 },
+        position: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         anchored: false,
         wrap: false,
         width: 0,
@@ -726,7 +736,11 @@ fn a_run_still_being_written_holds_its_last_answer() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
     let viewport = Viewport {
-        position: Position { file: 0, row: 0 },
+        position: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         anchored: false,
         wrap: false,
         width: 0,
@@ -778,7 +792,11 @@ fn a_binary_file_adds_nothing_and_says_nothing() {
         &mut highlighter,
         &history,
         Viewport {
-            position: Position { file: 0, row: 0 },
+            position: Position {
+                file: 0,
+                row: 0,
+                under: 0,
+            },
             anchored: false,
             wrap: false,
             width: 0,
@@ -899,7 +917,11 @@ fn a_files_block_ends_in_a_blank_row() {
         &mut highlighter,
         &history,
         Viewport {
-            position: Position { file: 0, row: 0 },
+            position: Position {
+                file: 0,
+                row: 0,
+                under: 0,
+            },
             anchored: false,
             wrap: false,
             width: 0,
@@ -978,7 +1000,11 @@ fn the_total_holds_when_the_reader_pins_one_file() {
     let history = History::new();
 
     let viewport = |single: bool| Viewport {
-        position: Position { file: 0, row: 0 },
+        position: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         anchored: false,
         wrap: false,
         width: 0,

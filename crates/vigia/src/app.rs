@@ -1174,6 +1174,7 @@ impl App {
                         // Unchanged by B19, and that is a finding rather than an
                         // oversight.
                         row: span.saturating_sub(height),
+                        under: 0,
                     };
                 } else {
                     self.jump_to(frame.files().len().saturating_sub(1));
@@ -1194,7 +1195,11 @@ impl App {
     /// Put the viewport at the top of `file`, which is what a jump means.
     fn jump_to(&mut self, file: usize) {
         self.anchored = false;
-        self.position = Position { file, row: 0 };
+        self.position = Position {
+            file,
+            row: 0,
+            under: 0,
+        };
     }
 
     /// Move the list's window, and take the map over only if it moved.
@@ -1242,6 +1247,7 @@ impl App {
             self.position = Position {
                 file,
                 row: self.dragged_to(at, total, height),
+                under: 0,
             };
             return Ok(());
         }
@@ -1252,6 +1258,7 @@ impl App {
         let mut position = Position {
             file: files.saturating_sub(1),
             row: 0,
+            under: 0,
         };
         for file in 0..files {
             let rows = crate::view::block_rows(frame, file)?;
@@ -1260,6 +1267,7 @@ impl App {
             position = Position {
                 file,
                 row: target.saturating_sub(seen),
+                under: 0,
             };
             if seen + rows > target {
                 break;

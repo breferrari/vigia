@@ -57,7 +57,11 @@ fn last_line(text: &str) -> String {
 
 fn viewport() -> Viewport {
     Viewport {
-        position: Position { file: 0, row: 0 },
+        position: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         anchored: false,
         diff_rows: 20,
         width: 120,

@@ -6356,6 +6356,7 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_wherever_the_list_is_looking() 
             position: vigia::Position {
                 file: pinned,
                 row: 0,
+                under: 0,
             },
             anchored: false,
             diff_rows: 12,

@@ -349,7 +349,14 @@ fn a_file_step_disengages_follow_at_both_ends_of_the_diff() {
     for action in [Action::File(1), Action::File(-1)] {
         let mut app = App::new();
         assert!(app.following());
-        assert_eq!(app.position(), Position { file: 0, row: 0 });
+        assert_eq!(
+            app.position(),
+            Position {
+                file: 0,
+                row: 0,
+                under: 0
+            }
+        );
         app.apply(action, &mut frame, body()).expect("apply");
         assert!(
             !app.following(),

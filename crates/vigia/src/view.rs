@@ -1317,6 +1317,9 @@ pub struct Position {
     pub file: usize,
     /// Rows of that file already scrolled past.
     pub row: usize,
+    /// Rows hung under that row already scrolled past: its note box, picture
+    /// and note rows. Zero is the row itself.
+    pub under: usize,
 }
 
 /// Everything [`View::collect`] needs to know about where the screen is looking.
@@ -1870,6 +1873,7 @@ impl View {
             top: Position {
                 file: position.file.min(files.saturating_sub(1)),
                 row: position.row,
+                under: 0,
             },
             landed: false,
             ended: false,
@@ -2036,6 +2040,7 @@ impl View {
                     view.top = Position {
                         file: index,
                         row: skip,
+                        under: 0,
                     };
                     placed = true;
                 }
@@ -2105,6 +2110,7 @@ impl View {
                     != Position {
                         file: first,
                         row: 0,
+                        under: 0,
                     };
             if restarted || !(overshot || short) {
                 break;
@@ -2139,6 +2145,7 @@ impl View {
                 != Position {
                     file: first,
                     row: 0,
+                    under: 0,
                 };
         }
 
@@ -2146,6 +2153,7 @@ impl View {
         let floor = Position {
             file: first,
             row: 0,
+            under: 0,
         };
         let at_bottom = at_bottom
             || (index >= stop
@@ -2884,12 +2892,17 @@ impl View {
                 } else {
                     row
                 };
-                return Ok(Position { file: index, row });
+                return Ok(Position {
+                    file: index,
+                    row,
+                    under: 0,
+                });
             }
             if index == first {
                 return Ok(Position {
                     file: first,
                     row: 0,
+                    under: 0,
                 });
             }
             index -= 1;

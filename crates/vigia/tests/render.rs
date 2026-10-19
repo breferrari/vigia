@@ -3432,7 +3432,11 @@ fn two_regions_at(current: usize, row: usize) -> View {
             line(LineKind::Added, 39, "    if self.pending.is_empty() {"),
         ],
         files: 3,
-        top: Position { file: current, row },
+        top: Position {
+            file: current,
+            row,
+            under: 0,
+        },
         read: 4,
         scale: Scale::flat(0),
         gutter: None,
@@ -4858,6 +4862,7 @@ fn the_diff_scrollbar_reaches_the_bottom_at_its_last_screenful() {
         view.top = Position {
             file: 0,
             row: span.saturating_sub(rows),
+            under: 0,
         };
 
         let backend = screen(width, height, &view, &chrome());

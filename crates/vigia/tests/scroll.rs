@@ -184,6 +184,7 @@ fn scrolling_off_the_end_of_a_file_continues_into_the_next_one() {
         .map(|n| Position {
             file: n / BLOCK,
             row: n % BLOCK,
+            under: 0,
         })
         .collect();
     assert_eq!(
@@ -215,7 +216,11 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
     );
     assert_eq!(
         landed,
-        Position { file: 3, row: 0 },
+        Position {
+            file: 3,
+            row: 0,
+            under: 0
+        },
         "the walk did not start"
     );
 
@@ -237,6 +242,7 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
             Position {
                 file: absolute / BLOCK,
                 row: absolute % BLOCK,
+                under: 0,
             }
         })
         .collect();
@@ -314,7 +320,8 @@ fn home_and_end_go_to_the_first_and_last_file() {
         ),
         Position {
             file: FILES - 1,
-            row: 0
+            row: 0,
+            under: 0,
         }
     );
     assert_eq!(
@@ -325,7 +332,11 @@ fn home_and_end_go_to_the_first_and_last_file() {
             &history,
             Action::Top
         ),
-        Position { file: 0, row: 0 }
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        }
     );
 }
 
@@ -353,7 +364,11 @@ fn n_and_p_step_one_file_and_land_on_its_heading() {
                 &history,
                 Action::File(1)
             ),
-            Position { file, row: 0 },
+            Position {
+                file,
+                row: 0,
+                under: 0
+            },
             "`n` did not land on file {file}'s heading"
         );
     }
@@ -366,7 +381,11 @@ fn n_and_p_step_one_file_and_land_on_its_heading() {
                 &history,
                 Action::File(-1)
             ),
-            Position { file, row: 0 },
+            Position {
+                file,
+                row: 0,
+                under: 0
+            },
             "`p` did not land on file {file}'s heading"
         );
     }
@@ -381,7 +400,11 @@ fn n_and_p_step_one_file_and_land_on_its_heading() {
             &history,
             Action::Scroll(2)
         ),
-        Position { file: 1, row: 2 },
+        Position {
+            file: 1,
+            row: 2,
+            under: 0
+        },
         "the fixture does not put the viewport inside file 1"
     );
     assert_eq!(
@@ -392,7 +415,11 @@ fn n_and_p_step_one_file_and_land_on_its_heading() {
             &history,
             Action::File(-1)
         ),
-        Position { file: 0, row: 0 },
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        },
         "`p` from inside a file stopped at that file's heading, so the key means \
          two things depending on where the reader was"
     );
@@ -417,7 +444,11 @@ fn the_file_step_stops_at_both_ends() {
             &history,
             Action::File(-1)
         ),
-        Position { file: 0, row: 0 },
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        },
         "`p` at the first file moved"
     );
 
@@ -438,7 +469,11 @@ fn the_file_step_stops_at_both_ends() {
             &history,
             Action::File(-1)
         ),
-        Position { file: 0, row: 2 },
+        Position {
+            file: 0,
+            row: 2,
+            under: 0
+        },
         "`p` inside the first file jumped to its heading, which is `g`'s job"
     );
 
@@ -459,7 +494,8 @@ fn the_file_step_stops_at_both_ends() {
         ),
         Position {
             file: FILES - 1,
-            row: 0
+            row: 0,
+            under: 0,
         },
         "`n` at the last file moved"
     );
@@ -501,7 +537,11 @@ fn a_page_keeps_one_row_of_overlap() {
             &history,
             Action::Page(-1)
         ),
-        Position { file: 0, row: 0 },
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        },
         "paging back did not return to the top"
     );
 }
@@ -544,7 +584,11 @@ fn a_half_page_keeps_no_overlap_because_it_already_is_one() {
             &history,
             Action::HalfPage(-1)
         ),
-        Position { file: 0, row: 0 },
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        },
         "half a page back did not return to the top of a {rows} row body"
     );
 
@@ -638,7 +682,11 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     );
     assert_eq!(
         before,
-        Position { file: 7, row: 2 },
+        Position {
+            file: 7,
+            row: 2,
+            under: 0
+        },
         "the scroll did not land"
     );
 
@@ -1220,7 +1268,8 @@ fn end_scroll_holds() {
         end,
         Position {
             file: FILES - 1,
-            row: 0
+            row: 0,
+            under: 0,
         },
         "`G` moved"
     );
@@ -1266,7 +1315,8 @@ fn follow_end_holds() {
         end,
         Position {
             file: FILES - 1,
-            row: 0
+            row: 0,
+            under: 0,
         }
     );
     let now = after(
@@ -1300,7 +1350,14 @@ fn tall_end_scrolls() {
         &history,
         Action::Bottom,
     );
-    assert_eq!(end, Position { file: 1, row: 0 });
+    assert_eq!(
+        end,
+        Position {
+            file: 1,
+            row: 0,
+            under: 0
+        }
+    );
     let now = after(
         &mut app,
         &mut frame,
@@ -1310,7 +1367,11 @@ fn tall_end_scrolls() {
     );
     assert_eq!(
         now,
-        Position { file: 1, row: 1 },
+        Position {
+            file: 1,
+            row: 1,
+            under: 0
+        },
         "a step down inside a last file taller than the pane held"
     );
 }
@@ -1343,10 +1404,21 @@ fn wrapped_end_scrolls() {
             .expect("view")
             .top
     };
-    assert_eq!(step(Action::Bottom), Position { file: 0, row: 0 });
+    assert_eq!(
+        step(Action::Bottom),
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        }
+    );
     assert_eq!(
         step(Action::Scroll(1)),
-        Position { file: 0, row: 1 },
+        Position {
+            file: 0,
+            row: 1,
+            under: 0
+        },
         "a step down held while wrapped rows were still below the pane"
     );
 }
