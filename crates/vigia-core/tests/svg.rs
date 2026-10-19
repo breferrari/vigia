@@ -162,3 +162,19 @@ fn svg_counted_binary() {
         "a drawn SVG's lines count toward the total"
     );
 }
+
+#[test]
+fn svg_measured_binary() {
+    let root = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#;
+    let scratch = Scratch::new("svg-measured");
+    scratch.write("icon.svg", icon(root, "red"));
+    scratch.commit_all("initial");
+    scratch.write("icon.svg", icon(root, "blue"));
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let span = worktree.measure(&changes[0]).expect("measure");
+    assert!(
+        span.binary && span.hunks == 0 && span.lines == 0,
+        "the height walk measured a drawn SVG as text: {span:?}"
+    );
+}
