@@ -673,7 +673,9 @@ impl Worktree {
     fn held_side(&self, bytes: &[u8], named: Option<Format>, cost: &mut u64) -> Option<ImageSide> {
         match picture::lfs_oid(bytes) {
             Some(oid) => self.lfs_side(oid, named, cost),
-            None => picture::side_of(std::io::Cursor::new(bytes), bytes.len() as u64, named),
+            None => {
+                picture::side_of(std::io::Cursor::new(bytes), bytes.len() as u64, named).flatten()
+            }
         }
     }
 
@@ -771,7 +773,7 @@ impl Worktree {
             return match picture::lfs_oid(&head) {
                 Some(oid) if follow => self.lfs_side(oid, named, cost),
                 Some(_) => None,
-                None => picture::side_of(std::io::Cursor::new(&head), length, named),
+                None => picture::side_of(std::io::Cursor::new(&head), length, named).flatten(),
             };
         }
         // Small, because every seek drops the buffer and the refill is read again.
@@ -782,7 +784,10 @@ impl Worktree {
             if reader.rewind().is_err() {
                 break;
             }
-            side = picture::side_of(&mut reader, length, named);
+            let Some(read) = picture::side_of(&mut reader, length, named) else {
+                break;
+            };
+            side = read;
             // A file within the limit was read whole, so a larger one cannot help.
             if side.is_some() || reader.get_ref().total < limit || length <= limit {
                 break;

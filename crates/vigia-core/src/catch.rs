@@ -12,20 +12,26 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 thread_local! {
     static CATCHING: Cell<bool> = const { Cell::new(false) };
+    /// Panics the hook has seen inside the current catch.
+    static SEEN: Cell<u32> = const { Cell::new(0) };
 }
 
 /// `work`, or `None` if it panicked. The panic hook leaves a panic in here to
 /// this catch.
 pub fn caught<T>(work: impl FnOnce() -> T) -> Option<T> {
     let outer = CATCHING.with(|catching| catching.replace(true));
+    let seen = SEEN.with(|seen| seen.replace(0));
     let result = std::panic::catch_unwind(AssertUnwindSafe(work));
     CATCHING.with(|catching| catching.set(outer));
+    SEEN.with(|cell| cell.set(seen));
     result.ok()
 }
 
-/// Whether this thread is inside [`caught`].
+/// Whether the panic the hook is running for will reach a [`caught`] on this
+/// thread. A second one inside the same catch is raised while the first
+/// unwinds, and the runtime aborts on it, so it is not.
 pub fn catching() -> bool {
-    CATCHING.with(Cell::get)
+    CATCHING.with(Cell::get) && SEEN.with(|seen| seen.replace(seen.get() + 1)) == 0
 }
 
 /// Where a test has asked the next picture to panic, or nothing.

@@ -287,8 +287,8 @@ pub fn context_for(workdir: &Path, note: &Note) -> Vec<(u32, String)> {
 /// that quits between Enter and the write takes it with it, and the note is in
 /// the store either way.
 ///
-/// Nothing on this thread may panic. A panic off the picture worker aborts, so
-/// a panic here takes the pane with it and the slot is moot; every
+/// Nothing on this thread may panic. A panic outside a picture's catch aborts,
+/// so a panic here takes the pane with it and the slot is moot; every
 /// value it touches comes off the disk and is decoded accordingly.
 pub fn spawn(
     registry: Registry,

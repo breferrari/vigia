@@ -2842,7 +2842,7 @@ const GRAVIOLA_MIRRORED: &str = "0.4.1";
 /// The mirrored CPU-feature list is pinned to the release it was read from.
 ///
 /// The guard exists because graviola asserts rather than degrades and a panic
-/// off the picture worker aborts, so a feature added upstream is a dead
+/// outside a picture's catch aborts, so a feature added upstream is a dead
 /// monitor on hardware nobody here can test. A caret range would take that
 /// silently, and no test of the guard's own behaviour can see it: the guard
 /// keeps answering, about the wrong list.
@@ -3380,7 +3380,7 @@ fn codecs_on_worker() {
     assert_eq!(
         threaded_codecs(&repo_file("Cargo.lock")),
         Vec::<String>::new(),
-        "a decode could now run off the picture worker, where the panic hook aborts"
+        "a decode could now run outside a picture's catch, where the panic hook aborts"
     );
     let fixture = "[[package]]\nname = \"rayon\"\n\n[[package]]\nname = \"libwebp-sys\"\n\n[[package]]\nname = \"png\"\n";
     assert_eq!(

@@ -140,20 +140,27 @@ impl Reaped {
     ) -> Option<std::process::ExitStatus> {
         let until = Instant::now() + limit;
         while Instant::now() < until {
-            if let Ok(Some(status)) = self.0.try_wait() {
-                return Some(status);
-            }
-            let mut fds = libc::pollfd {
-                fd: master.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            // SAFETY: one valid pollfd.
-            if unsafe { libc::poll(&mut fds, 1, 10) } > 0 {
-                let mut buffer = [0u8; 4096];
-                if let Ok(read) = master.read(&mut buffer) {
-                    seen.extend_from_slice(&buffer[..read]);
+            let exited = self.0.try_wait().ok().flatten();
+            // Read until the terminal is quiet, and after an exit to its end:
+            // the child's last output can still be waiting in it.
+            loop {
+                let mut fds = libc::pollfd {
+                    fd: master.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                // SAFETY: one valid pollfd.
+                if unsafe { libc::poll(&mut fds, 1, 10) } <= 0 {
+                    break;
                 }
+                let mut buffer = [0u8; 4096];
+                match master.read(&mut buffer) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => seen.extend_from_slice(&buffer[..read]),
+                }
+            }
+            if exited.is_some() {
+                return exited;
             }
         }
         None

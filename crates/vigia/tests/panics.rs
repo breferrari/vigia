@@ -1,5 +1,5 @@
-//! A picture that panics draws as undecoded, and the panic hook leaves the
-//! picture worker alone and aborts everywhere else. `SPEC.md` §11.1, I8.
+//! A picture that panics draws as undecoded, and the panic hooks leave a panic
+//! to the catch waiting for it and abort on every other. `SPEC.md` §11.1, I8.
 
 #[cfg(unix)]
 #[path = "pty/mod.rs"]
@@ -51,38 +51,12 @@ fn view_of(app: &mut App, pictures: &mut Pictures, frame: &mut Frame) -> View {
 
 /// A view of `frame` on a 100x30 pane, after every queued picture is built.
 fn settled(app: &mut App, pictures: &mut Pictures, frame: &mut Frame) -> View {
-    let mut highlighter = Highlighter::eager();
-    let history = History::new();
-    let chrome = app.chrome(
-        "fixture",
-        None,
-        vigia::Stood {
-            standing: &Standing::Current,
-            now: 0,
-        },
-        Pointing::default(),
-        Default::default(),
-        "",
-    );
-    let body = body_layout(
-        Rect::new(0, 0, 100, 30),
-        &chrome,
-        frame.files().len(),
-        vigia::list_rows_wanted(frame.files()),
-    );
-    let mut view = app
-        .view(frame, &mut highlighter, &history, body)
-        .expect("view");
-    pictures.attach(&mut view.rows, frame);
+    view_of(app, pictures, frame);
     assert!(
         pictures.settle(Duration::from_secs(60)),
         "the pictures were not built"
     );
-    let mut view = app
-        .view(frame, &mut highlighter, &history, body)
-        .expect("view");
-    pictures.attach(&mut view.rows, frame);
-    view
+    view_of(app, pictures, frame)
 }
 
 /// The size line's suffix and how many panels were built.
@@ -179,6 +153,27 @@ fn panic_child() {
         return;
     };
     let which = which.to_string_lossy().into_owned();
+    if which == "double" {
+        // A panic while a caught one unwinds: no catch can take it.
+        struct Again;
+        impl Drop for Again {
+            fn drop(&mut self) {
+                panic!("a second panic on purpose");
+            }
+        }
+        vigia::install_panic_hook();
+        vigia_core::caught(|| {
+            let _again = Again;
+            panic!("a caught panic on purpose");
+        });
+        println!("survived");
+        return;
+    }
+    if which == "main" {
+        // The pane's hook alone: it must end the process without `main`'s.
+        vigia::install_panic_hook();
+        panic!("the main thread on purpose");
+    }
     vigia::install_abort_hook();
     if which == "caught-base" {
         // The base hook alone, as in every mode before the pane's goes on.
@@ -203,10 +198,12 @@ fn panic_child() {
             println!("survived caught={caught}");
         }
         "header" => {
+            // Past the first header read, so a retry with more bytes would
+            // find the header that panicked the first time.
             let scratch = Scratch::new("panic-header-child");
-            scratch.write("screen.png", png(120, 260, 1));
+            scratch.write("screen.png", support::screen_png(1));
             scratch.commit_all("baseline");
-            scratch.write("screen.png", png(120, 260, 2));
+            scratch.write("screen.png", support::screen_png(2));
             let worktree = scratch.worktree();
             let mut frame = worktree.frame();
             pictures::panic_next(Stage::Header);
@@ -293,7 +290,7 @@ fn caught_panic_base_hook() {
 
 #[cfg(unix)]
 #[test]
-fn header_panic_on_frame_thread() {
+fn frame_header_panic() {
     let (text, status) = ran("header", pty::Script::default());
     assert!(
         text.contains("survived binary=true") && status.success(),
@@ -308,7 +305,7 @@ fn header_panic_on_frame_thread() {
 
 #[cfg(unix)]
 #[test]
-fn worker_panic_outside_catch_aborts() {
+fn uncaught_worker_aborts() {
     let (text, status) = ran("outside", pty::Script::default());
     assert!(
         aborted(status) && !text.contains("survived"),
@@ -338,8 +335,9 @@ fn main_panic_restores() {
 
 #[cfg(unix)]
 #[test]
-fn mcp_thread_panic_aborts() {
-    let (text, status) = ran(
+fn server_thread_aborts() {
+    // As in `vigia mcp`: stdout alone, which it speaks JSON on.
+    let (stdout, status) = ran(
         "thread",
         pty::Script {
             quiet: true,
@@ -347,12 +345,32 @@ fn mcp_thread_panic_aborts() {
         },
     );
     assert!(
-        aborted(status) && !text.contains("survived"),
-        "a background thread's panic left the process running: {status:?} {text}"
+        aborted(status) && !stdout.contains("survived"),
+        "a background thread's panic left the process running: {status:?} {stdout}"
     );
     assert!(
-        !text.contains('\x1b') && !text.contains("a server thread on purpose"),
-        "the panic wrote to stdout, which `vigia mcp` speaks JSON on: {text:?}"
+        !stdout.contains('\x1b') && !stdout.contains("a server thread on purpose"),
+        "the panic wrote to stdout: {stdout:?}"
+    );
+    // And with stderr: the panic is still reported before the abort.
+    let (both, _) = ran("thread", pty::Script::default());
+    assert!(
+        both.contains("a server thread on purpose"),
+        "the base hook did not report the panic: {both}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn double_panic_restores() {
+    let (text, status) = ran("double", pty::Script::default());
+    assert!(
+        text.contains("\x1b[?1049l") && !text.contains("survived"),
+        "a second panic inside a catch did not restore the terminal: {text:?}"
+    );
+    assert!(
+        aborted(status),
+        "a second panic did not end in an abort: {status:?}"
     );
 }
 

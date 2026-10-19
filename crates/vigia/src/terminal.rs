@@ -193,6 +193,8 @@ fn check_drawable(is_terminal: bool) -> io::Result<()> {
 
 /// Chain a restore onto the panic hook, once per process.
 fn install_hook() {
+    // Under the pane's own, so the pane ends the process whoever started it.
+    install_abort_hook();
     install_hook_in(&HOOK, || restore_everything(&mut Crossterm::on_stdout()));
 }
 
@@ -221,14 +223,17 @@ fn install_hook_in(once: &Once, restore: impl Fn() + Send + Sync + 'static) {
 /// process that looks alive. It writes nothing to stdout, which `vigia mcp`
 /// speaks JSON on.
 pub fn install_abort_hook() {
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        if vigia_core::catching() {
-            return;
-        }
-        previous(info);
-        std::process::abort();
-    }));
+    static BASE: Once = Once::new();
+    BASE.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if vigia_core::catching() {
+                return;
+            }
+            previous(info);
+            std::process::abort();
+        }));
+    });
 }
 
 /// The panic hook `run` installs, for a test that needs it in a child.
