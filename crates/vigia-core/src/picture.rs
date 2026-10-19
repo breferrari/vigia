@@ -125,6 +125,7 @@ pub(crate) fn svg_side(head: &[u8], bytes: u64) -> Option<ImageSide> {
 /// The size an SVG's root `<svg>` start tag gives: `width` and `height` in
 /// pixels, or else its `viewBox`.
 fn svg_size(head: &[u8]) -> Option<(u32, u32)> {
+    use svgtypes::{Length, LengthUnit};
     crate::armed(crate::Stage::Header);
     let valid = match std::str::from_utf8(head) {
         Ok(text) => text,
@@ -139,31 +140,47 @@ fn svg_size(head: &[u8]) -> Option<(u32, u32)> {
             .map(|(_, value)| *value)
     };
     let view: Option<svgtypes::ViewBox> = value("viewBox").and_then(|view| view.parse().ok());
-    // As usvg sizes it: a percentage, or a missing side, is a share of the view
-    // box. Units other than pixels take the view box's side.
-    let length = |name: &str, of: Option<f64>| -> Option<f64> {
-        let Some(given) = value(name) else {
+    // A value that does not parse counts as absent, as usvg reads it.
+    let parsed = |name: &str| value(name).and_then(|value| value.parse::<Length>().ok());
+    let (width, height) = (parsed("width"), parsed("height"));
+    let font = parsed("font-size")
+        .filter(|size| matches!(size.unit, LengthUnit::None | LengthUnit::Px))
+        .map_or(12.0, |size| size.number);
+    // As usvg converts it, at 96 dpi: a percentage, or a missing side, is a
+    // share of the view box.
+    let resolve = |length: Option<Length>, of: f64| {
+        let Some(Length { number, unit }) = length else {
             return of;
         };
-        match given.parse::<svgtypes::Length>().ok()? {
-            svgtypes::Length {
-                number,
-                unit: svgtypes::LengthUnit::None | svgtypes::LengthUnit::Px,
-            } => Some(number),
-            svgtypes::Length {
-                number,
-                unit: svgtypes::LengthUnit::Percent,
-            } => Some(of? * number / 100.0),
-            _ => of,
+        match unit {
+            LengthUnit::None | LengthUnit::Px => number,
+            LengthUnit::Em => number * font,
+            LengthUnit::Ex => number * font / 2.0,
+            LengthUnit::In => number * 96.0,
+            LengthUnit::Cm => number * 96.0 / 2.54,
+            LengthUnit::Mm => number * 96.0 / 25.4,
+            LengthUnit::Pt => number * 96.0 / 72.0,
+            LengthUnit::Pc => number * 96.0 / 6.0,
+            LengthUnit::Percent => of * number / 100.0,
         }
     };
-    let width = length("width", view.map(|view| view.w))?;
-    let height = length("height", view.map(|view| view.h))?;
-    // One side given and the other missing: the other from the view box's aspect.
-    let (width, height) = match (view, value("width"), value("height")) {
-        (Some(view), Some(_), None) => (width, width * view.h / view.w),
-        (Some(view), None, Some(_)) => (height * view.w / view.h, height),
-        _ => (width, height),
+    let (width, height) = match view {
+        Some(view) => {
+            let (w, h) = (resolve(width, view.w), resolve(height, view.h));
+            // One side given alone takes the other from the view box's aspect.
+            match (width, height) {
+                (Some(_), None) => (w, w * view.h / view.w),
+                (None, Some(_)) => (h * view.w / view.h, h),
+                _ => (w, h),
+            }
+        }
+        // Without a view box, only two absolute sides are a size.
+        None => {
+            let absolute =
+                |length: Option<Length>| length.filter(|l| l.unit != LengthUnit::Percent);
+            let (width, height) = (absolute(width)?, absolute(height)?);
+            (resolve(Some(width), 0.0), resolve(Some(height), 0.0))
+        }
     };
     let side = |length: f64| {
         (length.is_finite() && length > 0.0).then(|| length.ceil().min(f64::from(u32::MAX)) as u32)

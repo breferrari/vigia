@@ -433,6 +433,11 @@ impl App {
         self.pictures = pictures;
     }
 
+    /// Whether a changed image draws its pictures.
+    pub fn draws_pictures(&self) -> bool {
+        self.pictures
+    }
+
     /// Whether the reader has asked for the staged run.
     pub fn staged(&self) -> bool {
         self.staged

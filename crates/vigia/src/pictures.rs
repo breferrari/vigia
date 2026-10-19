@@ -723,9 +723,11 @@ const SVG_SHORTEST: f32 = 64.0;
 /// What one SVG's filters may cost, in kernel cells times pixels. Sixty-four
 /// blurs at 256 pixels a side, about 250ms.
 const FILTER_BUDGET: f64 = 1024.0 * 256.0 * 256.0;
-/// What a filter primitive other than a convolution costs, in kernel cells.
-/// A blur measured at about twenty.
+/// What a filter primitive costs whose work per pixel is fixed, in kernel
+/// cells. A blur measured at about twenty.
 const PRIMITIVE_CELLS: u64 = 16;
+/// What one octave of turbulence costs, in kernel cells, as measured.
+const OCTAVE_CELLS: u64 = 16;
 
 /// SVG references to other files refused, since the process started.
 static REFUSED: AtomicU64 = AtomicU64::new(0);
@@ -753,8 +755,9 @@ fn fonts() -> std::sync::Arc<resvg::usvg::fontdb::Database> {
 const EMBEDDED_BUDGET: u64 = 32 * 1024 * 1024;
 
 /// An embedded image, as usvg reads it, once its share of `budget` and its
-/// size are known to fit. A nested SVG has no raster size, so it is refused
-/// with its own million nodes. Any refusal sets `over`.
+/// size are known to fit. One with no raster size is left out, as usvg leaves
+/// out one it cannot read: a nested SVG is, with its own million nodes. Over
+/// the budget or the size limits sets `over`.
 fn embedded(
     mime: &str,
     data: std::sync::Arc<Vec<u8>>,
@@ -775,57 +778,105 @@ fn embedded(
     {
         return refuse();
     }
-    let fits = image::ImageReader::new(std::io::Cursor::new(&**data))
+    let (width, height) = image::ImageReader::new(std::io::Cursor::new(&**data))
         .with_guessed_format()
-        .ok()
-        .and_then(|reader| reader.into_dimensions().ok())
-        .is_some_and(|(width, height)| {
-            width <= MAX_SIDE
-                && height <= MAX_SIDE
-                && u64::from(width) * u64::from(height) * 4 <= MAX_ALLOC
-        });
-    if !fits {
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if width > MAX_SIDE || height > MAX_SIDE || u64::from(width) * u64::from(height) * 4 > MAX_ALLOC
+    {
         return refuse();
     }
     (resvg::usvg::ImageHrefResolver::default_data_resolver())(mime, data, options)
 }
 
-/// What `tree`'s filters cost per pixel, in kernel cells, every `<use>` copy
-/// counted.
-fn filter_cost(tree: &resvg::usvg::Tree) -> u64 {
+/// What one filter primitive costs per pixel.
+enum Price {
+    Cells(u64),
+    /// A window this many root user units across each way, as a morphology
+    /// scans, so its cost grows with the render scale.
+    Window(f32, f32),
+}
+
+/// Every filter primitive `tree` runs, every `<use>` copy counted.
+fn prices(tree: &resvg::usvg::Tree) -> Vec<Price> {
     use resvg::usvg::{Group, Node, filter::Kind};
-    fn weigh(group: &Group, cost: &mut u64) {
+    fn weigh(group: &Group, prices: &mut Vec<Price>) {
+        let (sx, sy) = group.abs_transform().get_scale();
         for primitive in group
             .filters()
             .iter()
             .flat_map(|filter| filter.primitives())
         {
-            *cost = cost.saturating_add(match primitive.kind() {
+            prices.push(match primitive.kind() {
                 Kind::ConvolveMatrix(convolve) => {
                     let matrix = convolve.matrix();
-                    u64::from(matrix.columns()) * u64::from(matrix.rows())
+                    Price::Cells(u64::from(matrix.columns()) * u64::from(matrix.rows()))
                 }
-                _ => PRIMITIVE_CELLS,
+                Kind::Morphology(morphology) => Price::Window(
+                    2.0 * morphology.radius_x().get() * sx,
+                    2.0 * morphology.radius_y().get() * sy,
+                ),
+                Kind::Turbulence(turbulence) => {
+                    Price::Cells(u64::from(turbulence.num_octaves()).saturating_mul(OCTAVE_CELLS))
+                }
+                _ => Price::Cells(PRIMITIVE_CELLS),
             });
         }
         for node in group.children() {
             if let Node::Group(child) = node {
-                weigh(child, cost);
+                weigh(child, prices);
             }
-            node.subroots(|root| weigh(root, cost));
+            node.subroots(|root| weigh(root, prices));
         }
     }
-    let mut cost = 0;
-    weigh(tree.root(), &mut cost);
-    cost
+    let mut prices = Vec::new();
+    weigh(tree.root(), &mut prices);
+    prices
 }
 
-/// The long side to render at for filters costing `cost`, or `None` when
-/// even [`SVG_SHORTEST`] costs too much.
-fn long_side(cost: u64) -> Option<f32> {
-    let side = (FILTER_BUDGET / cost.max(1) as f64).sqrt() as f32;
-    let side = side.min(SVG_LONG_SIDE).floor();
-    (side >= SVG_SHORTEST).then_some(side)
+/// What `prices` cost over a render `long` pixels on its long side, for a
+/// document whose own long side is `size`.
+fn filter_cost(prices: &[Price], size: f32, long: f32) -> f64 {
+    let scale = long / size;
+    let across = |units: f32| (units * scale).ceil().clamp(1.0, long) as f64;
+    let cells: f64 = prices
+        .iter()
+        .map(|price| match *price {
+            Price::Cells(cells) => cells as f64,
+            Price::Window(x, y) => across(x) * across(y),
+        })
+        .sum();
+    cells * f64::from(long) * f64::from(long)
+}
+
+/// The longest side, up to [`SVG_LONG_SIDE`], at which every side's filters
+/// cost no more than [`FILTER_BUDGET`], or `None` when even
+/// [`SVG_SHORTEST`] costs more.
+fn long_side(sides: &[(Vec<Price>, f32)]) -> Option<f32> {
+    let fits = |long: f32| {
+        sides
+            .iter()
+            .all(|(prices, size)| filter_cost(prices, *size, long) <= FILTER_BUDGET)
+    };
+    if fits(SVG_LONG_SIDE) {
+        return Some(SVG_LONG_SIDE);
+    }
+    if !fits(SVG_SHORTEST) {
+        return None;
+    }
+    // The cost only grows with the side, so the longest that fits is found by
+    // halving.
+    let (mut fit, mut over) = (SVG_SHORTEST as u32, SVG_LONG_SIDE as u32);
+    while over - fit > 1 {
+        let middle = (fit + over) / 2;
+        if fits(middle as f32) {
+            fit = middle;
+        } else {
+            over = middle;
+        }
+    }
+    Some(fit as f32)
 }
 
 /// One SVG side parsed, with only what the document carries.
@@ -848,9 +899,11 @@ fn svg_tree(bytes: &[u8]) -> Option<resvg::usvg::Tree> {
         },
         ..Options::default()
     };
-    // Loaded once for the process, so a mention outside a label costs nothing
-    // the next time.
-    if bytes.windows(4).any(|window| window == b"text") {
+    // `<text>`, or `<svg:text>` under a prefix.
+    if bytes
+        .windows(5)
+        .any(|window| window == b"<text" || window == b":text")
+    {
         options.fontdb = fonts();
     }
     let tree = Tree::from_data(bytes, &options).ok()?;
@@ -880,8 +933,12 @@ fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>)> {
         None => Some(None),
     };
     let (old, new) = (tree(&job.sources.before)?, tree(&job.sources.after)?);
-    let cost = [&old, &new].into_iter().flatten().map(filter_cost).max();
-    let long = long_side(cost.unwrap_or(0))?;
+    let sides: Vec<_> = [&old, &new]
+        .into_iter()
+        .flatten()
+        .map(|tree| (prices(tree), tree.size().width().max(tree.size().height())))
+        .collect();
+    let long = long_side(&sides)?;
     let render = |tree: Option<resvg::usvg::Tree>| match tree {
         Some(tree) => render_svg(&tree, long).map(|image| Some((image, None))),
         None => Some(None),

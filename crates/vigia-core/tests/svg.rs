@@ -78,6 +78,22 @@ fn svg_size_line() {
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="50%" viewBox="0 0 10 30">"#,
             (40, 15),
         ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297">"#,
+            (794, 1123),
+        ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="1in" height="2cm">"#,
+            (96, 76),
+        ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" font-size="10" width="2em" height="1ex">"#,
+            (20, 5),
+        ),
+        (
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="auto" height="10" viewBox="0 0 30 15">"#,
+            (20, 10),
+        ),
     ] {
         let diff = changed("svg-size", &icon(root, "red"), &icon(root, "blue"));
         let side = Some((Format::Svg, want.0, want.1));

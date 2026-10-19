@@ -1734,6 +1734,7 @@ impl Shell {
         let (_, held) = aside.as_mut()?;
         held.show_staged(self.app.staged());
         held.hide(self.hide.clone());
+        held.draw_svg(self.app.draws_pictures());
         held.advance().ok()?;
         let churn = held.churn().ok()?.unwrap_or_default();
         Some(Facts {
@@ -2517,6 +2518,24 @@ mod tests {
             !tick.contains("effect"),
             "the tick arm arms an effect, so every write draws a motion over the diff"
         );
+    }
+
+    #[test]
+    fn aside_armed_like_pane() {
+        // `Shell` is private and holds a terminal, so the rule is read here.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let facts = shipped
+            .split("fn facts_at<'w>(")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }\n").next())
+            .expect("facts_at is gone");
+        for switch in ["show_staged(", "hide(", "draw_svg("] {
+            assert!(
+                facts.contains(&format!("held.{switch}")),
+                "the aside frame is not armed with {switch}), so its totals disagree with the pane's"
+            );
+        }
     }
 
     #[test]

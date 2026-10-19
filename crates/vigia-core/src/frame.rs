@@ -577,6 +577,7 @@ impl<'w> Frame<'w> {
         self.stats.evicted += self.cached.len() as u64;
         self.cached.clear();
         self.spans.clear();
+        self.settles_at = None;
     }
 
     /// The changed files, in the order status reported them.

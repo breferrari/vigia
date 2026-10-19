@@ -200,6 +200,27 @@ fn svg_text_change_lights_mask() {
 }
 
 #[test]
+fn svg_prefixed_text_lights_mask() {
+    let mut fonts = resvg::usvg::fontdb::Database::new();
+    fonts.load_system_fonts();
+    if fonts.is_empty() {
+        eprintln!("note: this system has no fonts, so the text test proves nothing here");
+        return;
+    }
+    let label = |text: &str| {
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:s="http://www.w3.org/2000/svg" width="24" height="24"><s:text x="1" y="16" font-size="12">{text}</s:text></svg>"#
+        )
+    };
+    let drawn = drawn("svg-prefixed-text", Some(&label("Save")), &label("Load"));
+    assert!(
+        changed(drawn.verdict),
+        "a change to a prefixed label alone lit nothing: {:?}",
+        drawn.verdict
+    );
+}
+
+#[test]
 fn svg_external_href_not_read() {
     let scratch = Scratch::new("svg-href-target");
     let target = scratch.path_of("green.png");
@@ -346,14 +367,33 @@ fn svg_image_size_bounded() {
 }
 
 #[test]
-fn svg_nested_svg_refused() {
+fn svg_nested_svg_skipped() {
     let inner = base64(svg(&fanned(r#"<rect id="l0" width="1" height="1"/>"#, 10, 5)).as_bytes());
-    let body =
-        format!(r#"<image width="8" height="8" xlink:href="data:image/svg+xml;base64,{inner}"/>"#);
-    assert_eq!(
-        verdict_of("svg-nested", &body),
-        Some(Verdict::Undecoded),
-        "an SVG embedded in an SVG was drawn"
+    let body = format!(
+        r#"<image width="8" height="8" xlink:href="data:image/svg+xml;base64,{inner}"/><rect width="4" height="4"/>"#
+    );
+    let drawn = drawn(
+        "svg-nested",
+        Some(&svg(r#"<rect width="2" height="2"/>"#)),
+        &svg(&body),
+    );
+    assert!(
+        changed(drawn.verdict),
+        "the document around a nested SVG was not drawn"
+    );
+    assert!(
+        drawn.took < Duration::from_secs(5),
+        "a nested SVG of a hundred thousand copies was drawn: {:?}",
+        drawn.took
+    );
+}
+
+#[test]
+fn svg_unknown_image_skipped() {
+    let body = r#"<image width="8" height="8" xlink:href="data:image/avif;base64,AAAAHGZ0eXBhdmlm"/><rect width="4" height="4"/>"#;
+    assert!(
+        changed(verdict_of("svg-unknown-image", body)),
+        "an image usvg would leave out refused the whole document"
     );
 }
 
@@ -441,5 +481,26 @@ fn svg_masked_filters_refused() {
         verdict_of("svg-masked-filters", &body),
         Some(Verdict::Undecoded),
         "ten thousand filtered copies inside a mask were drawn"
+    );
+}
+
+#[test]
+fn svg_morphology_scaled() {
+    // A 4-unit radius on a 24-unit document spans a third of the render at 1024.
+    let body = r#"<filter id="m"><feMorphology operator="dilate" radius="4"/></filter><rect width="4" height="4" filter="url(#m)"/>"#;
+    let total = rendered(verdict_of("svg-morphology", body));
+    assert!(
+        total.is_some_and(|total| total < 256 * 256),
+        "a morphology window as wide as the picture was rendered at {total:?} pixels"
+    );
+}
+
+#[test]
+fn svg_turbulence_refused() {
+    let body = r#"<filter id="t"><feTurbulence baseFrequency="0.5" numOctaves="100000000"/></filter><rect width="8" height="8" filter="url(#t)"/>"#;
+    assert_eq!(
+        verdict_of("svg-turbulence", body),
+        Some(Verdict::Undecoded),
+        "a hundred million octaves of turbulence were drawn"
     );
 }
