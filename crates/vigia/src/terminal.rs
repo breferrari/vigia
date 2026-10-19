@@ -1204,6 +1204,12 @@ mod tests {
                     shipped.contains("        || std::process::abort(),\n    );"),
                     "the one abort is not the panic hook's end step"
                 );
+                let restore = shipped.find("on_panic(&restore, &previous, info);");
+                let end = shipped.find("            end();");
+                assert!(
+                    matches!((restore, end), (Some(restore), Some(end)) if restore < end),
+                    "the panic hook does not restore the terminal before its end step"
+                );
             }
         }
     }
