@@ -74,6 +74,7 @@ svgtypes = "0.16.1"
 hayro = "0.8.0"
 hayro-syntax = "0.8.0"
 flate2 = "1.1"
+memchr = "2.8"
 # The requirement `usvg` declares, so the two resolve to one copy.
 skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.

@@ -32,10 +32,7 @@ pub fn inflated_length(raw: &[u8], cap: u64) -> Option<u64> {
 #[doc(hidden)]
 pub fn streams_fit(bytes: &[u8], budget: u64) -> bool {
     let mut left = budget;
-    let mut from = 0;
-    while let Some(found) = find(&bytes[from..], b"stream") {
-        let at = from + found;
-        from = at + 6;
+    for at in memchr::memmem::find_iter(bytes, b"stream") {
         let Some(data) = stream_start(bytes, at) else {
             continue;
         };
@@ -57,12 +54,6 @@ pub fn streams_fit(bytes: &[u8], budget: u64) -> bool {
         }
     }
     true
-}
-
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
 }
 
 /// Where a stream's data starts, when `stream` at `at` is the keyword: after
