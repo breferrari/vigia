@@ -548,7 +548,7 @@ Two failures acquitted a short tail of real work. Credit transfer let the off-CP
 
 ## #645 — decoder panic
 
-Ruled 2026-10-19, reader, relayed by the coordinator session. A picture whose decoder panics used to abort the process, because the release profile set `panic = "abort"` and the picture worker decodes whatever bytes an agent writes. The rust-fuzz trophy case lists past `image` panics found by fuzzing, and a truncated write in the middle of an edit is ordinary input here. The ruling is to unwind, catch the panic on the worker, and keep aborting everywhere else (SPEC §11.1).
+Ruled 2026-10-19, reader, relayed by the coordinator session. A picture whose decoder panics used to abort the process, because the release profile set `panic = "abort"` and the picture worker decodes whatever bytes an agent writes. The rust-fuzz trophy case lists past `image` panics found by fuzzing, and a truncated write in the middle of an edit is ordinary input here. The ruling is to unwind, catch a panic in a picture's work (the header read on the frame's thread and the build on the worker), and abort on every other (SPEC §11.1).
 
 **Decoding in a child process was not taken.** It keeps `panic = "abort"` and the binary size. It costs a process per session, its lifecycle and respawn, an IPC that carries about 23MB of decoded pixels for a 1170x2532 pair, a hidden CLI mode for SPEC to name, and parity on Windows: several hundred lines against about thirty.
 
