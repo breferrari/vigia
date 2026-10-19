@@ -3283,3 +3283,134 @@ fn arrival_holds_the_budget() {
         },
     );
 }
+
+/// I9 with a changed image's pictures on screen: a settled frame repaints the
+/// built panels and decodes nothing. `SPEC.md` §11.1.
+#[test]
+fn a_frame_with_pictures_holds_the_frame_budget() {
+    use vigia::pictures::{self, Inks, Pictures};
+
+    let scratch = Scratch::new("i9-pictures");
+    let screen = |accent: u8| {
+        image::RgbaImage::from_fn(1170, 2532, |x, y| {
+            image::Rgba([accent, (x % 251) as u8, (y % 241) as u8, 255])
+        })
+    };
+    let encoded = |image: &image::RgbaImage| {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .expect("encode");
+        bytes.into_inner()
+    };
+    scratch.write("a/screen.png", encoded(&screen(10)));
+    for file in 0..20 {
+        scratch.write(&format!("b/file_{file}.rs"), support::numbered_lines(200));
+    }
+    scratch.commit_all("baseline");
+    scratch.write("a/screen.png", encoded(&screen(200)));
+    for file in 0..20 {
+        scratch.edit_line(&format!("b/file_{file}.rs"), 5, "fn changed() {}");
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let pane = Rect::new(0, 0, 120, 40);
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let theme = Theme::dark();
+    let mut buf = Buffer::empty(pane);
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        Box::new(|| {}),
+    );
+    let screen_layout = layout_of(&app, pane, frame.files().len());
+    let mut paint = |frame: &mut Frame,
+                     app: &mut App,
+                     highlighter: &mut Highlighter,
+                     pictures: &mut Pictures| {
+        let chrome = app.chrome(
+            "fixture",
+            None,
+            vigia::Stood {
+                standing: &Standing::Current,
+                now: 0,
+            },
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
+        let mut view = app
+            .view(frame, highlighter, &history, screen_layout)
+            .expect("view");
+        pictures.attach(&mut view.rows, frame);
+        render(&mut buf, pane, &view, &theme, Glyphs::default(), &chrome);
+        view
+    };
+    paint(&mut frame, &mut app, &mut highlighter, &mut pictures);
+    let building = Instant::now();
+    assert!(
+        pictures.settle(Duration::from_secs(120)),
+        "the pictures were not built"
+    );
+    eprintln!(
+        "note: three pictures of a 1170x2532 pair built in {:?}, off the paint",
+        building.elapsed()
+    );
+    let view = paint(&mut frame, &mut app, &mut highlighter, &mut pictures);
+    let built = view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Picture { ready: Some(_), .. }))
+        .count();
+    assert!(
+        built > 10,
+        "{built} rows of built pictures are on screen, so this would time a frame \
+         without them"
+    );
+
+    let decoded = pictures::decodes();
+    let mut timed = |frame: &mut Frame,
+                     app: &mut App,
+                     highlighter: &mut Highlighter,
+                     pictures: &mut Pictures| {
+        time_cpu(|| {
+            paint(frame, app, highlighter, pictures);
+        })
+    };
+    for _ in 0..WARMUP_FRAMES {
+        timed(&mut frame, &mut app, &mut highlighter, &mut pictures);
+    }
+    assert_eq!(
+        pictures::decodes(),
+        decoded,
+        "a settled frame decoded a picture again"
+    );
+    assert_eq!(
+        pictures::decodes_off_worker(),
+        0,
+        "a picture was decoded on the thread that paints"
+    );
+
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        frames.push(timed(&mut frame, &mut app, &mut highlighter, &mut pictures).0);
+    }
+    holds_p99(
+        "I9: a settled frame repainting a changed image's three pictures on a 120x40 pane",
+        budget(I9_FRAME),
+        &frames,
+        || format!("({built} picture rows on screen)"),
+        || timed(&mut frame, &mut app, &mut highlighter, &mut pictures),
+    );
+}

@@ -455,3 +455,92 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
          screen that never gains its colour rather than one that gains it late"
     );
 }
+
+/// I7 with a changed PNG first: the first frame draws its size line and the
+/// rows held for its pictures, and decodes nothing. `SPEC.md` §11.1.
+#[test]
+fn a_png_first_paints_without_decoding() {
+    use vigia::pictures::{self, Inks, Pictures};
+
+    let scratch = Scratch::new("first-paint-png");
+    let screen = |accent: u8| {
+        image::RgbaImage::from_fn(1170, 2532, |x, y| {
+            image::Rgba([accent, (x % 251) as u8, (y % 241) as u8, 255])
+        })
+    };
+    let encoded = |image: &image::RgbaImage| {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .expect("encode");
+        bytes.into_inner()
+    };
+    scratch.write("a.png", encoded(&screen(10)));
+    scratch.write("b.txt", support::numbered_lines(50));
+    scratch.commit_all("baseline");
+    scratch.write("a.png", encoded(&screen(200)));
+    scratch.write("b.txt", support::numbered_lines(60));
+    let pane = Rect::new(0, 0, 120, 40);
+
+    let _timed = exclusively_timed();
+    let began = Instant::now();
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let history = History::new();
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        Box::new(|| {}),
+    );
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        vigia::Stood {
+            standing: &Standing::Current,
+            now: 0,
+        },
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
+    let body = body_layout(pane, &chrome, frame.files().len(), frame.files().len());
+    let mut buf = Buffer::empty(pane);
+    let mut view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    pictures.attach(&mut view.rows, &frame);
+    render(&mut buf, pane, &view, &Theme::dark(), Glyphs::default(), &chrome);
+    let first = began.elapsed();
+
+    assert_eq!(
+        pictures::decodes_off_worker(),
+        0,
+        "the first frame decoded a picture"
+    );
+    assert!(
+        view.rows
+            .iter()
+            .any(|row| matches!(row, Row::Sized { ready: None, .. })),
+        "the first frame did not draw the size line on its own"
+    );
+    assert!(
+        view.rows
+            .iter()
+            .any(|row| matches!(row, Row::Picture { ready: None, .. })),
+        "the first frame held no rows for the pictures"
+    );
+    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
+        return;
+    }
+    assert!(
+        first < budget(I7_STARTUP),
+        "I7: first paint with a changed PNG first took {first:?}, over {:?}",
+        budget(I7_STARTUP)
+    );
+}
