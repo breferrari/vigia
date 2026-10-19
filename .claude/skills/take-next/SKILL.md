@@ -122,7 +122,7 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 - **One issue, one branch, one worktree, one PR.** Work in a worktree, not in the main checkout. The main checkout stays on `main`, so `origin/main` and the tree agree. First, find a free `../vigia.*` worktree, because its `target/` is warm. Make sure that no other session uses it. Then run `git -C <dir> checkout -B issue-<n>-<slug> origin/main`. If no worktree is free, add one with `git worktree add ../vigia.<n> -b issue-<n>-<slug> origin/main`. After the merge, remove the worktree that you added.
 - **If the reader is present,** run `vigia` in a side pane on the worktree. A reader who looked at the pane found defects eleven green gates missed.
 - **A run that lasts longer than the pass** needs a comment on its issue. When the run starts, write what runs, where the output goes, and when it ends.
-- **Open a draft PR early** with `gh pr create --draft`. CI and Copilot skip drafts, so a push costs nothing.
+- **Open a draft PR early** with `gh pr create --draft`. CI skips drafts, so a push costs nothing.
 - **Write the failing test first** for each invariant. Watch it fail, then make it pass.
 - **A change to the frame path runs the budget gate.**
 - **Add no dependency that `SPEC.md` does not name.** First, propose it in the spec, in its own commit.
@@ -135,7 +135,7 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 git diff --name-only <base>..HEAD | sh .github/scripts/change-class.sh | tail -1
 ```
 
-`docs` means the diff is docs-only. Then skip the suite, the benches and the budget gates, and run the suites that CI's documents job runs: `cargo nextest run -p vigia --test package --test register --test sheet --test theme_docs` and `cargo nextest run -p vigia-core --test coverage`. `full` is code. In the PR body, write which scope you chose.
+`docs` means the diff is docs-only. Then skip the suite, the benches and the budget gates, and run the suites that CI's documents job runs: `cargo nextest run -p vigia --test package --test register --test sheet --test theme_docs` and `cargo nextest run -p vigia-core --test coverage`. Running cargo's code suites on a prose-only diff spends minutes and gives no signal. `full` is code. In the PR body, write which scope you chose.
 
 ## 6. Review and prove
 
@@ -162,7 +162,7 @@ Then prove the result:
 
 Before `gh pr ready`, put exactly one of the labels `release` or `internal` on the PR with `gh pr edit <n> --add-label <label>`. The label follows the changed paths, not what a user can see. Any path under `crates/*/src/` or `crates/*/assets/`, a dependency the binary builds with in `Cargo.toml` or `Cargo.lock`, or install (the `dist` metadata in `Cargo.toml`, `release.yml`) makes the PR `release`, a comment or a refactor included, because the binary changed. Everything else, which is process, CI, skills, `SPEC.md`, `ROADMAP.md`, tests and gates, is `internal`. Ruled 2026-09-30, reader. User-facing: none. A `release` PR carries `Release-note: <one line the user can read>` in a commit body. An `internal` PR carries `Release-note: none`. Start an `internal` title with its kind: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:` or `chore:`. Start a `release` title with `fix:` for a defect or `feat:` for a new feature.
 
-Before `gh pr ready`, name the commit each step 6 review read; a later code commit is reviewed first. `gh pr ready` starts the matrix and the Copilot review. Copilot has a quota, so mark the PR ready once, after the local suite is green and the plan diff is clean.
+Before `gh pr ready`, name the commit each step 6 review read; a later code commit is reviewed first. `gh pr ready` starts the matrix, so mark the PR ready once, after the local suite is green and the plan diff is clean.
 
 ```sh
 t=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -174,16 +174,11 @@ gh run view <id> --json conclusion --jq .conclusion
 
 Watch the run, not `gh pr checks`. List only the runs that started after the ready call. The run of the draft has the same `headSha`, a green conclusion and no jobs run. If the list is empty, the ready run is not in the queue yet. List again. The `headSha` of the run must be the head of the PR. Use `conclusion` as the gate, because `gh run watch` can exit 0 on a failed run. After each fix push, watch the new run the same way.
 
-Then read the Copilot review, which nothing else watches. Find out whether the review arrived. Then read its line comments:
+No external review is configured; once the post-ready run is green on the head, merge.
 
-```sh
-gh api repos/{owner}/{repo}/pulls/<n>/reviews --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | "\(.state)\n\(.body)"'
-gh api repos/{owner}/{repo}/pulls/<n>/comments --jq '.[] | select(.user.login == "Copilot") | "\(.path):\(.line)\n\(.body)\n"'
-```
+**A docs-only rebase merges without fresh CI.** A PR that was green on its previous head may merge right after a rebase with no fresh CI, if the rebase changed only `ROADMAP.md` or `CHANGELOG.md` and `git range-diff` shows its own commits otherwise unchanged. Then watch main's CI on the merge commit, and fix forward if it goes red.
 
-When the PR becomes ready, Copilot reviews it automatically. A manual request spends a second unit of quota. After the first ready run ends, wait up to fifteen minutes for the Copilot review. If no review arrives, continue and write that in the report. Reply to every comment. Fix it, or reply with the spec section or invariant that the fix breaks. A comment without a reply reads as agreement. Copilot comments do not bind you, and you must not ignore any of them. Put all fixes in one push. If you must do more than fix review comments, run `gh pr ready <n> --undo` first. The next ready call starts the matrix again and spends Copilot quota again.
-
-When the latest run is green on the PR head and every comment has a reply, merge with `gh pr merge <n> --squash --delete-branch`. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
+When the latest run is green on the PR head, merge with `gh pr merge <n> --squash --delete-branch`. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
 
 ## 8. Close the loop
 
@@ -203,7 +198,7 @@ If `record_work` fails after one smaller retry, write the note by hand under `pr
 
 Then write briefly: the issue that you took, what shipped with numbers, and the next task (named, not started). Add these parts:
 
-- **Review.** What each tool and Copilot found, and what you applied or skipped.
+- **Review.** What each tool found, and what you applied or skipped.
 - **Plan diff.** Every promise delivered, or the deviations.
 - **What the record gave.** The recorded decisions that the work used, or none.
 - **Decisions taken without asking.** One line each: the branch that you took and the branch that you did not take.

@@ -6,13 +6,13 @@ The reader invoked `/take-next unattended-loop`. That invocation is plan approva
 
 - **Step 3 does not wait, and skips plan mode.** Write the plan as usual and post it on the issue, headed "Plan (pre-approved by the reader for this run)". Then build. This replaces "Step 3 is a real stop".
 - **The four stops stop the item, not the loop.** A contradiction with `SPEC.md`, a task that is two tasks, a destructive action outside the branch, or a decline or narrowing of what the reader asked for: do not build past it. If a draft PR is open, leave it open with the question at the top of its body. Record the question for the final report and take the next item. A `SPEC.md` §6 dependency or stack change is the reader's, and goes to the report the same way. This replaces "ask the question in its own message, and wait".
-- **A wait does not block.** After `gh pr ready`, start the next pass in a new worktree while CI and the Copilot review run. While review agents run, apply each report as it arrives, then build. Merging still waits for its green run.
+- **A wait does not block.** After `gh pr ready`, start the next pass in a new worktree while CI runs. While review agents run, apply each report as it arrives, then build. Merging still waits for its green run.
 
 ## Merging
 
-- Merge a PR when the `ci` run on its **head** is green and step 7's Copilot comments each have a reply. Then remove its worktree and local branch in the same step.
+- Merge a PR when the `ci` run on its **head** is green. Then remove its worktree and local branch in the same step.
 - A red run stops merging. Fix it before the next pass starts.
-- When `main` moves under an open PR, rebase it. On a conflict in `crates/vigia/tests/package.rs`, take `main`'s side. On a `ROADMAP.md` conflict, keep both sides' rows. Then rerun `cargo test -p vigia --test register --test package`.
+- When `main` moves under an open PR, rebase it. On a conflict in `crates/vigia/tests/package.rs`, take `main`'s side. On a `ROADMAP.md` conflict, keep both sides' rows. Then rerun `cargo test -p vigia --test register --test package`. A rebase that changed only `ROADMAP.md` or `CHANGELOG.md` merges without fresh CI, per step 7.
 
 ## The queue
 
