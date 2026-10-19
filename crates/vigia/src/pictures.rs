@@ -1495,6 +1495,21 @@ mod tests {
             return;
         }
         assert!(any, "no installed face reads as covering Latin");
+        // Emoji faces map digits but no letters.
+        let emoji: Vec<_> = faces_of(&fonts)
+            .into_iter()
+            .filter(|face| matches!(face.name.as_str(), "Apple Color Emoji" | "Noto Color Emoji"))
+            .collect();
+        if emoji.is_empty() {
+            eprintln!("note: no emoji face here, so a face without Latin is not read");
+        }
+        for face in emoji {
+            assert!(
+                !fonts.with_face_data(face.id, covers_latin).unwrap_or(true),
+                "{} reads as covering Latin",
+                face.name
+            );
+        }
     }
 
     fn side(width: u32, height: u32) -> ImageSide {
