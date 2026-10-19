@@ -1583,7 +1583,7 @@ fn note_rows_step_back() {
 }
 
 #[test]
-fn wheel_steps_display_rows() {
+fn wheel_steps_rows() {
     let (scratch, mut app) = noted("scroll-note-wheel", 0, 6);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1608,7 +1608,7 @@ fn wheel_steps_display_rows() {
 }
 
 #[test]
-fn page_overlap_counts_display_rows() {
+fn page_down_overlap() {
     let height = body();
     let (scratch, mut app) = noted("scroll-note-page", 0, height * 2);
     let worktree = scratch.worktree();
@@ -1688,7 +1688,7 @@ fn edit_above_keeps_under() {
 }
 
 #[test]
-fn under_clamped_when_note_shrinks() {
+fn note_shrinks_under() {
     let (scratch, mut app) = noted("scroll-note-shrinks", 0, 6);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -1722,7 +1722,7 @@ fn under_clamped_when_note_shrinks() {
 }
 
 #[test]
-fn page_up_overlap_counts_display_rows() {
+fn page_up_overlap() {
     let height = body();
     let (scratch, mut app) = noted("scroll-note-page-up", 0, height * 2);
     let worktree = scratch.worktree();

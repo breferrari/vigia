@@ -1214,7 +1214,15 @@ fn cut_by_top(
     let top = (0..uncut.buffer().area.height)
         .find(|&y| row_of(&uncut, y).concat().contains("PNG 120"))
         .expect("the size line is drawn");
-    (uncut, pane.draw(&view), view, top)
+    let cut = pane.draw(&view);
+    for y in 0..top {
+        assert_eq!(
+            row_of(&cut, y),
+            row_of(&uncut, y),
+            "screen row {y}, above the diff, changed when the picture was cut by the top"
+        );
+    }
+    (uncut, cut, view, top)
 }
 
 /// Screen row `y` of a drawing, as its cells' symbols, short of the scrollbar,
@@ -1235,7 +1243,7 @@ fn rows_with(backend: &TestBackend, needle: &str) -> Vec<u16> {
 }
 
 #[test]
-fn picture_cut_by_top_halfblocks() {
+fn top_cut_halfblocks() {
     let (uncut, cut, view, top) =
         cut_by_top("pictures-cut-halfblocks", ProtocolType::Halfblocks, 2);
     let shown = picture_rows(&view).len();
@@ -1252,7 +1260,7 @@ fn picture_cut_by_top_halfblocks() {
 }
 
 #[test]
-fn picture_cut_by_top_kitty() {
+fn top_cut_kitty() {
     let (_, cut, view, top) = cut_by_top("pictures-cut-kitty", ProtocolType::Kitty, 2);
     let placed = rows_with(&cut, &PLACEHOLDER.to_string());
     let shown = picture_rows(&view).len();
@@ -1286,7 +1294,7 @@ fn sixel_heights(backend: &TestBackend) -> Vec<u32> {
 }
 
 #[test]
-fn picture_cut_by_top_sixel() {
+fn top_cut_sixel() {
     let cut_rows = 2u16;
     let (uncut, cut, _, top) = cut_by_top("pictures-cut-sixel", ProtocolType::Sixel, cut_rows);
     assert_eq!(
@@ -1314,7 +1322,7 @@ fn picture_cut_by_top_sixel() {
 }
 
 #[test]
-fn picture_cut_by_top_iterm2() {
+fn top_cut_iterm2() {
     let (uncut, cut, view, top) = cut_by_top("pictures-cut-iterm2", ProtocolType::Iterm2, 2);
     let shown = u16::try_from(picture_rows(&view).len()).expect("rows");
     let drawn = rows_with(&cut, "1337;File=");
@@ -1338,7 +1346,7 @@ fn picture_cut_by_top_iterm2() {
 }
 
 #[test]
-fn under_clamped_on_resize() {
+fn resize_clamps_under() {
     let (scratch, mut pane) = stacked("pictures-resize", ProtocolType::Halfblocks, 40);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();

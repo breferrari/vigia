@@ -2455,7 +2455,7 @@ impl View {
             })
             .collect();
         let total: usize = costs.iter().map(|(pieces, under)| pieces + 1 + under).sum();
-        total.saturating_sub(aimed(&costs, &walked.blocks, aim))
+        total.saturating_sub(skipped(&costs, &walked.blocks, aim))
     }
 
     /// Turn logical rows into display rows, record the gutter, and answer the rows
@@ -2543,8 +2543,7 @@ impl View {
             .collect();
         let cost = |at: usize| costs[at].0 + 1 + costs[at].1;
         let total: usize = (0..breaks.len()).map(cost).sum();
-        let opens_at = aimed(&costs, blocks, aim);
-        // Whether the screen opens where a step put it rather than on its first row.
+        let opens_at = skipped(&costs, blocks, aim);
         let aiming = opens_at > 0 || aim.rise.is_some();
         // Every pinned answer's blocks, whether the window reaches them or not:
         // the pass sweeps what nothing asks for.
@@ -3200,7 +3199,7 @@ fn logical_of(blocks: &[Block], rows: usize, position: Position) -> Option<usize
 
 /// Display rows above the step `aim` opens on, among walked rows of
 /// `(pieces, hung)` each.
-fn aimed(costs: &[(usize, usize)], blocks: &[Block], aim: Aim) -> usize {
+fn skipped(costs: &[(usize, usize)], blocks: &[Block], aim: Aim) -> usize {
     let Some(&(_, first)) = costs.first() else {
         return 0;
     };
