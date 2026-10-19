@@ -484,6 +484,7 @@ fn png_first_paint() {
             canvas: (0x0d, 0x11, 0x17),
             changed: (0xf8, 0x51, 0x49),
         },
+        ratatui_image::picker::Picker::halfblocks(),
         Box::new(|| {}),
     );
     let chrome = app.chrome(

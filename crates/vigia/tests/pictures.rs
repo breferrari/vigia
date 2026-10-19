@@ -10,6 +10,7 @@ use image::{ImageEncoder, ImageFormat, Rgba, RgbaImage};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
+use ratatui_image::picker::{Picker, ProtocolType};
 use support::{Scratch, png};
 use vigia::pictures::{self, Inks, Kind, Pictures};
 use vigia::{Action, App, Glyphs, Pointing, Row, Theme, View, body_layout, render};
@@ -33,11 +34,18 @@ struct Pane {
 
 impl Pane {
     fn new(width: u16, height: u16) -> Self {
+        Self::drawn_by(width, height, ProtocolType::Halfblocks)
+    }
+
+    /// A pane whose pictures are encoded for `protocol` at a 10x20 cell.
+    fn drawn_by(width: u16, height: u16, protocol: ProtocolType) -> Self {
         let mut app = App::new();
         app.draw_pictures(true);
+        let mut picker = Picker::halfblocks();
+        picker.set_protocol_type(protocol);
         Self {
             app,
-            pictures: Pictures::new(INKS, Box::new(|| {})),
+            pictures: Pictures::new(INKS, picker, Box::new(|| {})),
             highlighter: Highlighter::eager(),
             history: History::new(),
             width,
@@ -774,6 +782,7 @@ fn worker_skips_hidden() {
     let held = std::sync::Mutex::new(held);
     pane.pictures = Pictures::new(
         INKS,
+        Picker::halfblocks(),
         Box::new(move || {
             let _ = held.lock().map(|held| held.recv());
         }),
@@ -812,4 +821,156 @@ fn worker_skips_hidden() {
         "pictures nobody could see were decoded"
     );
     assert_eq!(pane.pictures.kept(), 0, "a picture off screen was kept");
+}
+
+/// The Kitty placeholder every cell of a Kitty picture carries.
+const PLACEHOLDER: char = '\u{10EEEE}';
+
+/// A settled pane drawing a modified screen image in `protocol`.
+fn protocol_pane(name: &str, protocol: ProtocolType) -> (Scratch, Pane) {
+    let scratch = changed(
+        name,
+        "screen.png",
+        &encode(&screen_like(120, 260, [40, 90, 200]), ImageFormat::Png),
+        &encode(&screen_like(120, 260, [200, 90, 40]), ImageFormat::Png),
+    );
+    (scratch, Pane::drawn_by(100, 30, protocol))
+}
+
+/// Cells whose symbol contains `needle`.
+fn cells_with(backend: &TestBackend, needle: &str) -> usize {
+    backend
+        .buffer()
+        .content()
+        .iter()
+        .filter(|cell| cell.symbol().contains(needle))
+        .count()
+}
+
+#[test]
+fn kitty_placement() {
+    let (scratch, mut pane) = protocol_pane("pictures-kitty", ProtocolType::Kitty);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let (_, _, kind, panels) = sized(&view).expect("a size line");
+    assert_eq!((kind, panels), (Kind::Three, 3));
+    let first = pane.draw(&view);
+    assert_eq!(
+        cells_with(&first, "\x1b_G"),
+        3,
+        "each panel's image is not sent once, in one cell"
+    );
+    let placed = cells_with(&first, &PLACEHOLDER.to_string());
+    let slots: usize = sized_slots(&view).iter().map(|(w, r)| w * r).sum();
+    assert!(
+        placed >= slots * 9 / 10 && placed <= slots,
+        "{placed} placeholders for {slots} cells of panels"
+    );
+    assert_eq!(
+        cells_with(&first, "\u{2580}"),
+        0,
+        "a Kitty pane drew half-blocks"
+    );
+    let again = pane.draw(&view);
+    assert_eq!(
+        cells_with(&again, "\x1b_G"),
+        0,
+        "an image already sent was sent again"
+    );
+    assert_eq!(cells_with(&again, &PLACEHOLDER.to_string()), placed);
+}
+
+#[test]
+fn scrolled_kitty_placement() {
+    let scratch = Scratch::new("pictures-kitty-scrolled");
+    scratch.write("a.png", png(120, 260, 1));
+    scratch.write("z.txt", support::numbered_lines(10));
+    scratch.commit_all("baseline");
+    scratch.write("a.png", png(120, 260, 2));
+    scratch.write("z.txt", support::numbered_lines(13));
+    let mut pane = Pane::drawn_by(100, 30, ProtocolType::Kitty);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let whole = pane.settled(&mut frame);
+    let rows = picture_rows(&whole).len();
+    pane.scroll(&mut frame, 4);
+    let view = pane.settled(&mut frame);
+    let shown = picture_rows(&view);
+    assert!(
+        shown.first().is_some_and(|(part, _)| *part > 0) && shown.len() < rows,
+        "the picture is not cut by the top of the pane: {shown:?}"
+    );
+    let drawn = pane.draw(&view);
+    assert_eq!(
+        cells_with(&drawn, "\x1b_G"),
+        3,
+        "a picture cut by the top was not sent"
+    );
+    let placed_rows = drawn
+        .buffer()
+        .content()
+        .chunks(usize::from(pane.width))
+        .filter(|row| row.iter().any(|cell| cell.symbol().contains(PLACEHOLDER)))
+        .count();
+    assert_eq!(
+        placed_rows,
+        shown.len(),
+        "placeholders on {placed_rows} rows"
+    );
+}
+
+#[test]
+fn sixel_placement() {
+    let (scratch, mut pane) = protocol_pane("pictures-sixel", ProtocolType::Sixel);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let drawn = pane.draw(&view);
+    assert_eq!(
+        cells_with(&drawn, "\x1bP"),
+        3,
+        "each panel is not one Sixel sequence in its first cell"
+    );
+    assert_eq!(
+        cells_with(&drawn, "\u{2580}"),
+        0,
+        "a Sixel pane drew half-blocks"
+    );
+}
+
+#[test]
+fn iterm2_placement() {
+    let (scratch, mut pane) = protocol_pane("pictures-iterm2", ProtocolType::Iterm2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let drawn = pane.draw(&view);
+    let rows: usize = sized_slots(&view).iter().map(|(_, r)| r).sum();
+    let images = cells_with(&drawn, "1337;File=");
+    assert!(
+        images > 0 && images <= rows,
+        "{images} iTerm2 images for {rows} panel rows"
+    );
+}
+
+/// Each panel's slot as `(width, rows)`.
+fn sized_slots(view: &View) -> Vec<(usize, usize)> {
+    view.rows
+        .iter()
+        .find_map(|row| match row {
+            Row::Sized { key, .. } => Some(
+                key.shape
+                    .slots
+                    .iter()
+                    .map(|slot| (usize::from(slot.width), usize::from(slot.rows)))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default()
 }

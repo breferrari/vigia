@@ -398,6 +398,61 @@ pub fn ask(_timeout: std::time::Duration, _palette: bool) -> Vec<u8> {
     Vec::new()
 }
 
+/// How long the picture query waits for the terminal, in all.
+pub const PICTURES_WAIT: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Ask the terminal which image protocol it draws and its cell size in pixels,
+/// through `ratatui-image`'s own query. `asked` is false when the background
+/// query went unanswered, which on Unix skips this one: a terminal that answers
+/// nothing would cost a second wait. Windows sends no other query, so it always
+/// asks.
+pub fn picker(asked: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
+    use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
+    if cfg!(unix) && !asked {
+        return (Picker::halfblocks(), crate::pictures::Answer::default());
+    }
+    let picker = {
+        let options = QueryStdioOptions {
+            timeout_ms: PICTURES_WAIT.as_millis() as i32,
+            #[cfg(unix)]
+            stdio: query_stdio(),
+            #[cfg(unix)]
+            kitty_shared_memory_object: QueryStdioOptions::probe_kitty_smo(),
+            ..QueryStdioOptions::default()
+        };
+        Picker::from_query_stdio_with_options(options).unwrap_or_else(|_| Picker::halfblocks())
+    };
+    let caps = picker.capabilities();
+    // The terminal's own size in pixels, which the crate's fallback reads too.
+    let sized = ratatui::crossterm::terminal::window_size()
+        .is_ok_and(|size| size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0);
+    let answer = crate::pictures::Answer {
+        kitty: caps.contains(&Capability::Kitty),
+        sixel: caps.contains(&Capability::Sixel),
+        cell: sized
+            || caps
+                .iter()
+                .any(|cap| matches!(cap, Capability::CellSize(Some(_)))),
+    };
+    (picker, answer)
+}
+
+/// The descriptors the picture query reads and writes: the terminal's own when
+/// both ends are one, else `/dev/tty`. macOS answers `poll` on `/dev/tty` with
+/// `POLLNVAL`, so there the query reads nothing through it.
+#[cfg(unix)]
+fn query_stdio() -> Option<(std::os::fd::OwnedFd, std::os::fd::OwnedFd)> {
+    use std::os::fd::AsFd;
+    let (stdin, stdout) = (io::stdin(), stdout());
+    if stdin.is_terminal() && stdout.is_terminal() {
+        return Some((
+            stdin.as_fd().try_clone_to_owned().ok()?,
+            stdout.as_fd().try_clone_to_owned().ok()?,
+        ));
+    }
+    ratatui_image::picker::cap_parser::QueryStdioOptions::stdio_dev_tty().ok()
+}
+
 #[cfg(test)]
 mod background_tests {
     use super::{ANSWERING, Background, answered, background_of, colours_of, query, wait_limit};

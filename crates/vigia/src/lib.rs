@@ -81,7 +81,9 @@ pub use render::{
     diff_height, menu_cell, note_cells, notice_area, positions_gap, regions, render, voice_style,
 };
 pub use state::state_root;
-pub use terminal::{Background, Colours, Screen, Session, background_of, colours_of};
+pub use terminal::{
+    Background, Colours, PICTURES_WAIT, Screen, Session, background_of, colours_of, picker,
+};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
@@ -347,6 +349,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // environment anything. An unrecognised value is refused, not defaulted.
     let glyphs = Glyphs::detect()?;
 
+    // Beside the background query and before the event reader, which would
+    // read the answer as keys. `SPEC.md` §11.1.
+    let (mut picker, answer) = terminal::picker(!reply.is_empty());
+    picker.set_protocol_type(pictures::protocol_of(answer, |key| {
+        std::env::var(key).ok()
+    })?);
+    let protocol = picker.protocol_type();
+
     // Here rather than inside `App` for the palette's reason: a config file that
     // does not parse has to be reported on a terminal the reader can still read.
     // `SPEC.md` §11.2 B6.
@@ -391,6 +401,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             colours.as_ref().map(|colours| colours.background),
             terminal::background_of(&reply) == Some(Background::Light),
         ),
+        picker,
         Box::new(move || {
             let _ = pictured.send(Wake::Pictured);
         }),
@@ -448,8 +459,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         effects_ran: false,
     };
 
-    // A half-block is a background, and below 24-bit a background is dropped.
-    shell.app.draw_pictures(depth == Depth::Truecolor);
+    shell
+        .app
+        .draw_pictures(pictures::drawn(depth == Depth::Truecolor, protocol));
 
     // The arming from above, reported now that there is somewhere to report it. A
     // signal that arrived before this point is not lost: it waits in the channel

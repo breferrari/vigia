@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui_image::picker::ProtocolType;
 use vigia::{
     ARRIVING_FRAME, Action, App, BOX_ROWS, Body, Change, Glyphs, Input, Key, LEAVING, NoteEffects,
     PaintStats, Pointing, Row, Theme, View, WHEEL_ROWS, body_layout, box_cells, box_entrance,
@@ -3288,9 +3289,32 @@ fn arrival_holds_the_budget() {
 /// built panels and decodes nothing. `SPEC.md` §11.1.
 #[test]
 fn pictures_frame_budget() {
+    pictures_frame(ProtocolType::Halfblocks);
+}
+
+/// The same with Kitty placeholders, after the one frame that sends the images.
+#[test]
+fn pictures_frame_kitty() {
+    pictures_frame(ProtocolType::Kitty);
+}
+
+/// The same with Sixel, which writes each panel's sequence into its first cell
+/// on every frame.
+#[test]
+fn pictures_frame_sixel() {
+    pictures_frame(ProtocolType::Sixel);
+}
+
+/// The same with iTerm2 images, one per panel row.
+#[test]
+fn pictures_frame_iterm2() {
+    pictures_frame(ProtocolType::Iterm2);
+}
+
+fn pictures_frame(protocol: ProtocolType) {
     use vigia::pictures::{self, Inks, Pictures};
 
-    let scratch = Scratch::new("i9-pictures");
+    let scratch = Scratch::new(&format!("i9-pictures-{protocol:?}"));
     scratch.write("a/screen.png", support::screen_png(10));
     for file in 0..20 {
         scratch.write(&format!("b/file_{file}.rs"), support::numbered_lines(200));
@@ -3315,6 +3339,11 @@ fn pictures_frame_budget() {
         Inks {
             canvas: (0x0d, 0x11, 0x17),
             changed: (0xf8, 0x51, 0x49),
+        },
+        {
+            let mut picker = ratatui_image::picker::Picker::halfblocks();
+            picker.set_protocol_type(protocol);
+            picker
         },
         Box::new(|| {}),
     );
@@ -3395,7 +3424,10 @@ fn pictures_frame_budget() {
         frames.push(timed(&mut frame, &mut app, &mut highlighter, &mut pictures).0);
     }
     holds_p99(
-        "I9: a settled frame repainting a changed image's three pictures on a 120x40 pane",
+        &format!(
+            "I9: a settled frame repainting a changed image's three pictures in {protocol:?} \
+             on a 120x40 pane"
+        ),
         budget(I9_FRAME),
         &frames,
         || format!("({built} picture rows on screen)"),
