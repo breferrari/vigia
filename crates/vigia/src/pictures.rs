@@ -718,7 +718,7 @@ fn image_format(format: Format) -> Option<ImageFormat> {
 /// The long side an SVG is rendered at, which every panel is shrunk from.
 const SVG_LONG_SIDE: f32 = 1024.0;
 
-/// References an SVG asked for that were refused, since the process started.
+/// SVG references to other files refused, since the process started.
 static REFUSED: AtomicU64 = AtomicU64::new(0);
 
 /// How many references to other files SVGs have asked for and been refused.
@@ -768,12 +768,7 @@ fn render_svg(bytes: &[u8]) -> Option<RgbaImage> {
         resvg::tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
-    let mut image = RgbaImage::new(width, height);
-    for (pixel, drawn) in image.pixels_mut().zip(pixmap.pixels()) {
-        let colour = drawn.demultiply();
-        pixel.0 = [colour.red(), colour.green(), colour.blue(), colour.alpha()];
-    }
-    Some(image)
+    RgbaImage::from_raw(width, height, pixmap.take_demultiplied())
 }
 
 /// One side decoded, with its colour profile. The first frame only.

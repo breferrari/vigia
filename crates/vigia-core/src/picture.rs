@@ -194,9 +194,9 @@ fn root_attributes(text: &str) -> Option<Vec<(&str, &str)>> {
         let name = rest[..equals].trim();
         // A name that runs into another tag is a start tag that never closed.
         if name.is_empty()
-            || name.contains(|c: char| {
-                c == '<' || c == '>' || c.is_whitespace() || c == '"' || c == '\''
-            })
+            || !name
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | ':' | '.'))
         {
             return None;
         }
