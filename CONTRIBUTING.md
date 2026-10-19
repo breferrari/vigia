@@ -75,6 +75,7 @@ cargo nextest run -p vigia --test notes heat  # one suite, then a substring of t
 cargo test --workspace --doc                  # the doctests, which nextest does not run
 cargo test --release --test budgets           # a release gate; first_paint is the other, run as its own step like CI does
 cargo clippy --workspace --all-targets
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps   # the docs, with the warnings CI refuses
 cargo fmt --all
 ```
 
