@@ -47,12 +47,7 @@ fn silent_terminal_no_reader() {
         line.contains("Halfblocks"),
         "a silent terminal chose a protocol: {line}"
     );
-    let waited: f64 = line
-        .split("asked ")
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|w| w.parse().ok())
-        .unwrap_or(f64::MAX);
+    let waited = pty::waited_ms(&text);
     assert!(
         waited < vigia::PICTURES_WAIT.as_secs_f64() * 1000.0 + 200.0,
         "the query waited {waited}ms on a silent terminal: {line}"
@@ -114,12 +109,7 @@ fn key_during_silent_query() {
         "the key after the query was lost: {text}"
     );
     let line = asked_line(&text);
-    let waited: f64 = line
-        .split("asked ")
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|w| w.parse().ok())
-        .unwrap_or(f64::MAX);
+    let waited = pty::waited_ms(&text);
     assert!(
         line.contains("Halfblocks") && waited < vigia::PICTURES_WAIT.as_secs_f64() * 1000.0 + 200.0,
         "a key typed into a silent query stalled it or chose a protocol: {line}"

@@ -323,8 +323,17 @@ fn answered(reply: &[u8], palette: bool) -> bool {
     }
 }
 
+/// How long the background query waits for a first answer.
+#[doc(hidden)]
+pub const BACKGROUND_WAIT: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Between reads of a terminal that `poll` cannot see.
+#[cfg(unix)]
+const UNPOLLED: std::time::Duration = std::time::Duration::from_millis(5);
+
 /// How long a terminal that has begun answering the palette is given to finish.
-const ANSWERING: std::time::Duration = std::time::Duration::from_secs(1);
+#[doc(hidden)]
+pub const ANSWERING: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// How long [`ask`] waits in all. A terminal that has begun answering the
 /// palette is waited on to the end: an answer left unread reaches the event
@@ -352,8 +361,13 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
         let query = query(palette);
         let mut sent = 0;
         while sent < query.len() {
-            sent += rustix::io::write(&output, &query[sent..]).ok()?;
+            match rustix::io::retry_on_intr(|| rustix::io::write(&output, &query[sent..])) {
+                Ok(0) | Err(_) => return None,
+                Ok(wrote) => sent += wrote,
+            }
         }
+        // Cleared once `poll` cannot see the descriptor.
+        let mut polling = true;
         let start = std::time::Instant::now();
         loop {
             let deadline = start + wait_limit(palette, !reply.is_empty(), timeout);
@@ -361,24 +375,38 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
             if now >= deadline {
                 return Some(());
             }
-            let mut fds = [rustix::event::PollFd::new(
-                &input,
-                rustix::event::PollFlags::IN,
-            )];
-            let waited =
-                rustix::event::poll(&mut fds, Some(&(deadline - now).try_into().ok()?)).ok()?;
-            if waited == 0 {
-                continue;
-            }
-            // `POLLNVAL` or a hangup: a read would wait for a key.
-            if !fds[0].revents().contains(rustix::event::PollFlags::IN) {
-                return Some(());
+            if polling {
+                let mut fds = [rustix::event::PollFd::new(
+                    &input,
+                    rustix::event::PollFlags::IN,
+                )];
+                let waited =
+                    rustix::event::poll(&mut fds, Some(&(deadline - now).try_into().ok()?)).ok()?;
+                if waited == 0 {
+                    continue;
+                }
+                let revents = fds[0].revents();
+                if revents.contains(rustix::event::PollFlags::NVAL) {
+                    // macOS on `/dev/tty`, opened fresh for this query, so the
+                    // flag reaches nothing else: read without blocking instead.
+                    rustix::io::ioctl_fionbio(&input, true).ok()?;
+                    polling = false;
+                    continue;
+                }
+                if !revents.contains(rustix::event::PollFlags::IN) {
+                    return Some(());
+                }
             }
             let mut buffer = [0u8; 256];
-            let read = rustix::io::read(&input, &mut buffer).ok()?;
-            if read == 0 {
-                return Some(());
-            }
+            let read = match rustix::io::read(&input, &mut buffer) {
+                Ok(0) => return Some(()),
+                Ok(read) => read,
+                Err(rustix::io::Errno::AGAIN) => {
+                    std::thread::sleep(UNPOLLED.min(deadline - now));
+                    continue;
+                }
+                Err(_) => return Some(()),
+            };
             reply.extend_from_slice(&buffer[..read]);
             if answered(&reply, palette) {
                 return Some(());

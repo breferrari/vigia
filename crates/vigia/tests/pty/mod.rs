@@ -62,6 +62,9 @@ pub fn run(mut command: Command, script: Script<'_>) -> String {
     // The child reads its terminal in line mode, so the byte needs its line.
     master.write_all(b"z\n").expect("type a byte");
     read_until(&mut master, &mut seen, "got z", Duration::from_secs(10));
+    // Closed before the child is reaped: one exiting on a terminal waits for
+    // its output to drain.
+    drop(master);
     String::from_utf8_lossy(&seen).into_owned()
 }
 

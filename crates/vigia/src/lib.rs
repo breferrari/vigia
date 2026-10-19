@@ -82,7 +82,8 @@ pub use render::{
 };
 pub use state::state_root;
 pub use terminal::{
-    Background, Colours, PICTURES_WAIT, Screen, Session, ask, background_of, colours_of, picker,
+    ANSWERING, BACKGROUND_WAIT, Background, Colours, PICTURES_WAIT, Screen, Session, ask,
+    background_of, colours_of, picker,
 };
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
@@ -335,7 +336,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // The palette is asked for only when it will be used, so the default costs
     // one query and not eighteen.
     let wanted = theme::wants_colours(|key| std::env::var(key).ok());
-    let reply = terminal::ask(std::time::Duration::from_millis(150), wanted);
+    let reply = terminal::ask(terminal::BACKGROUND_WAIT, wanted);
     let colours = terminal::colours_of(&reply);
     let depth = Depth::detect()?;
     let theme = theme::from_env(

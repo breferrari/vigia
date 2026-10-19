@@ -14,9 +14,9 @@ const CHILD: &str = "VIGIA_ASK_CHILD";
 /// Set in the child when it asks for the palette too.
 const PALETTE: &str = "VIGIA_ASK_PALETTE";
 /// The background query's wait, as `run` passes it.
-const WAIT: Duration = Duration::from_millis(150);
+const WAIT: Duration = vigia::BACKGROUND_WAIT;
 /// How long a palette answer that has begun is given to finish.
-const ANSWERING: Duration = Duration::from_secs(1);
+const ANSWERING: Duration = vigia::ANSWERING;
 /// Room for a loaded machine past a bound.
 const SLACK: Duration = Duration::from_millis(200);
 
@@ -70,6 +70,21 @@ fn piped_stdin_ask() {
     });
     assert_typed(&text);
     assert_within(&text, WAIT);
+}
+
+#[test]
+fn piped_answered_ask() {
+    // On macOS the query falls back to `/dev/tty`, which `poll` cannot see.
+    let text = asked(Ask {
+        answer: Some(b"\x1b]11;rgb:0000/0000/0000\x1b\\"),
+        piped: true,
+        ..Ask::default()
+    });
+    assert_typed(&text);
+    assert!(
+        pty::asked_line(&text).contains("]11;rgb:"),
+        "an answer through /dev/tty was not read: {text}"
+    );
 }
 
 #[test]
