@@ -182,11 +182,12 @@ pub struct Watcher<'repo> {
     /// The LFS store's `objects`, in every spelling as for `roots`. An object
     /// landing there can turn a `binary` side into a picture.
     store: Vec<PathBuf>,
-    /// The store's `objects` as the config names it.
-    store_objects: PathBuf,
     /// While `objects` outside the worktree does not exist yet, its deepest
     /// existing ancestor, watched until it appears.
     store_ancestor: Option<PathBuf>,
+    /// The git-dir watches armed outside the worktree, which an ancestor of
+    /// the store may share and must then keep.
+    git_watches: Vec<PathBuf>,
     /// Why the store could not be watched, until [`Self::take_store_notice`].
     store_notice: Option<String>,
     index: IndexWatch,
@@ -277,6 +278,7 @@ impl<'repo> Watcher<'repo> {
             .map_err(|e| Error::Watch(Box::new(e)))?;
         // Not recursive: `objects/` churns on every write.
         let inside = |dir: &Path| roots.iter().any(|root| dir.starts_with(root));
+        let mut git_watches = Vec::new();
         for dir in [git_dir.first(), common_dir.first()].into_iter().flatten() {
             if inside(dir) {
                 continue;
@@ -284,12 +286,14 @@ impl<'repo> Watcher<'repo> {
             backend
                 .watch(dir, RecursiveMode::NonRecursive)
                 .map_err(|e| Error::Watch(Box::new(e)))?;
+            git_watches.push(dir.clone());
             // A linked worktree's git dir has no refs of its own.
             let heads = dir.join("refs").join("heads");
             if heads.is_dir() {
                 backend
                     .watch(&heads, RecursiveMode::Recursive)
                     .map_err(|e| Error::Watch(Box::new(e)))?;
+                git_watches.push(heads);
             }
             // For `info/attributes`, which a non-recursive watch above cannot see.
             let info = dir.join("info");
@@ -297,6 +301,7 @@ impl<'repo> Watcher<'repo> {
                 backend
                     .watch(&info, RecursiveMode::NonRecursive)
                     .map_err(|e| Error::Watch(Box::new(e)))?;
+                git_watches.push(info);
             }
         }
 
@@ -320,8 +325,8 @@ impl<'repo> Watcher<'repo> {
             git_dir,
             common_dir,
             store,
-            store_objects: objects,
             store_ancestor: None,
+            git_watches,
             store_notice: None,
             index,
             options,
@@ -339,26 +344,21 @@ impl<'repo> Watcher<'repo> {
     /// Watch `objects`, or its deepest existing ancestor until it appears, and
     /// say whether `objects` is watched now.
     fn arm_store(&mut self) -> bool {
-        while !self.store_objects.is_dir() {
-            let Some(ancestor) = self
-                .store_objects
-                .ancestors()
-                .skip(1)
-                .find(|dir| dir.is_dir())
-                .map(Path::to_path_buf)
-            else {
+        let objects = self.store[0].clone();
+        while !objects.is_dir() {
+            let Some(ancestor) = objects.ancestors().skip(1).find(|dir| dir.is_dir()) else {
                 return false;
             };
             // Already watched, and its child is still missing.
-            if self.store_ancestor.as_ref() == Some(&ancestor)
-                || !self.arm_or_notice(&ancestor, RecursiveMode::NonRecursive)
+            if self.store_ancestor.as_deref() == Some(ancestor)
+                || !self.arm_or_notice(ancestor, RecursiveMode::NonRecursive)
             {
                 return false;
             }
-            self.store_ancestor = Some(ancestor);
+            self.drop_ancestor();
+            self.store_ancestor = Some(ancestor.to_path_buf());
         }
-        self.store_ancestor = None;
-        let objects = self.store_objects.clone();
+        self.drop_ancestor();
         self.arm_or_notice(&objects, RecursiveMode::Recursive)
     }
 
@@ -368,14 +368,22 @@ impl<'repo> Watcher<'repo> {
         let Err(error) = (self.arm)(&mut self.backend, path, mode) else {
             return true;
         };
-        // A recursive watch that stopped partway holds what it added. Only that
-        // one: an ancestor may be a watch of the main set.
+        // A recursive watch that stopped partway holds what it added.
         if mode == RecursiveMode::Recursive {
             let _ = self.backend.unwatch(path);
         }
-        self.store_ancestor = None;
+        self.drop_ancestor();
         self.store_notice = Some(store_notice(&error));
         false
+    }
+
+    /// Stop watching the store's ancestor, unless a git-dir watch is the same.
+    fn drop_ancestor(&mut self) {
+        if let Some(ancestor) = self.store_ancestor.take()
+            && !self.git_watches.contains(&ancestor)
+        {
+            let _ = self.backend.unwatch(&ancestor);
+        }
     }
 
     /// Once, why an LFS object landing will not redraw its file until the next
@@ -909,11 +917,12 @@ mod tests {
                 let _ = std::fs::remove_dir_all(&self.0);
             }
         }
-        let base = Removed(std::env::temp_dir().join(format!(
-            "vigia-store-arm-{}-{:?}",
-            std::process::id(),
-            std::time::SystemTime::now()
-        )));
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let base = Removed(
+            std::env::temp_dir().join(format!("vigia-store-arm-{}-{stamp}", std::process::id())),
+        );
         let (tree, store) = (base.0.join("tree"), base.0.join("store"));
         std::fs::create_dir_all(store.join("objects")).expect("store");
         std::fs::create_dir_all(&tree).expect("tree");
@@ -936,7 +945,11 @@ mod tests {
             None,
             &tree,
             WatchOptions::default(),
-            |_, _, _| Err(notify::Error::new(notify::ErrorKind::MaxFilesWatch)),
+            // As a full table does: partway through, holding what it added.
+            |backend, path, mode| {
+                let _ = backend.watch(path, mode);
+                Err(notify::Error::new(notify::ErrorKind::MaxFilesWatch))
+            },
         )
         .expect("the main watch still arms");
         let notice = watcher.take_store_notice().expect("no notice");
@@ -947,16 +960,28 @@ mod tests {
         );
         assert_eq!(watcher.take_store_notice(), None, "the notice came twice");
 
+        let mut tick_within = |timeout: Duration| {
+            let (stop, (ticked, waiting)) = (watcher.stopper(), mpsc::channel::<()>());
+            let guard = std::thread::spawn(move || {
+                if waiting.recv_timeout(timeout).is_err() {
+                    stop.stop();
+                }
+            });
+            let tick = watcher.next_tick();
+            let _ = ticked.send(());
+            guard.join().expect("the guard");
+            tick.is_some()
+        };
+        std::fs::write(store.join("objects").join("object"), "x\n").expect("write");
+        assert!(
+            !tick_within(Duration::from_millis(600)),
+            "the failed store watch was left armed"
+        );
         std::fs::write(tree.join("a.txt"), "x\n").expect("write");
-        let (stop, (ticked, waiting)) = (watcher.stopper(), mpsc::channel::<()>());
-        let guard = std::thread::spawn(move || {
-            if waiting.recv_timeout(Duration::from_secs(10)).is_err() {
-                stop.stop();
-            }
-        });
-        assert!(watcher.next_tick().is_some(), "a tree write did not tick");
-        let _ = ticked.send(());
-        guard.join().expect("the guard");
+        assert!(
+            tick_within(Duration::from_secs(10)),
+            "a tree write did not tick"
+        );
         assert_eq!(watcher.take_store_notice(), None, "the notice came again");
     }
 

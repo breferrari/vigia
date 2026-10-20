@@ -114,6 +114,14 @@ impl Taken {
             awaiting,
         }
     }
+
+    /// Whether an object a side was missing is there now, counting each `stat`.
+    fn arrived(&self, probes: &mut u64) -> bool {
+        self.awaiting.iter().any(|object| {
+            *probes += 1;
+            object.is_file()
+        })
+    }
 }
 
 /// One cache, split by which run a change came from.
@@ -242,9 +250,6 @@ fn provenance(taken: &Taken, current: &FileChange) -> Provenance {
     // moved, and a new kind is a different diff outright.
     if taken.kind != current.kind || taken.before != current.before || taken.after != current.after
     {
-        return Provenance::Moved;
-    }
-    if taken.awaiting.iter().any(|object| object.is_file()) {
         return Provenance::Moved;
     }
     // A removal, a conflict and a type change are computed from the left side
@@ -758,7 +763,13 @@ impl<'w> Frame<'w> {
         let what = if let Some(measured) = self.spans.get_mut(change)
             && let Some(taken) = measured.taken.as_ref()
         {
-            let what = verdict(taken, change, now, &mut fresh);
+            let mut awaited = 0;
+            let what = if taken.arrived(&mut awaited) {
+                Verdict::Remeasure
+            } else {
+                verdict(taken, change, now, &mut fresh)
+            };
+            self.stats.probes += awaited;
             if what != Verdict::Remeasure {
                 measured.answered = true;
             }
@@ -864,15 +875,18 @@ impl<'w> Frame<'w> {
         // Lazily, for the reason [`reusable`] gives: a `stat` this answer will
         // not read is a syscall bought for nothing, and `probes` should count
         // the ones actually taken.
-        let mut probed = false;
+        let (mut probed, mut awaited) = (false, 0);
         let reuse = match self.cached.get(change) {
             None => false,
-            Some(cached) => reusable(&cached.taken, change, || {
-                probed = true;
-                fingerprint(&path)
-            }),
+            Some(cached) => {
+                !cached.taken.arrived(&mut awaited)
+                    && reusable(&cached.taken, change, || {
+                        probed = true;
+                        fingerprint(&path)
+                    })
+            }
         };
-        self.stats.probes += u64::from(probed);
+        self.stats.probes += u64::from(probed) + awaited;
 
         if reuse {
             self.stats.reused += 1;

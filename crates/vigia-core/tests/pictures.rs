@@ -841,7 +841,7 @@ fn lfs_new_object_arrives() {
 }
 
 /// Waiting on an object costs the other files nothing: both diffs are reused,
-/// at one fingerprint each.
+/// at one fingerprint each and one `stat` of the missing object.
 #[test]
 fn lfs_wait_reuses() {
     let (scratch, _) = lfs_repo("picture-lfs-wait", &png(24, 40, 1), &png(30, 50, 2));
@@ -857,5 +857,9 @@ fn lfs_wait_reuses() {
     let (reused, probes) = (frame.stats().reused, frame.stats().probes);
     support::materialise(&mut frame);
     assert_eq!(frame.stats().reused - reused, 2, "a diff was read again");
-    assert_eq!(frame.stats().probes - probes, 2, "the wait cost a probe");
+    assert_eq!(
+        frame.stats().probes - probes,
+        3,
+        "the wait cost more than its stat"
+    );
 }
