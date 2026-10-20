@@ -27,8 +27,11 @@ fn silent_child() {
     let waited = began.elapsed();
     ratatui::crossterm::terminal::disable_raw_mode().expect("leave raw mode");
     let mut tty = std::fs::File::open("/dev/tty").expect("the child has a terminal");
+    let compress = picker
+        .capabilities()
+        .contains(&ratatui_image::picker::Capability::KittyCompression);
     println!(
-        "asked {:.3} {:?} {answer:?}",
+        "asked {:.3} {:?} {answer:?} compress: {compress}",
         waited.as_secs_f64() * 1000.0,
         picker.protocol_type()
     );
@@ -63,6 +66,24 @@ fn kitty_answer_read() {
     assert!(
         line.contains("Kitty") && line.contains("kitty: true") && line.contains("cell: true"),
         "an answering kitty was not read: {line}"
+    );
+}
+
+#[test]
+fn kitty_compression_read() {
+    // kitty answers the compressed probe as well as the plain one.
+    let text = asked_in_pty(Some(
+        b"\x1b_Gi=31;OK\x1b\\\x1b_Gi=32;OK\x1b\\\x1b[6;20;10t\x1b[0n",
+    ));
+    let line = asked_line(&text);
+    assert!(
+        line.contains("Kitty") && line.contains("compress: true"),
+        "a kitty that takes compression was not read as one: {line}"
+    );
+    let plain = asked_in_pty(Some(b"\x1b_Gi=31;OK\x1b\\\x1b[6;20;10t\x1b[0n"));
+    assert!(
+        asked_line(&plain).contains("compress: false"),
+        "a kitty that did not answer the probe was read as taking compression"
     );
 }
 

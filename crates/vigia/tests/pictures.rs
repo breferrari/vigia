@@ -961,8 +961,59 @@ fn kitty_ids(backend: &TestBackend) -> Vec<u32> {
 }
 
 #[test]
-fn kitty_deleted_on_leave() {
-    let (scratch, mut pane) = protocol_pane("pictures-kitty-leave", ProtocolType::Kitty);
+fn kitty_kept_off_screen() {
+    let scratch = Scratch::new("pictures-kitty-kept");
+    scratch.write("a.png", png(120, 260, 1));
+    scratch.write("z.txt", support::numbered_lines(10));
+    scratch.commit_all("baseline");
+    scratch.write("a.png", png(120, 260, 2));
+    scratch.write("z.txt", support::numbered_lines(200));
+    let mut pane = Pane::drawn_by(100, 30, ProtocolType::Kitty);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    assert_eq!(
+        kitty_ids(&pane.draw(&view)).len(),
+        3,
+        "three images were not sent"
+    );
+
+    pane.scroll(&mut frame, 150);
+    let away = pane.settled(&mut frame);
+    assert!(
+        picture_rows(&away).is_empty(),
+        "the picture is still on screen"
+    );
+    pane.draw(&away);
+    assert_eq!(
+        pane.pictures.retired(),
+        "",
+        "an image off screen was deleted"
+    );
+    assert_eq!(
+        pane.pictures.kept(),
+        1,
+        "the picture off screen was dropped"
+    );
+
+    pane.scroll(&mut frame, -150);
+    let back = pane.settled(&mut frame);
+    let drawn = pane.draw(&back);
+    assert_eq!(
+        cells_with(&drawn, "\x1b_G"),
+        0,
+        "a picture that came back was sent again"
+    );
+    assert!(
+        cells_with(&drawn, &PLACEHOLDER.to_string()) > 0,
+        "the picture that came back is not placed"
+    );
+}
+
+#[test]
+fn kitty_deleted_on_edit() {
+    let (scratch, mut pane) = protocol_pane("pictures-kitty-edit", ProtocolType::Kitty);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
@@ -975,10 +1026,14 @@ fn kitty_deleted_on_leave() {
         "a delete was owed while on screen"
     );
 
-    // The image is reverted, so its picture leaves the pane.
-    scratch.checkout("screen.png");
+    // Edited again, so the same path shows a new picture.
+    scratch.write(
+        "screen.png",
+        encode(&screen_like(120, 260, [90, 200, 40]), ImageFormat::Png),
+    );
     frame.advance().expect("advance");
-    pane.view(&mut frame);
+    let edited = pane.settled(&mut frame);
+    pane.draw(&edited);
     let deletes = pane.pictures.retired();
     for id in &sent {
         assert!(

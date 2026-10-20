@@ -494,6 +494,9 @@ pub fn picker(ask: bool) -> (ratatui_image::picker::Picker, crate::pictures::Ans
         timeout_ms: PICTURES_WAIT.as_millis() as i32,
         #[cfg(unix)]
         stdio: query_stdio(),
+        // The terminal's parse of a transmit is what a scroll waits on, and the
+        // deflate runs on the picture worker.
+        kitty_compression: true,
         ..QueryStdioOptions::default()
     };
     let Ok(picker) = Picker::from_query_stdio_with_options(options) else {

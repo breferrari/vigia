@@ -257,6 +257,8 @@ pub struct Built {
     pub profiles_differ: bool,
     /// The ids of its Kitty images, which the terminal holds until told to drop them.
     pub kitty: Vec<u32>,
+    /// The bytes the terminal stores for those images: their pixels, unpacked.
+    pub stored: u64,
     /// Which page of a PDF was drawn, and whether the page count changed.
     pub page_note: Option<String>,
     /// The sizes found for sides the frame path left unsized, by their stamp.
@@ -551,6 +553,10 @@ pub struct Pictures {
     done: mpsc::Receiver<(Arc<Key>, Option<Cell>, Option<Built>)>,
     /// Kitty images whose picture is gone, waiting to be deleted.
     retired: Vec<u32>,
+    /// When each kept picture was last on screen, in [`Pictures::keep`] calls.
+    seen: HashMap<Arc<Key>, u64>,
+    /// How many times [`Pictures::keep`] has run.
+    tick: u64,
     /// Whether a delete has to pass through tmux.
     tmux: bool,
     /// Where the picker goes, until it has been given.
@@ -625,6 +631,7 @@ fn undecoded() -> Built {
         verdict: Verdict::Undecoded,
         profiles_differ: false,
         kitty: Vec::new(),
+        stored: 0,
         page_note: None,
         sizes: Vec::new(),
         bar: None,
@@ -680,6 +687,10 @@ impl Pictures {
                     return;
                 };
                 let queried = (base.font_size().width, base.font_size().height);
+                // Read here: a picker resized for a zoom has lost what the query found.
+                let compress = base
+                    .capabilities()
+                    .contains(&ratatui_image::picker::Capability::KittyCompression);
                 let mut resized: Option<(Cell, Picker)> = None;
                 for job in inbox {
                     let picker = match job.cell {
@@ -700,7 +711,8 @@ impl Pictures {
                     // Everything one picture takes, decode to encode: a file an
                     // agent wrote must not be able to close the pane.
                     let built = wanted.then(|| {
-                        vigia_core::caught(|| build(&job, inks, picker)).unwrap_or_else(undecoded)
+                        vigia_core::caught(|| build(&job, inks, picker, compress))
+                            .unwrap_or_else(undecoded)
                     });
                     // Before the send, so a caller that has the picture sees
                     // what it cost.
@@ -721,6 +733,8 @@ impl Pictures {
             jobs,
             done,
             retired: Vec::new(),
+            seen: HashMap::new(),
+            tick: 0,
             tmux: false,
             picker: Some(picked),
             cell: None,
@@ -846,18 +860,57 @@ impl Pictures {
         true
     }
 
-    /// Keep the pictures in `shown`, and retire the Kitty images of the rest.
+    /// Keep the pictures in `shown`, and the Kitty pictures that left the
+    /// screen while the terminal still holds them, so coming back sends nothing.
+    /// A picture whose path is shown under another key is stale, and goes.
     fn keep(&mut self, shown: &HashSet<Arc<Key>>) {
-        self.retire_where(|key, _| !shown.contains(key));
+        self.tick += 1;
+        for key in shown {
+            if self.built.contains_key(key) {
+                self.seen.insert(Arc::clone(key), self.tick);
+            }
+        }
+        let paths: HashSet<&str> = shown.iter().map(|key| key.path.as_str()).collect();
+        let stale: Vec<Arc<Key>> = self
+            .built
+            .iter()
+            .filter(|(key, ready)| {
+                !shown.contains(*key)
+                    && (ready.0.kitty.is_empty() || paths.contains(key.path.as_str()))
+            })
+            .map(|(key, _)| Arc::clone(key))
+            .collect();
+        self.retire_where(|key, _| stale.contains(key));
+        self.evict(shown);
+    }
+
+    /// Retire the Kitty pictures off screen that were shown longest ago, until
+    /// what the terminal holds for this pane is within [`KITTY_HELD`].
+    fn evict(&mut self, shown: &HashSet<Arc<Key>>) {
+        let mut held: u64 = self.built.values().map(|ready| ready.0.stored).sum();
+        while held > KITTY_HELD {
+            let Some(oldest) = self
+                .built
+                .iter()
+                .filter(|(key, ready)| !shown.contains(*key) && ready.0.stored > 0)
+                .min_by_key(|(key, _)| self.seen.get(*key).copied().unwrap_or(0))
+                .map(|(key, _)| Arc::clone(key))
+            else {
+                return;
+            };
+            held -= self.built[&oldest].0.stored;
+            self.retire_where(|key, _| *key == oldest);
+        }
     }
 
     /// Drop each picture `doomed` names, and owe the deletes of its Kitty images.
     fn retire_where(&mut self, doomed: impl Fn(&Arc<Key>, &Built) -> bool) {
-        let retired = &mut self.retired;
+        let (retired, seen) = (&mut self.retired, &mut self.seen);
         self.built.retain(|key, ready| {
             let dropped = doomed(key, &ready.0);
             if dropped {
                 retired.extend(&ready.0.kitty);
+                seen.remove(key);
             }
             !dropped
         });
@@ -865,7 +918,7 @@ impl Pictures {
 
     /// Retire every kept picture, for a pane about to leave the terminal.
     pub fn retire_all(&mut self) {
-        self.keep(&HashSet::new());
+        self.retire_where(|_, _| true);
     }
 
     /// Retire every kept Kitty picture, so it is built again and sent under a
@@ -998,6 +1051,11 @@ impl Pictures {
         }
     }
 }
+
+/// The most a pane keeps in the terminal's image store, in unpacked pixel
+/// bytes. kitty and Ghostty each store 320 MB of image data per screen and
+/// evict the oldest past it, which would leave a kept picture blank.
+const KITTY_HELD: u64 = 64 * 1024 * 1024;
 
 /// The most an image may be, in pixels on a side, before its decode is refused.
 const MAX_SIDE: u32 = 16_384;
@@ -1509,6 +1567,7 @@ fn panel(
     paint: Paint,
     inks: Inks,
     picker: &Picker,
+    compress: bool,
 ) -> Option<(SlicedProtocol, Option<u32>)> {
     let image = DynamicImage::ImageRgb8(painted(image, hit, paint, inks));
     let size = Size::new(slot.width, slot.rows);
@@ -1529,7 +1588,7 @@ fn panel(
             cells,
             id,
             picker.tmux_detected(),
-            false,
+            compress,
             false,
         )
         .ok()?;
@@ -1625,7 +1684,7 @@ fn painted(mut image: RgbImage, hit: Option<&Hits>, paint: Paint, inks: Inks) ->
 
 /// Build one picture: read and decode both sides, compare them, and encode each
 /// panel. A side that does not decode builds nothing to draw.
-fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
+fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
     let side = |source: &Option<Source>, format: Option<Format>| match (source, format) {
         (Some(source), Some(format)) => decode(source, image_format(format)?).map(Some),
         (None, None) => Some(None),
@@ -1673,6 +1732,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
     let mut shrunk: HashMap<(Side, u32, u32), RgbImage> = HashMap::new();
     let mut panels = Vec::new();
     let mut kitty = Vec::new();
+    let mut stored = 0;
     // A page drawn alone takes the first slot, after its bar, as an added or
     // deleted image does.
     let (slots, paints): (Vec<Slot>, &[(Side, Paint)]) = match (alone, job.key.shape.slots.first())
@@ -1724,10 +1784,15 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
             }
             _ => None,
         };
-        let Some((protocol, id)) = panel(small, hit.as_ref(), slot, paint, inks, picker) else {
+        let pixels = u64::from(small.width()) * u64::from(small.height());
+        let Some((protocol, id)) = panel(small, hit.as_ref(), slot, paint, inks, picker, compress)
+        else {
             return undecoded();
         };
-        kitty.extend(id);
+        if let Some(id) = id {
+            kitty.push(id);
+            stored += pixels * 4;
+        }
         panels.push((slot, protocol));
     }
     Built {
@@ -1735,6 +1800,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         verdict,
         profiles_differ,
         kitty,
+        stored,
         page_note: page,
         sizes: Vec::new(),
         bar: alone,
@@ -1744,6 +1810,98 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kitty_sent_compressed() {
+        use ratatui::widgets::Widget;
+        #[allow(deprecated)]
+        let mut picker = Picker::from_fontsize((10, 20).into());
+        picker.set_protocol_type(ProtocolType::Kitty);
+        let inks = Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        };
+        let slot = Slot {
+            x: 0,
+            width: 4,
+            rows: 2,
+        };
+        let sent = |compress| {
+            let (protocol, _) = panel(
+                RgbImage::new(40, 40),
+                None,
+                slot,
+                Paint::Plain,
+                inks,
+                &picker,
+                compress,
+            )
+            .expect("a panel");
+            let area = ratatui::layout::Rect::new(0, 0, 4, 2);
+            let mut buf = ratatui::buffer::Buffer::empty(area);
+            ratatui_image::sliced::SlicedImage::new(&protocol, (0, 0).into())
+                .render(area, &mut buf);
+            buf.content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>()
+        };
+        assert!(sent(true).contains("o=z"), "asked to compress, it sent raw");
+        assert!(!sent(false).contains("o=z"), "it compressed unasked");
+    }
+
+    #[test]
+    fn kitty_evicted_oldest() {
+        let mut pictures = Pictures::unpicked(
+            Inks {
+                canvas: (0, 0, 0),
+                changed: (255, 0, 0),
+            },
+            Box::new(|| {}),
+        );
+        let key = |n: u64| {
+            Arc::new(Key {
+                path: format!("{n}.png"),
+                before: Some(n),
+                after: Some(n + 1),
+                shape: Shape {
+                    kind: Kind::Three,
+                    rows: 1,
+                    slots: Vec::new(),
+                },
+            })
+        };
+        // Three of 30 MiB each, shown one after another: 90 MiB off screen.
+        for n in 0..3 {
+            let built = Built {
+                kitty: vec![u32::try_from(n + 1).expect("small")],
+                stored: 30 * 1024 * 1024,
+                ..undecoded()
+            };
+            pictures.built.insert(key(n), Ready(Arc::new(built)));
+            pictures.keep(&HashSet::from([key(n)]));
+        }
+        assert_eq!(
+            pictures.retired(),
+            "\x1b_Ga=d,d=I,i=1,q=2\x1b\\",
+            "not exactly the oldest went"
+        );
+        assert_eq!(pictures.kept(), 2, "more than the bound requires went");
+        // Past the bound with only what is on screen: none of it goes.
+        pictures.built.insert(
+            key(9),
+            Ready(Arc::new(Built {
+                kitty: vec![9],
+                stored: 70 * 1024 * 1024,
+                ..undecoded()
+            })),
+        );
+        pictures.keep(&HashSet::from([key(9)]));
+        assert!(
+            pictures.get(&key(9)).is_some(),
+            "a picture on screen was evicted"
+        );
+    }
 
     #[test]
     fn scaled_cell_slack() {
@@ -2444,6 +2602,7 @@ mod tests {
             verdict,
             profiles_differ,
             kitty: Vec::new(),
+            stored: 0,
             page_note: None,
             sizes: Vec::new(),
             bar: None,
