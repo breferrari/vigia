@@ -128,7 +128,7 @@ jobs:
 
       - name: upload failing runs
         if: steps.measure.outputs.fail != '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: failures-${{ inputs.os }}-replica-${{ matrix.replica }}
           path: failures/

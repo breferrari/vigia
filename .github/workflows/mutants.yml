@@ -91,7 +91,7 @@ jobs:
           # 2 is a missed mutant and 3 a timeout, which are reported, not
           # failures. Anything else, such as a red baseline, fails the shard.
           case "$status" in 0|2|3) exit 0 ;; *) exit "$status" ;; esac
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: mutants-shard-${{ matrix.shard }}
