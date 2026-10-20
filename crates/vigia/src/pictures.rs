@@ -487,21 +487,42 @@ pub type Cell = (u16, u16);
 /// reports it.
 pub type Window = ratatui::crossterm::terminal::WindowSize;
 
-/// The cell in `now`, from the cell `queried` in `then`: the window's pixels
-/// beyond its cells at the query are padding, held fixed, so a window that only
-/// gains or loses cells keeps the cell. `None` when either reports no pixels.
-pub fn scaled_cell(queried: Cell, then: &Window, now: &Window) -> Option<Cell> {
-    let axis = |cell: u16, px_then: u16, cells_then: u16, px_now: u16, cells_now: u16| {
-        if px_then == 0 || px_now == 0 || cells_now == 0 {
+/// The cell in `now`, from the cell `queried` in `then`, kept at `current`
+/// unless it moved further than the windows' leftover pixels can explain:
+/// either window may hold up to a cell beyond its whole cells, so a pane that
+/// only gains or loses cells keeps its cell. `None` when either reports no
+/// pixels.
+pub fn scaled_cell(queried: Cell, current: Cell, then: &Window, now: &Window) -> Option<Cell> {
+    let axis = |cell: u16, at: u16, px_then: u16, cells_then: u16, px_now: u16, cells_now: u16| {
+        if px_then == 0 || px_now == 0 || cells_then == 0 || cells_now == 0 {
             return None;
         }
-        let pad = i64::from(px_then) - i64::from(cells_then) * i64::from(cell);
-        let (inner, cells) = (i64::from(px_now) - pad, i64::from(cells_now));
-        Some(((inner * 2 + cells) / (cells * 2)).clamp(1, i64::from(u16::MAX)) as u16)
+        let (cell, at) = (f64::from(cell), f64::from(at));
+        let scaled = cell * f64::from(px_now) * f64::from(cells_then)
+            / (f64::from(px_then) * f64::from(cells_now));
+        let slack = at / f64::from(cells_now) + cell / f64::from(cells_then);
+        if (scaled - at).abs() <= slack {
+            return Some(at as u16);
+        }
+        Some(scaled.round().clamp(1.0, f64::from(u16::MAX)) as u16)
     };
     Some((
-        axis(queried.0, then.width, then.columns, now.width, now.columns)?,
-        axis(queried.1, then.height, then.rows, now.height, now.rows)?,
+        axis(
+            queried.0,
+            current.0,
+            then.width,
+            then.columns,
+            now.width,
+            now.columns,
+        )?,
+        axis(
+            queried.1,
+            current.1,
+            then.height,
+            then.rows,
+            now.height,
+            now.rows,
+        )?,
     ))
 }
 
@@ -812,7 +833,8 @@ impl Pictures {
             }
             return false;
         };
-        let Some(cell) = scaled_cell(queried, then, &window) else {
+        let current = self.cell.unwrap_or(queried);
+        let Some(cell) = scaled_cell(queried, current, then, &window) else {
             return false;
         };
         if Some(cell) == self.cell {
@@ -1723,7 +1745,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scaled_cell_padding() {
+    fn scaled_cell_slack() {
         let window = |columns, rows, width, height| Window {
             rows,
             columns,
@@ -1731,40 +1753,39 @@ mod tests {
             height,
         };
         let then = window(100, 30, 1000, 600);
-        assert_eq!(scaled_cell((10, 20), &then, &then), Some((10, 20)));
-        assert_eq!(
-            scaled_cell((10, 20), &then, &window(100, 30, 1500, 900)),
-            Some((15, 30))
-        );
-        // A 9 by 19 cell with 100 by 30 pixels of padding, zoomed to 18 by 38.
-        assert_eq!(
-            scaled_cell((9, 19), &then, &window(100, 30, 1900, 1170)),
-            Some((18, 38))
-        );
-        // The same cell and padding, in a pane cut to 20 columns: no change.
+        let at = |now: &Window| scaled_cell((10, 20), (10, 20), &then, now);
+        assert_eq!(at(&then), Some((10, 20)));
+        // A zoom of one pixel a cell, and of twice.
+        assert_eq!(at(&window(90, 27, 1000, 600)), Some((11, 22)));
+        assert_eq!(at(&window(50, 15, 1000, 600)), Some((20, 40)));
+        // A pane cut to fewer cells, or left with a partial row or column,
+        // keeps its cell.
+        assert_eq!(at(&window(20, 10, 208, 219)), Some((10, 20)));
         assert_eq!(
             scaled_cell(
-                (9, 20),
-                &window(100, 30, 920, 600),
-                &window(20, 30, 200, 600)
+                (10, 20),
+                (10, 20),
+                &window(100, 30, 1040, 619),
+                &window(20, 10, 208, 200)
             ),
-            Some((9, 20))
+            Some((10, 20))
         );
+        // A queried cell in another unit than the window's pixels.
         assert_eq!(
-            scaled_cell((10, 20), &then, &window(100, 30, 1049, 600)),
-            Some((10, 20)),
-            "rounded, not cut"
+            scaled_cell(
+                (10, 20),
+                (10, 20),
+                &window(100, 30, 500, 300),
+                &window(50, 15, 250, 150)
+            ),
+            Some((10, 20))
         );
+        assert_eq!(at(&window(100, 30, 0, 0)), None);
         assert_eq!(
-            scaled_cell((10, 20), &then, &window(100, 30, 1051, 600)),
-            Some((11, 20))
+            scaled_cell((10, 20), (10, 20), &window(100, 30, 0, 600), &then),
+            None
         );
-        assert_eq!(
-            scaled_cell((10, 20), &then, &window(100, 30, 1, 1)),
-            Some((1, 1))
-        );
-        assert_eq!(scaled_cell((10, 20), &then, &window(100, 30, 0, 0)), None);
-        assert_eq!(scaled_cell((10, 20), &window(100, 30, 0, 600), &then), None);
+        assert_eq!(at(&window(100, 30, 1, 1)), Some((1, 1)));
     }
 
     #[test]
