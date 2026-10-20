@@ -3870,12 +3870,35 @@ fn actions_pinned() {
         checked >= 50,
         "only {checked} uses: lines found, so the scan read nothing"
     );
+    // A pinned rust-toolchain has no ref name to read the toolchain from.
+    for entry in std::fs::read_dir(&dir).expect("the workflows") {
+        let path = entry.expect("an entry").path();
+        let text = without_comments(&read(&path));
+        for (at, _) in text.match_indices("uses: dtolnay/rust-toolchain@") {
+            let after: Vec<&str> = text[at..].lines().skip(1).take(3).collect();
+            assert!(
+                after.iter().any(|line| line.contains("toolchain:")),
+                "{}: a pinned rust-toolchain names no toolchain",
+                path.display()
+            );
+        }
+    }
     let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
     assert!(
         ci.contains("zizmor --offline --config .github/zizmor.yml .github/workflows")
             && ci.contains("\"zizmor=${NEEDS_ZIZMOR_RESULT}\""),
         "ci complete does not judge the workflow audit"
     );
+}
+
+/// The actions `seen` at more than one commit.
+fn split_actions(
+    seen: &std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+) -> Vec<String> {
+    seen.iter()
+        .filter(|(_, revs)| revs.len() > 1)
+        .map(|(action, _)| action.clone())
+        .collect()
 }
 
 /// Each action runs at one commit everywhere: every workflow, and the commits
@@ -3922,11 +3945,32 @@ fn actions_one_version() {
             .or_default()
             .insert(rev.to_owned());
     }
-    let split: Vec<_> = seen.iter().filter(|(_, revs)| revs.len() > 1).collect();
-    assert!(
-        split.is_empty(),
-        "actions at more than one commit: {split:?}"
+    assert_eq!(
+        split_actions(&seen),
+        Vec::<String>::new(),
+        "actions at more than one commit"
     );
+    let mut fixture = std::collections::BTreeMap::new();
+    fixture.insert("a/b".to_owned(), ["1".to_owned(), "2".to_owned()].into());
+    fixture.insert("c/d".to_owned(), ["1".to_owned()].into());
+    assert_eq!(
+        split_actions(&fixture),
+        ["a/b"],
+        "the scan missed a split action"
+    );
+}
+
+/// The jobs in `workflow` that name no permissions of their own.
+fn jobs_without_permissions(workflow: &str) -> Vec<String> {
+    jobs_of(&without_comments(workflow))
+        .into_iter()
+        .filter(|(_, block)| {
+            !keys_at_indent(block, 4)
+                .iter()
+                .any(|key| key == "permissions")
+        })
+        .map(|(job, _)| job)
+        .collect()
 }
 
 /// Every workflow drops the token's default scopes, and every job names the
@@ -3945,18 +3989,22 @@ fn permissions_declared() {
             text.lines().any(|line| line == "permissions: {}"),
             "{name} keeps the token's default scopes"
         );
-        for (job, block) in jobs_of(&without_comments(&text)) {
-            assert!(
-                keys_at_indent(&block, 4)
-                    .iter()
-                    .any(|key| key == "permissions"),
-                "{name}: job `{job}` declares no permissions"
-            );
-            checked += 1;
-        }
+        assert_eq!(
+            jobs_without_permissions(&text),
+            Vec::<String>::new(),
+            "{name} has jobs that declare no permissions"
+        );
+        checked += jobs_of(&without_comments(&text)).len();
     }
     assert!(
         checked >= 15,
         "only {checked} jobs found, so the scan read nothing"
+    );
+    let fixture =
+        "name: x\njobs:\n  a:\n    runs-on: x\n    permissions: {}\n  b:\n    runs-on: x\n";
+    assert_eq!(
+        jobs_without_permissions(fixture),
+        ["b"],
+        "the scan missed a job"
     );
 }
