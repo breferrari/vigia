@@ -2,7 +2,7 @@
 
 **This is a fork. Use [syntect](https://crates.io/crates/syntect) instead.**
 
-`vigia-syntect` is [syntect](https://github.com/trishume/syntect) 5.3.0 with the patches listed in [`PATCHES.md`](https://github.com/breferrari/vigia/blob/main/vendor/syntect/PATCHES.md), published so that [vigia](https://github.com/breferrari/vigia) can ship them until a syntect release carries them. It is kept by vigia's maintainer, and it is not affiliated with or endorsed by syntect or its author. Report problems with this fork at <https://github.com/breferrari/vigia/issues>, not to syntect.
+`vigia-syntect` is [syntect](https://github.com/trishume/syntect) 5.3.0 with the patches listed in [`PATCHES.md`](https://github.com/breferrari/vigia/blob/vigia-syntect-5.3.0/vendor/syntect/PATCHES.md), published so that [vigia](https://github.com/breferrari/vigia) can ship them until a syntect release carries them. It is kept by vigia's maintainer, and it is not affiliated with or endorsed by syntect or its author. Report problems with this fork at <https://github.com/breferrari/vigia/issues>, not to syntect.
 
 syntect is MIT licensed, and so is this fork. Upstream's README follows, without its badges, which describe upstream's crate.
 
