@@ -3749,10 +3749,29 @@ fn deny_policy() {
         Vec::<&str>::new(),
         "deny.toml does not ban these"
     );
-    let allowed = toml_array(&deny, "allow");
-    assert!(
-        allowed.iter().all(|licence| !licence.contains("GPL")),
-        "deny.toml allows a GPL licence: {allowed:?}"
+    // The licences `cargo deny list` found the release graph needs, 2026-10-20.
+    let mut allowed = toml_array(&deny, "allow");
+    allowed.sort();
+    assert_eq!(
+        allowed,
+        [
+            "0BSD",
+            "Apache-2.0",
+            "Apache-2.0 WITH LLVM-exception",
+            "BSD-2-Clause",
+            "BSD-3-Clause",
+            "BSL-1.0",
+            "CC0-1.0",
+            "CDLA-Permissive-2.0",
+            "ISC",
+            "MIT",
+            "MIT-0",
+            "MPL-2.0",
+            "Unicode-3.0",
+            "Unlicense",
+            "Zlib",
+        ],
+        "deny.toml allows other licences than the graph needs"
     );
     assert!(
         without_comments(&deny).contains("unused-allowed-license = \"deny\""),
