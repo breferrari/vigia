@@ -28,6 +28,8 @@ pub struct Script<'a> {
     pub detached: bool,
     /// The child's stderr goes nowhere, so the terminal shows stdout alone.
     pub quiet: bool,
+    /// The terminal's columns, rows, and width and height in pixels, or none.
+    pub size: Option<(u16, u16, u16, u16)>,
 }
 
 /// Run `command` in a fresh terminal under `script`, wait for its `asked`
@@ -58,6 +60,16 @@ pub fn run(command: Command, script: Script<'_>) -> String {
 /// child exiting on a terminal waits for its output to drain.
 pub fn start(mut command: Command, script: &Script<'_>) -> (Reaped, File) {
     let (terminal, slave) = open();
+    if let Some((columns, rows, width, height)) = script.size {
+        let size = libc::winsize {
+            ws_row: rows,
+            ws_col: columns,
+            ws_xpixel: width,
+            ws_ypixel: height,
+        };
+        // SAFETY: a valid descriptor and a valid winsize.
+        unsafe { libc::ioctl(terminal.as_raw_fd(), libc::TIOCSWINSZ, &size) };
+    }
     command
         .stdout(Stdio::from(slave.try_clone().expect("dup")))
         .stderr(if script.quiet {

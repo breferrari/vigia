@@ -3791,3 +3791,210 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
         || timed(&mut frame, &mut app, &mut highlighter, &mut pictures),
     );
 }
+
+#[cfg(unix)]
+#[path = "pty/mod.rs"]
+mod pty;
+
+/// Every read of the terminal, with when it landed.
+#[cfg(unix)]
+type Reads = Vec<(Instant, Vec<u8>)>;
+
+/// What a held scroll key over Kitty pictures wrote, read at a fixed rate.
+#[cfg(unix)]
+struct Held {
+    /// From each key to the end of the next frame the terminal read.
+    latencies: Samples,
+    /// The longest of them.
+    max: Duration,
+    /// The most transmit any one frame carried, in bytes.
+    frame_transmit: usize,
+    /// Kitty images begun, and finished.
+    begun: usize,
+    finished: usize,
+}
+
+/// Scroll `scratch` with a held key down, up and down again, in the real
+/// binary, through a terminal that reads `rate` bytes a second.
+#[cfg(unix)]
+fn held_kitty(scratch: &Scratch, rate: u64) -> Held {
+    use std::io::{Read, Write};
+    use std::sync::{Arc, Mutex};
+
+    // The cursor hide that ends every draw.
+    const END: &[u8] = b"\x1b[?25l";
+    const KEYS: usize = 120;
+
+    let home = support::TempDir::new("held-home");
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_vigia"));
+    command
+        .arg(scratch.root())
+        .env("TERM", "xterm-kitty")
+        .env("COLORTERM", "truecolor")
+        .env("VIGIA_PICTURES", "kitty")
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join("config"))
+        .env("XDG_STATE_HOME", home.path().join("state"))
+        .env_remove("TMUX");
+    let script = pty::Script {
+        quiet: true,
+        size: Some((120, 45, 1200, 900)),
+        ..pty::Script::default()
+    };
+    let (_child, mut master) = pty::start(command, &script);
+    let mut writer = master.try_clone().expect("the terminal's other end");
+
+    // Every read, with when it landed, paced as a terminal that parses slowly.
+    let reads: Arc<Mutex<Reads>> = Arc::default();
+    let into = Arc::clone(&reads);
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 4096];
+        while let Ok(read) = master.read(&mut buffer) {
+            if read == 0 {
+                return;
+            }
+            into.lock()
+                .expect("reads")
+                .push((Instant::now(), buffer[..read].to_vec()));
+            std::thread::sleep(Duration::from_secs_f64(read as f64 / rate as f64));
+        }
+    });
+
+    let quiet = |for_at_least: Duration| {
+        let deadline = Instant::now() + support::ceiling(Duration::from_secs(60));
+        loop {
+            std::thread::sleep(Duration::from_millis(50));
+            let last = reads.lock().expect("reads").last().map(|(at, _)| *at);
+            if last.is_some_and(|at| at.elapsed() >= for_at_least) || Instant::now() > deadline {
+                return;
+            }
+        }
+    };
+    quiet(Duration::from_secs(2));
+
+    let mut keys = Vec::with_capacity(KEYS * 3);
+    for key in *b"jkj" {
+        for _ in 0..KEYS {
+            keys.push(Instant::now());
+            writer.write_all(&[key]).expect("type");
+            std::thread::sleep(I9_FRAME);
+        }
+    }
+    quiet(Duration::from_secs(1));
+    let _ = writer.write_all(b"q");
+
+    let reads = reads.lock().expect("reads");
+    let first = reads
+        .iter()
+        .position(|(at, _)| *at >= keys[0])
+        .unwrap_or(reads.len());
+    let mut ends: Vec<Instant> = Vec::new();
+    let mut wire: Vec<u8> = Vec::new();
+    for (at, bytes) in &reads[first..] {
+        let from = wire.len().saturating_sub(END.len() - 1);
+        wire.extend_from_slice(bytes);
+        let found = wire[from..]
+            .windows(END.len())
+            .filter(|w| *w == END)
+            .count();
+        ends.extend(std::iter::repeat_n(*at, found));
+    }
+
+    let mut latencies = Samples::new(keys.len());
+    let mut max = Duration::ZERO;
+    for key in &keys {
+        let next = ends
+            .iter()
+            .find(|end| *end > key)
+            .map_or(Duration::MAX, |end| *end - *key);
+        latencies.push(next);
+        max = max.max(next);
+    }
+
+    let text = String::from_utf8_lossy(&wire);
+    let (mut frame_transmit, mut begun, mut finished) = (0, 0, 0);
+    for frame in text.split("\x1b[?25l") {
+        let mut carried = 0;
+        for apc in frame.split("\x1b_G").skip(1) {
+            let apc = apc.split("\x1b\\").next().unwrap_or_default();
+            let head = apc.split(';').next().unwrap_or_default();
+            if head.contains("a=d") {
+                continue;
+            }
+            carried += apc.len();
+            begun += usize::from(head.contains("a=T"));
+            finished += usize::from(head.contains("m=0"));
+        }
+        frame_transmit = frame_transmit.max(carried);
+    }
+    Held {
+        latencies,
+        max,
+        frame_transmit,
+        begun,
+        finished,
+    }
+}
+
+/// I9, as the reader feels it: a held scroll key over Kitty pictures through
+/// a terminal that parses at 4 MB/s, and at 16.2 MB/s, the rate measured under
+/// herdr. Each key is drawn within two frames at p99 and four at most, no frame
+/// carries more than a frame's share of transmit, nothing is sent twice, and
+/// every image begun is finished.
+#[cfg(unix)]
+#[test]
+fn held_scroll_kitty() {
+    use vigia::pictures::TRANSMIT_FRAME;
+
+    if !absolute_gates_apply("cargo test --release --test budgets held_scroll_kitty") {
+        return;
+    }
+    let scratch = Scratch::new("held-kitty");
+    let images = 4;
+    for n in 0..images {
+        scratch.write(&format!("a/{n}.png"), support::screen_png(10));
+        scratch.write(&format!("a/{n}.txt"), support::numbered_lines(40));
+    }
+    scratch.commit_all("baseline");
+    for n in 0..images {
+        scratch.write(&format!("a/{n}.png"), support::screen_png(200));
+        scratch.write(&format!("a/{n}.txt"), support::numbered_lines(60));
+    }
+
+    let _timed = exclusively_timed();
+    for rate in [4_000_000, 16_200_000] {
+        let held = held_kitty(&scratch, rate);
+        assert!(
+            held.frame_transmit <= TRANSMIT_FRAME,
+            "at {rate} B/s a frame carried {} bytes of transmit, past {TRANSMIT_FRAME}",
+            held.frame_transmit
+        );
+        assert!(
+            held.begun > 0 && held.begun <= 3 * images,
+            "at {rate} B/s {} Kitty images were sent for {images} pictures of three panels",
+            held.begun
+        );
+        assert_eq!(
+            held.finished, held.begun,
+            "at {rate} B/s an image was begun and never finished"
+        );
+        let claim = format!("held key to the next frame at {rate} B/s");
+        holds_p99_rounds(
+            &claim,
+            2 * I9_FRAME,
+            &held.latencies,
+            || format!("the longest was {:?}", held.max),
+            || (held_kitty(&scratch, rate).latencies, None),
+        );
+        if held.max > 4 * I9_FRAME {
+            let again = held_kitty(&scratch, rate);
+            assert!(
+                again.max <= 4 * I9_FRAME,
+                "{claim}: the longest was {:?} and then {:?}, past {:?} both times",
+                held.max,
+                again.max,
+                4 * I9_FRAME
+            );
+        }
+    }
+}

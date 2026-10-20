@@ -572,6 +572,9 @@ pub struct Pictures {
     outbox: VecDeque<(Arc<Key>, String)>,
     /// How much of the first transmit is written.
     written: usize,
+    /// Whether a transmit finished since the last attach, so a frame is owed to
+    /// place it.
+    unplaced: bool,
     /// Whether a delete has to pass through tmux.
     tmux: bool,
     /// Where the picker goes, until it has been given.
@@ -754,6 +757,7 @@ impl Pictures {
             walked: 0,
             outbox: VecDeque::new(),
             written: 0,
+            unplaced: false,
             tmux: false,
             picker: Some(picked),
             cell: None,
@@ -1028,9 +1032,19 @@ impl Pictures {
         self.built.get(key).cloned()
     }
 
-    /// Whether a transmit is still waiting to be written.
+    /// Whether a transmit is still waiting to be written, or one finished since
+    /// the last [`Pictures::attach`] has not been placed.
     pub fn sending(&self) -> bool {
-        !self.outbox.is_empty()
+        !self.outbox.is_empty() || self.unplaced
+    }
+
+    /// The deletes owed, unless an image is part way out and must finish first.
+    pub fn deletes(&mut self) -> String {
+        if self.written == 0 {
+            self.retired()
+        } else {
+            String::new()
+        }
     }
 
     /// What to write before the next frame: the deletes owed, when no image is
@@ -1068,6 +1082,7 @@ impl Pictures {
             if take == rest.len() {
                 self.outbox.pop_front();
                 self.written = 0;
+                self.unplaced = true;
             } else {
                 self.written += take;
                 return out;
@@ -1087,6 +1102,7 @@ impl Pictures {
     /// are ever read past their header.
     pub fn attach(&mut self, rows: &mut [Row], frame: &vigia_core::Frame<'_>) {
         self.collect();
+        self.unplaced = false;
         // One entry per picture: its rows share one key, side by side.
         let mut hung: Vec<(&Arc<Key>, usize, &Picture)> = Vec::new();
         for row in rows.iter() {
@@ -2161,7 +2177,7 @@ mod tests {
         pictures.retire_where(|key, _| key.path == "0.png");
         pictures.retire_where(|key, _| key.path == "1.png");
         let mut wire = first;
-        while pictures.sending() {
+        while !pictures.outbox.is_empty() {
             let frame = pictures.output(TRANSMIT_FRAME);
             assert!(
                 frame.len() <= TRANSMIT_FRAME + 64,

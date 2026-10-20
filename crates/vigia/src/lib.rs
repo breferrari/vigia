@@ -1194,6 +1194,19 @@ impl Shell {
         }
     }
 
+    /// Send the Kitty deletes owed, unless an image is part way out.
+    fn write_deletes(&mut self) {
+        use std::io::Write;
+        let deletes = self.pictures.deletes();
+        if !deletes.is_empty() {
+            let _ = self
+                .session
+                .screen()
+                .backend_mut()
+                .write_all(deletes.as_bytes());
+        }
+    }
+
     /// Send the Kitty deletes owed and up to `budget` bytes of transmits. A
     /// failed write leaves the images to the terminal's own quota.
     fn write_pictures(&mut self, budget: usize) {
@@ -2267,9 +2280,8 @@ impl Shell {
             self.elsewhere,
             &self.root,
         );
-        // Before the draw, so the terminal has dropped and received what the
-        // cells below place.
-        self.write_pictures(pictures::TRANSMIT_FRAME);
+        // Before the draw, so the terminal drops what left the screen.
+        self.write_deletes();
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
@@ -2325,6 +2337,13 @@ impl Shell {
                 notice_effects.process_effects(since.into(), f.buffer_mut(), notice);
             }
         })?;
+        // After the cells, so a key's frame waits only on the share already on its
+        // way. A picture is placed on a frame after its last chunk.
+        self.write_pictures(pictures::TRANSMIT_FRAME);
+        {
+            use std::io::Write;
+            let _ = self.session.screen().backend_mut().flush();
+        }
         self.painted = now;
         self.effects_ran = self.effects_running();
         self.hovered = chrome.hovered;
