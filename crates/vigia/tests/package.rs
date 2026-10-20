@@ -3236,7 +3236,8 @@ fn dependencies_in_readme() {
     );
 }
 
-/// A ready run is never cancelled by the draft run a push made just before it.
+/// A ready run is never cancelled by the draft run a push made just before it,
+/// and a newer run on any ref, main included, cancels the older.
 #[test]
 fn ready_run_survives() {
     let ci = repo_file(".github/workflows/ci.yml");
@@ -3250,9 +3251,14 @@ fn ready_run_survives() {
          ready event cancel each other and the survivor can be the skipped run: {group}"
     );
     assert!(
-        group.contains("github.ref == 'refs/heads/main' && github.sha"),
-        "main's commits share a concurrency group, and a group keeps one pending \
-         run, so a burst of merges cancels the ones in the middle: {group}"
+        !group.contains("github.sha"),
+        "main's runs are grouped per commit, so a burst of merges runs every one \
+         to the end and holds runners from the pull requests: {group}"
+    );
+    assert!(
+        ci.lines()
+            .any(|line| line.trim() == "cancel-in-progress: true"),
+        "a superseded run is left to finish"
     );
 }
 
