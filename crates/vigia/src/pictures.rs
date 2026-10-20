@@ -587,6 +587,7 @@ impl Pictures {
                         }
                     })
                     .unwrap_or(0);
+                    vigia_core::armed(Stage::Pairs);
                     if scored.send((candidate.key, score)).is_err() {
                         break;
                     }

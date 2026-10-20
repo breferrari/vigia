@@ -94,3 +94,38 @@ fn binary_rename_paired_by_worker() {
         "a.bin is listed beside its rename"
     );
 }
+
+#[test]
+fn quiet_pairs_never_wake() {
+    // Nothing to score: the rename thread blocks on its channel and wakes
+    // the pane not once.
+    let scratch = Scratch::new("rename-quiet");
+    scratch.write("a.txt", "a\n");
+    scratch.commit_all("initial");
+    scratch.write("a.txt", "b\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let wakes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let counted = std::sync::Arc::clone(&wakes);
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        },
+        Picker::halfblocks(),
+        Box::new(move || {
+            counted.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }),
+    );
+    for _ in 0..20 {
+        pictures.score_pairs(&frame);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(pictures.found_pairs().is_empty());
+    assert_eq!(
+        wakes.load(std::sync::atomic::Ordering::Relaxed),
+        0,
+        "a pane with no pair to score was woken"
+    );
+}

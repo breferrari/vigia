@@ -233,6 +233,30 @@ fn panic_child() {
             pictures.settle(Duration::from_secs(20));
             println!("survived");
         }
+        "pairs" => {
+            // A pair too large for the frame, so the rename thread scores it.
+            let scratch = Scratch::new("panic-pairs-child");
+            let old: Vec<u8> = (0..2_200_000u32).map(|n| (n * 7 % 251) as u8).collect();
+            let mut new = old.clone();
+            new[0] = 0;
+            let last = new.len() - 1;
+            new[last] ^= 1;
+            scratch.write("a.bin", [&[0u8][..], &old].concat());
+            scratch.commit_all("baseline");
+            std::fs::remove_file(scratch.path_of("a.bin")).expect("remove");
+            scratch.write("b.bin", &new);
+            let worktree = scratch.worktree();
+            let mut frame = worktree.frame();
+            frame.advance().expect("advance");
+            let mut pictures = Pictures::new(INKS, Picker::halfblocks(), Box::new(|| {}));
+            pictures::panic_next(Stage::Pairs);
+            pictures.score_pairs(&frame);
+            let began = std::time::Instant::now();
+            while pictures.found_pairs().is_empty() && began.elapsed() < Duration::from_secs(20) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            println!("survived");
+        }
         _ => panic!("the main thread on purpose"),
     }
     std::io::stdout().flush().expect("flush");
@@ -314,6 +338,20 @@ fn uncaught_worker_aborts() {
     assert!(
         text.contains("a test asked Worker to panic"),
         "the worker's panic was not reported: {text}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn uncaught_pairs_aborts() {
+    let (text, status) = ran("pairs", pty::Script::default());
+    assert!(
+        aborted(status) && !text.contains("survived"),
+        "a panic on the rename thread outside its catch did not end the process: {status:?} {text}"
+    );
+    assert!(
+        text.contains("a test asked Pairs to panic"),
+        "the rename thread's panic was not reported: {text}"
     );
 }
 
