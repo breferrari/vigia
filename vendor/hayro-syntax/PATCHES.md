@@ -11,7 +11,8 @@ The budget is checked where each decode produces its output:
 - `src/object/stream.rs`: `Stream::decoded_image` spends the output of each filter in the chain, and fails with `StreamDecode` past the budget. Every stream decode goes through it.
 - `src/filter/lzw_flate.rs`, `run_length.rs`, `ascii_85.rs`: Flate (zlib, raw deflate and the pdf.js fallback), LZW, RunLength and ASCII85 grow their output through `limit::room`, which admits the bytes before the buffer grows, grows capacity in powers of two and never past what is left. A bomb stops at the limit, and the largest buffer a growth copies from is under half of it. ASCII85 no longer sizes its output from its input up front.
 - `src/filter/dct.rs`, `jpx.rs`, `jbig2.rs`, `ccitt.rs`: check the image's dimensions and component count, at the most bytes a sample can take while it decodes, before any pixel is decoded.
-- `src/lib.rs`: exports `with_decode_limit` and `DecodeLimitExceeded` under `std`.
+- `src/filter/lzw_flate.rs`: a predictor's eight-bit path undoes rows in place. The bit-level path, for TIFF rows at a depth other than eight, writes a second buffer, so the input and output are admitted together.
+- `src/lib.rs`: exports `with_decode_limit` and `DecodeLimitExceeded` under `std`, and, hidden, `fallback_capacity`, which reports the capacity the fallback inflater's output reached, for tests of the limit. `src/filter/mod.rs` makes `lzw_flate` visible in the crate for it.
 
 ## The predictor row
 
