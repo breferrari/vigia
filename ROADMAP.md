@@ -419,6 +419,7 @@ Milestone: [Phase 11](https://github.com/breferrari/vigia/milestone/12). Ships i
 | ⬜ | Budget the re-diff of drawn files inside the settle margin | [#73](https://github.com/breferrari/vigia/issues/73) |
 | ⬜ | Stop syntect recompiling a fence's closing regex on every search **Ruled 2026-10-20, reader: vendored patch plus upstream; the build is Phase 11's** | [#264](https://github.com/breferrari/vigia/issues/264) |
 | ⬜ | Measure an @ guard on Markdown's email auto-link pattern | [#265](https://github.com/breferrari/vigia/issues/265) |
+| ⬜ | Keep an edit above a long fence off the paint | [#729](https://github.com/breferrari/vigia/issues/729) |
 
 ## Phase 12 — correct at the edges
 
