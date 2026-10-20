@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 628" width="680" height="628" role="img"
-     aria-label="The vigia pane with one changed file carrying four notes: one whose line has left the diff, drawn under the file&#x27;s heading and marked gone; one the agent has read and answered, marked seen with its reply under it; one on the changed line, marked open; and one whose line was edited under it, marked changed.">
-  <!-- source: crates/vigia/tests/snapshots/notes__note_states_frame.snap rows=1-27,40, rendered at 80x40. Every row's text is the snapshot's; package.rs::frame_svgs_match holds it. -->
+     aria-label="The vigia pane with one changed file carrying four notes: one whose line has left the diff, drawn under the file's heading and marked gone; one the agent has read and answered, marked seen with its reply under it; one on the changed line, marked open; and one whose line was edited under it, marked changed.">
+  <!-- source: crates/vigia/tests/snapshots/notes__note_states_frame.snap rows=1-27,40, rendered at 80x40. Drawn by the xtask frames binary; package.rs::frame_svgs_match holds it to the snapshot. -->
   <defs>
     <clipPath id="win"><rect x="8" y="8" width="664" height="612" rx="12"/></clipPath>
     <style>

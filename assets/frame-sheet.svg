@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 842 748" width="842" height="748" role="img"
      aria-label="The vigia pane with the gestures sheet open over it: every key in one column and every mouse gesture in the next, each beside what it does.">
-  <!-- source: crates/vigia/tests/snapshots/sheet__sheet_frame.snap rows=1-34, rendered at 100x34. Every row's text is the snapshot's; package.rs::frame_svgs_match holds it. -->
+  <!-- source: crates/vigia/tests/snapshots/sheet__sheet_frame.snap rows=1-34, rendered at 100x34. Drawn by the xtask frames binary; package.rs::frame_svgs_match holds it to the snapshot. -->
   <defs>
     <clipPath id="win"><rect x="8" y="8" width="826" height="732" rx="12"/></clipPath>
     <style>

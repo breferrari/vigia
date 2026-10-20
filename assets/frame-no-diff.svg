@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 518 228" width="518" height="228" role="img"
      aria-label="The vigia pane listing three files with no line diff, each saying why: a binary file, an unresolved conflict, and a rename with no edit.">
-  <!-- source: crates/vigia/tests/snapshots/render__a_file_with_no_line_diff_says_why.snap rows=1-8, rendered at 60x8. Every row's text is the snapshot's; package.rs::frame_svgs_match holds it. -->
+  <!-- source: crates/vigia/tests/snapshots/render__a_file_with_no_line_diff_says_why.snap rows=1-8, rendered at 60x8. Drawn by the xtask frames binary; package.rs::frame_svgs_match holds it to the snapshot. -->
   <defs>
     <clipPath id="win"><rect x="8" y="8" width="502" height="212" rx="12"/></clipPath>
     <style>

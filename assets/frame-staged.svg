@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 308" width="680" height="308" role="img"
      aria-label="The vigia pane with staged changes shown: an unstaged run and a staged run, each under its own labelled rule, one file appearing in both.">
-  <!-- source: crates/vigia/tests/snapshots/render__the_staged_run_at_eighty_columns.snap rows=1-12, rendered at 80x12. Every row's text is the snapshot's; package.rs::frame_svgs_match holds it. -->
+  <!-- source: crates/vigia/tests/snapshots/render__the_staged_run_at_eighty_columns.snap rows=1-12, rendered at 80x12. Drawn by the xtask frames binary; package.rs::frame_svgs_match holds it to the snapshot. -->
   <defs>
     <clipPath id="win"><rect x="8" y="8" width="664" height="292" rx="12"/></clipPath>
     <style>

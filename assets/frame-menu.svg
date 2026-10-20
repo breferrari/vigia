@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 548" width="680" height="548" role="img"
      aria-label="The vigia pane with the config menu open over it: every on and off setting with where it stands, a row to save the settings and a row to reset them.">
-  <!-- source: crates/vigia/tests/snapshots/menu__menu_frame.snap rows=1-24, rendered at 80x24. Every row's text is the snapshot's; package.rs::frame_svgs_match holds it. -->
+  <!-- source: crates/vigia/tests/snapshots/menu__menu_frame.snap rows=1-24, rendered at 80x24. Drawn by the xtask frames binary; package.rs::frame_svgs_match holds it to the snapshot. -->
   <defs>
     <clipPath id="win"><rect x="8" y="8" width="664" height="532" rx="12"/></clipPath>
     <style>

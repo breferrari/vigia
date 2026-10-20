@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 842 348" width="842" height="348" role="img"
      aria-label="The vigia pane listing a renamed and edited file as its new path, an arrow and its old path, above its diff.">
-  <!-- source: crates/vigia/tests/snapshots/render__rename_frame.snap rows=1-14, rendered at 100x14. Every row's text is the snapshot's; package.rs::frame_svgs_match holds it. -->
+  <!-- source: crates/vigia/tests/snapshots/render__rename_frame.snap rows=1-14, rendered at 100x14. Drawn by the xtask frames binary; package.rs::frame_svgs_match holds it to the snapshot. -->
   <defs>
     <clipPath id="win"><rect x="8" y="8" width="826" height="332" rx="12"/></clipPath>
     <style>
