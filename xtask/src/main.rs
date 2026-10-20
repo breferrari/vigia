@@ -14,7 +14,7 @@
 //!
 //! **Every local extra has its patterns force-compiled under the shipped
 //! regex engine before it is admitted.** Upstream `syntect` here, at the version
-//! vigia's fork is cut from; the fork changes no compile. `syntect` compiles patterns lazily behind an
+//! vigia's fork is cut from, whose patch changes no pattern's compile. `syntect` compiles patterns lazily behind an
 //! `expect`, and a panic outside a picture's catch aborts, so a grammar carrying
 //! one incompatible pattern is a process kill on the first file that reaches
 //! it. `two-face`'s `fancy` build guarantees this property for its own set by

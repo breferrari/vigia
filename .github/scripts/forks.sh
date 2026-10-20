@@ -61,15 +61,29 @@ for dir in "$root"/vendor/*/; do
   [ -d "$dir/patches" ] || continue
   fork=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$dir/Cargo.toml" | head -1)
   version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$dir/Cargo.toml" | head -1)
-  if ! curl -fsSL --retry 3 "https://static.crates.io/crates/$fork/$fork-$version.crate" -o "$work/$fork.crate" 2>/dev/null; then
-    echo "vendor/$(basename "$dir"): $fork $version is not published yet"
-    continue
-  fi
+  # A fork under upstream's own name is a [patch] and published by nobody.
+  base=$(sed -n 's/^Base: `\([^`]*\)`.*/\1/p' "$dir/PATCHES.md")
+  [ "$fork" != "$base" ] || continue
+  status=$(curl -sSL --retry 3 -o "$work/$fork.crate" -w '%{http_code}' "https://static.crates.io/crates/$fork/$fork-$version.crate")
+  case $status in
+    200) ;;
+    403 | 404)
+      echo "vendor/$(basename "$dir"): $fork $version is not published yet"
+      continue
+      ;;
+    *)
+      echo "::error::crates.io answered $status for $fork $version"
+      failed=1
+      continue
+      ;;
+  esac
   cargo package --quiet --allow-dirty --no-verify --manifest-path "$dir/Cargo.toml" --target-dir "$work/package"
   mkdir "$work/published-$fork" "$work/packaged-$fork"
   tar -xzf "$work/$fork.crate" -C "$work/published-$fork"
   tar -xzf "$work/package/package/$fork-$version.crate" -C "$work/packaged-$fork"
-  if diff -r -x .cargo_vcs_info.json "$work/published-$fork" "$work/packaged-$fork" >"$work/$fork.published.diff"; then
+  # Cargo writes Cargo.toml and Cargo.lock afresh on each package; the manifest
+  # as written is Cargo.toml.orig, which is compared.
+  if diff -r -x .cargo_vcs_info.json -x Cargo.toml -x Cargo.lock "$work/published-$fork" "$work/packaged-$fork" >"$work/$fork.published.diff"; then
     echo "$fork $version on crates.io is vendor/$(basename "$dir")"
   else
     echo "::error::$fork $version on crates.io is not what vendor/$(basename "$dir") packages"

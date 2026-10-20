@@ -12,28 +12,29 @@ fn fork_parses_as_upstream() {
 
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let listed = Command::new("git")
-        .args(["ls-files"])
+        .args(["ls-files", "-z"])
         .current_dir(root)
         .output()
         .expect("git runs");
     let (mut files, mut grammars, mut lines) = (0, std::collections::BTreeSet::new(), 0);
-    for path in String::from_utf8_lossy(&listed.stdout).lines() {
+    for path in String::from_utf8_lossy(&listed.stdout).split('\0') {
         // The vendored crates are more Rust, read by a grammar this already covers.
-        if path.starts_with("vendor/") {
+        if path.is_empty() || path.starts_with("vendor/") {
             continue;
         }
-        let Some(extension) = path.rsplit_once('.').map(|(_, ext)| ext) else {
-            continue;
-        };
-        let (Some(mine), Some(upstream)) = (
-            ours.find_syntax_by_extension(extension),
-            theirs.find_syntax_by_extension(extension),
+        let full = format!("{root}/{path}");
+        let (Ok(Some(mine)), Ok(Some(upstream))) = (
+            ours.find_syntax_for_file(&full),
+            theirs.find_syntax_for_file(&full),
         ) else {
             continue;
         };
-        let Ok(text) = std::fs::read_to_string(format!("{root}/{path}")) else {
-            continue;
-        };
+        assert_eq!(
+            mine.name, upstream.name,
+            "{path} picks another grammar in the fork"
+        );
+        let text = std::fs::read_to_string(&full)
+            .unwrap_or_else(|error| panic!("{path} has a grammar and cannot be read: {error}"));
         let mut a = syntect::parsing::ParseState::new(mine);
         let mut b = syntect_upstream::parsing::ParseState::new(upstream);
         for (number, line) in text.split_inclusive('\n').enumerate() {
