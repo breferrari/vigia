@@ -163,8 +163,8 @@ palette! {
     added_bar,
     /// The same, on a removed line.
     removed_bar,
-    /// A changed pixel in a picture's mask. Unset, it takes
-    /// [`Theme::removed_bar`]'s colour.
+    /// A changed pixel in a picture's mask, at every depth. Unless it holds an
+    /// RGB colour, it takes [`Theme::removed_bar`]'s.
     picture_changed,
     /// The wash over rows a drag has selected. It stands in for the diff wash
     /// rather than layering over it, so the sigil column carries added against
@@ -264,6 +264,8 @@ impl Theme {
     /// This palette, in colours `depth` can actually show.
     pub fn resolve(self, depth: Depth) -> Self {
         let mut out = self.map(|style| depth.resolve(style));
+        // A pixel colour, which no cell depth limits.
+        out.picture_changed = self.picture_changed;
         // A depth that cannot carry a background drops the selection's, and unlike
         // the diff washes it has no bar to degrade onto: a reader would drag and see
         // nothing while the release went on sending. Reversing is what `ansi` already

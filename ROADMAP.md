@@ -360,7 +360,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in
 | ✅ | Pin every workflow action to a commit and audit the workflows **Found by the standards review, 2026-10-20** | [#679](https://github.com/breferrari/vigia/issues/679) |
 | ✅ | Attest the release binaries and embed their dependency list **Found by the standards review, 2026-10-20** | [#680](https://github.com/breferrari/vigia/issues/680) |
 | ✅ | Bound every test, CI job and mutation run in time. **Moved to Phase 9 by the reader, 2026-10-20** | [#676](https://github.com/breferrari/vigia/issues/676) |
-| ⬜ | Give the picture change mask its own theme key **Moved into 1.2.0 by the reader, 2026-10-20** | [#710](https://github.com/breferrari/vigia/issues/710) |
+| ✅ | Give the picture change mask its own theme key **Moved into 1.2.0 by the reader, 2026-10-20** | [#710](https://github.com/breferrari/vigia/issues/710) |
 
 ## Phase 10 — current Rust
 
@@ -732,7 +732,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | Bound every test, CI job and mutation run in time ([#676](https://github.com/breferrari/vigia/issues/676)) | Phase 14, 2026-10-20 | Reader, 2026-10-20: "This must be fixed within this milestone." Moved to Phase 9, where it gates 1.2.0, and taken before #639 finishes. |
 | The foundation block ([#683](https://github.com/breferrari/vigia/issues/683), [#685](https://github.com/breferrari/vigia/issues/685), [#515](https://github.com/breferrari/vigia/issues/515), [#441](https://github.com/breferrari/vigia/issues/441), [#682](https://github.com/breferrari/vigia/issues/682), [#677](https://github.com/breferrari/vigia/issues/677), [#681](https://github.com/breferrari/vigia/issues/681), [#74](https://github.com/breferrari/vigia/issues/74), [#141](https://github.com/breferrari/vigia/issues/141)) | Phases 12 to 14, 2026-10-20 | Reader, 2026-10-20: right after 1.2.0 and before Phase 11. |
 | Observe what a prompting session does with a posted note ([#444](https://github.com/breferrari/vigia/issues/444)) | Phase 12, 2026-10-20 | Reader, 2026-10-20: into Phase 11. |
-| Give the picture change mask its own theme key ([#710](https://github.com/breferrari/vigia/issues/710)) | Phase 12, 2026-10-20 | Moved into 1.2.0 by the reader, 2026-10-20. |
+| Give the picture change mask its own theme key ([#710](https://github.com/breferrari/vigia/issues/710)) | Phase 12, 2026-10-20 | Reader, 2026-10-20: moved into 1.2.0, filed the same day in Phase 12. |
 
 ---
 

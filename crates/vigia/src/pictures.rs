@@ -336,12 +336,13 @@ impl Inks {
             (0, 0, 0)
         });
         // A pixel needs a real colour, so a named one falls through.
-        let rgb = |style: ratatui::style::Style| match style.bg {
+        let rgb = |colour: Option<ratatui::style::Color>| match colour {
             Some(ratatui::style::Color::Rgb(r, g, b)) => Some((r, g, b)),
             _ => None,
         };
-        let changed = rgb(theme.picture_changed)
-            .or_else(|| rgb(theme.removed_bar))
+        let changed = rgb(theme.picture_changed.bg)
+            .or_else(|| rgb(theme.picture_changed.fg))
+            .or_else(|| rgb(theme.removed_bar.bg))
             .unwrap_or((0xf8, 0x51, 0x49));
         Self { canvas, changed }
     }
@@ -2212,6 +2213,19 @@ mod tests {
             changed("base = dark\nremoved_bar = on #123456\npicture_changed = on red").0,
             (0x12, 0x34, 0x56),
             "a named picture_changed hid the theme's removed_bar"
+        );
+        assert_eq!(
+            changed("base = dark\npicture_changed = #00ff00").0,
+            (0x00, 0xff, 0x00),
+            "a foreground picture_changed was ignored"
+        );
+        let resolved = crate::theme::parse("base = dark\npicture_changed = on #00ff00")
+            .expect("theme parses")
+            .resolve(crate::colour::Depth::Ansi256);
+        assert_eq!(
+            Inks::of(&resolved, None, false).changed,
+            (0x00, 0xff, 0x00),
+            "picture_changed was dropped below truecolour"
         );
     }
 
