@@ -85,6 +85,14 @@ pub fn timed_cpu<T>(work: impl FnOnce() -> T) -> (T, Duration, Duration) {
     (value, wall, cpu)
 }
 
+/// Keep this thread busy for `length` of wall time.
+pub fn spin_for(length: Duration) {
+    let start = Instant::now();
+    while start.elapsed() < length {
+        std::hint::spin_loop();
+    }
+}
+
 /// This thread's CPU time so far, or `None` where the platform has no clock.
 #[cfg(unix)]
 fn thread_cpu() -> Option<Duration> {
@@ -133,9 +141,7 @@ pub fn cycle_rate() -> Option<f64> {
         let mut slowest: Option<f64> = None;
         for _ in 0..CALIBRATION_SLICES {
             let (cycles, start) = (thread_cycles()?, Instant::now());
-            while start.elapsed() < CALIBRATION_SLICE {
-                std::hint::spin_loop();
-            }
+            spin_for(CALIBRATION_SLICE);
             let spun = thread_cycles()?.checked_sub(cycles)?;
             let rate = spun as f64 / start.elapsed().as_nanos() as f64;
             slowest = Some(slowest.map_or(rate, |was: f64| was.min(rate)));

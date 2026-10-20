@@ -986,12 +986,7 @@ fn cycle_clock_direction() {
     let busy = Duration::from_millis(100);
     let mut read = Vec::new();
     for _ in 0..5 {
-        let (wall, cpu) = time_cpu(|| {
-            let deadline = std::time::Instant::now() + busy;
-            while std::time::Instant::now() < deadline {
-                std::hint::spin_loop();
-            }
-        });
+        let (wall, cpu) = time_cpu(|| support::spin_for(busy));
         assert!(
             cpu <= wall * 2,
             "a busy spin of {wall:?} read as {cpu:?} of CPU, past twice its wall time"
