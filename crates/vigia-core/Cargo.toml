@@ -49,6 +49,13 @@ pdf = ["dep:hayro-syntax"]
 [dev-dependencies]
 criterion.workspace = true
 syntect = { workspace = true, features = ["yaml-load"] }
+# Upstream syntect at the fork's base, for `tests/fork.rs` to compare their
+# parses. Pinned to that base by `package.rs`.
+syntect-upstream = { package = "syntect", version = "=5.3.0", default-features = false, features = [
+    "parsing",
+    "dump-load",
+    "regex-fancy",
+] }
 
 [[bench]]
 name = "engine"

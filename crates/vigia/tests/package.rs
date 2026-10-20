@@ -3788,8 +3788,9 @@ fn forks_replace_crates() {
         forks += 1;
     }
     assert!(forks > 0, "no fork was found, so this test checks nothing");
-    // `xtask` builds the grammar dump with upstream `syntect`, since `two-face`
-    // hands it upstream's types; the two must stay the version the fork is cut from.
+    // Upstream `syntect` is held beside the fork in two places, `xtask` for
+    // `two-face`'s types and `vigia-core`'s tests to compare against; both stay
+    // the version the fork is cut from.
     let base =
         std::fs::read_to_string(repo_root().join("vendor/syntect/PATCHES.md")).expect("PATCHES.md");
     let version = base
@@ -3800,6 +3801,12 @@ fn forks_replace_crates() {
     assert!(
         repo_file("xtask/Cargo.toml").contains(&format!("syntect = {{ version = \"={version}\"")),
         "xtask's syntect is not the {version} the fork is cut from"
+    );
+    assert!(
+        repo_file("crates/vigia-core/Cargo.toml").contains(&format!(
+            "syntect-upstream = {{ package = \"syntect\", version = \"={version}\""
+        )),
+        "vigia-core's syntect-upstream is not the {version} the fork is cut from"
     );
 }
 

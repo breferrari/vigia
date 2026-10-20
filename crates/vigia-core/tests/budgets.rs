@@ -8,7 +8,7 @@ use std::time::Duration;
 use support::{
     COARSE_TICK, FLOOR_TICKS, Scratch, absolute_gates_apply, budget, delta, highlight_delta,
     highlight_window, holds_p99, holds_p99_rounds, holds_p99_ticked, materialise, settle, time,
-    time_cpu,
+    time_cpu, timed_cpu,
 };
 use vigia_core::{
     ChangeKind, ChangeOptions, FileChange, Frame, FrameStats, HighlightStats, Highlighter,
@@ -1464,5 +1464,79 @@ fn rename_frame_many_small() {
         &with,
         String::new,
         || cold(&moved, true),
+    );
+}
+
+/// Code lines in the fenced block, the size #264 measured.
+const FENCE_LINES: usize = 24;
+/// Frames sampled for the fence gate.
+const FENCE_FRAMES: usize = 60;
+
+/// A Markdown file with one fenced Rust block, `edit` written into its middle
+/// line. A pattern that closes on a backreference is searched at every
+/// position inside the block.
+fn fenced(edit: usize) -> String {
+    let mut text = String::from("# Notes\n\nSome prose before the block.\n\n```rust\n");
+    for i in 0..FENCE_LINES {
+        if i == FENCE_LINES / 2 {
+            text.push_str(&format!("    let edited = {edit};\n"));
+        } else {
+            text.push_str(&format!(
+                "    let value_{i} = compute(&input, {i}).map(|x| x | 1).unwrap_or_default();\n"
+            ));
+        }
+    }
+    text.push_str("```\n\nSome prose after it.\n");
+    text
+}
+
+#[test]
+fn fenced_markdown_holds_the_frame_budget() {
+    // I9 for the parse a fenced block costs, beside the same bytes in a file no
+    // grammar claims, so the gap is the grammar's and not the fixture's.
+    let scratch = Scratch::new("i9-fence");
+    for path in ["notes.md", "notes.txt"] {
+        scratch.write(path, "");
+    }
+    scratch.commit_all("empty");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut highlighter = Highlighter::eager();
+    let mut edits = 0usize;
+    let mut redraw = |frame: &mut Frame, highlighter: &mut Highlighter, path: &str| {
+        edits += 1;
+        scratch.write(path, fenced(edits));
+        frame.advance().expect("advance");
+        let before = highlighter.stats();
+        let (drawn, wall, cpu) =
+            timed_cpu(|| highlight_window(frame, highlighter, path, 0, 1).rows);
+        let parsed = highlight_delta(before, highlighter.stats()).parsed;
+        assert!(drawn > FENCE_LINES, "the block's lines were not drawn");
+        assert_eq!(parsed, 1, "the edited hunk was not parsed again");
+        (wall, cpu)
+    };
+    redraw(&mut frame, &mut highlighter, "notes.md");
+    redraw(&mut frame, &mut highlighter, "notes.txt");
+
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut fence, mut control) = (Samples::new(FENCE_FRAMES), Samples::new(FENCE_FRAMES));
+    for _ in 0..FENCE_FRAMES {
+        fence.push(redraw(&mut frame, &mut highlighter, "notes.md").0);
+        control.push(redraw(&mut frame, &mut highlighter, "notes.txt").0);
+    }
+    let at = |samples: &Samples| samples.percentile(0.99).expect("samples");
+    eprintln!(
+        "fenced markdown: p99 {:?}, the same bytes without a grammar {:?}",
+        at(&fence),
+        at(&control)
+    );
+    holds_p99(
+        &format!("I9: re-highlighting a {FENCE_LINES}-line fenced block"),
+        budget(I9_FRAME),
+        &fence,
+        String::new,
+        || redraw(&mut frame, &mut highlighter, "notes.md"),
     );
 }
