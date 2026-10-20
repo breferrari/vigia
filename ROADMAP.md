@@ -349,7 +349,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in
 | ⬜ | Leave picture rows out of the scrollbar's count **Found by review on #657** | [#660](https://github.com/breferrari/vigia/issues/660) |
 | ⬜ | Resend Kitty images after a tmux reattach **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
 | ⬜ | Follow cell size changes after startup **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
-| ⬜ | Pair a renamed and changed image as a rename **Found while building #655** | [#658](https://github.com/breferrari/vigia/issues/658) |
+| 🔨 | Pair a renamed and changed image as a rename **Found while building #655** | [#658](https://github.com/breferrari/vigia/issues/658) |
 
 ## Phase 10 — current Rust
 
