@@ -4,7 +4,7 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-#[path = "../../vigia-core/tests/support/ceiling.rs"]
+#[path = "pty/ceiling.rs"]
 mod ceiling;
 use ceiling::ceiling;
 

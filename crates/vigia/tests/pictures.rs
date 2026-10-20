@@ -11,7 +11,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui_image::picker::{Picker, ProtocolType};
-use support::{Scratch, animated_gif, claimed_png, png};
+use support::{Scratch, animated_gif, ceiling, claimed_png, png};
 use vigia::pictures::{Inks, Kind, Pictures};
 use vigia::{Action, App, Glyphs, Pointing, Row, Theme, View, body_layout, render};
 use vigia_core::{Frame, Highlighter, History, Standing};
@@ -91,7 +91,7 @@ impl Pane {
     fn settled(&mut self, frame: &mut Frame) -> View {
         self.view(frame);
         assert!(
-            self.pictures.settle(Duration::from_secs(60)),
+            self.pictures.settle(ceiling(Duration::from_secs(60))),
             "the pictures were not built"
         );
         self.view(frame)
@@ -770,7 +770,7 @@ fn worker_skips_hidden() {
     let started = std::time::Instant::now();
     while pane.pictures.decodes() - decoded < 2 {
         assert!(
-            started.elapsed() < Duration::from_secs(60),
+            started.elapsed() < ceiling(Duration::from_secs(60)),
             "the first picture was never built"
         );
         std::thread::sleep(Duration::from_millis(5));
@@ -779,7 +779,7 @@ fn worker_skips_hidden() {
     pane.pictures.attach(&mut nothing, &frame);
     drop(release);
     assert!(
-        pane.pictures.settle(Duration::from_secs(60)),
+        pane.pictures.settle(ceiling(Duration::from_secs(60))),
         "the worker never finished"
     );
 

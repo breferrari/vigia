@@ -9,8 +9,9 @@ use std::time::Duration;
 use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
 use support::{
-    Scratch, ccitt_white, icon_ops, icon_pdf, label_pdf, lzw_repeats, lzw_zeros, open_locked_pdf,
-    pdf, pdf_doc, pdf_with, run_length_zeros, zlib_filled, zlib_zeros, zlib_zeros_lenient,
+    Scratch, ccitt_white, ceiling, icon_ops, icon_pdf, label_pdf, lzw_repeats, lzw_zeros,
+    open_locked_pdf, pdf, pdf_doc, pdf_with, run_length_zeros, zlib_filled, zlib_zeros,
+    zlib_zeros_lenient,
 };
 use vigia::pictures::{Inks, Kind, Pictures, Verdict};
 use vigia::{App, Pointing, Row, View, body_layout};
@@ -100,7 +101,7 @@ fn drawn(name: &str, old: Option<&[u8]>, new: &[u8]) -> Drawn {
     let mut learned = false;
     let view = loop {
         assert!(
-            pictures.settle(Duration::from_secs(120)),
+            pictures.settle(ceiling(Duration::from_secs(120))),
             "the pictures were not built"
         );
         let view = view_of(&mut app, &mut pictures, &mut frame);

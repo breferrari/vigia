@@ -9,9 +9,6 @@ use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-// A binary that also has `support` loads this twice, which is harmless.
-#[allow(clippy::duplicate_mod)]
-#[path = "../../../vigia-core/tests/support/ceiling.rs"]
 mod ceiling;
 use ceiling::ceiling;
 

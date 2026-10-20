@@ -67,11 +67,15 @@ function test(line) {
 		let stderr = "";
 		child.stdout.on("data", (chunk) => (stdout += chunk));
 		child.stderr.on("data", (chunk) => (stderr += chunk));
-		const timer = setTimeout(() => stop(child), Math.max(0, ends - Date.now()));
+		let late = false;
+		const timer = setTimeout(() => {
+			late = true;
+			stop(child);
+		}, Math.max(0, ends - Date.now()));
 		child.on("close", (status) => {
 			clearTimeout(timer);
 			running = null;
-			resolve({ status: Date.now() >= ends ? null : status, stdout, stderr });
+			resolve({ status: late ? null : status, stdout, stderr });
 		});
 	});
 }
@@ -95,8 +99,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 	});
 }
 
-const rows = [];
-const say = (row) => console.log(`${row.verdict.padEnd(8)}  ${row.name}${row.by ? `  (${row.by})` : ""}`);
+let allKilled = true;
 for (const [at, m] of battery.entries()) {
 	const original = readFileSync(m.file);
 	const before = hash(original);
@@ -129,8 +132,9 @@ for (const [at, m] of battery.entries()) {
 	// `error: test failed` too.
 	const broke = run.status !== 0 && /^error: (could not compile|linking with) /m.test(output);
 	const verdict = run.status === 0 ? "SURVIVED" : broke ? "BROKE" : "KILLED";
-	rows.push({ name: m.name, verdict, by: failed.join(", ") });
-	say(rows.at(-1));
+	const by = failed.join(", ");
+	console.log(`${verdict.padEnd(8)}  ${m.name}${by ? `  (${by})` : ""}`);
+	allKilled &&= verdict === "KILLED";
 }
 
-process.exit(rows.some((row) => row.verdict !== "KILLED") ? 1 : 0);
+process.exit(allKilled ? 0 : 1);

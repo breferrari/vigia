@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
-use support::Scratch;
+use support::{Scratch, ceiling};
 use vigia::pictures::{self, Inks, Kind, Pictures, Verdict};
 use vigia::{App, Pointing, Row, View, body_layout};
 use vigia_core::{Frame, Highlighter, History, Standing};
@@ -77,7 +77,7 @@ fn drawn(name: &str, old: Option<&str>, new: &str) -> Drawn {
     view_of(&mut app, &mut pictures, &mut frame);
     let began = Instant::now();
     assert!(
-        pictures.settle(Duration::from_secs(60)),
+        pictures.settle(ceiling(Duration::from_secs(60))),
         "the pictures were not built"
     );
     let took = began.elapsed();
