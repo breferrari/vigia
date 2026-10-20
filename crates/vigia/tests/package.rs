@@ -2113,7 +2113,9 @@ fn unreleased_marks() {
                 .rsplit(' ')
                 .next()
                 .and_then(version_parts)
-                .unwrap_or_else(|| panic!("{name} carries an unreleased mark with no version before it"));
+                .unwrap_or_else(|| {
+                    panic!("{name} carries an unreleased mark with no version before it")
+                });
             if marked <= version {
                 stale.push(format!("{name}: {marked:?}"));
             }

@@ -896,8 +896,7 @@ fn readme_gestures() -> Vec<String> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let readme = ["README.md", "docs/KEYS.md"]
         .map(|name| {
-            std::fs::read_to_string(root.join(name))
-                .unwrap_or_else(|e| panic!("read {name}: {e}"))
+            std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("read {name}: {e}"))
         })
         .join("\n");
 

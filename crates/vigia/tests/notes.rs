@@ -7682,15 +7682,36 @@ fn note_states_frame() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut rig = Rig::open(&scratch);
-    let mut put = |id: &str, line: u32, text: &str, body: &str, status, reply: Option<&str>| {
+    let put = |id: &str, line: u32, text: &str, body: &str, status, reply: Option<&str>| {
         let mut left = note(id, line, text, body);
         left.status = status;
         left.reply = reply.map(str::to_owned);
         rig.store.put(&left).expect("put");
     };
-    put("n1", 5, EDITED, "use saturating_mul here", Status::Open, None);
-    put("n2", 3, "line 3", "why keep this line?", Status::Seen, Some("it seeds the margin; kept"));
-    put("n3", 7, "line 7 as it was", "rename this", Status::Open, None);
+    put(
+        "n1",
+        5,
+        EDITED,
+        "use saturating_mul here",
+        Status::Open,
+        None,
+    );
+    put(
+        "n2",
+        3,
+        "line 3",
+        "why keep this line?",
+        Status::Seen,
+        Some("it seeds the margin; kept"),
+    );
+    put(
+        "n3",
+        7,
+        "line 7 as it was",
+        "rename this",
+        Status::Open,
+        None,
+    );
     put("n4", 11, "line 11", "check the end", Status::Open, None);
     rig.reload();
     let painted = rig.paint(&mut frame, TALL, Pointing::default());

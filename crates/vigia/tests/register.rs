@@ -845,7 +845,10 @@ fn public_prose_denylist() {
         ("docs/KEYS.md".to_owned(), read("docs/KEYS.md")),
         ("docs/NOTES.md".to_owned(), read("docs/NOTES.md")),
         ("docs/INSTALL.md".to_owned(), read("docs/INSTALL.md")),
-        ("docs/ARCHITECTURE.md".to_owned(), read("docs/ARCHITECTURE.md")),
+        (
+            "docs/ARCHITECTURE.md".to_owned(),
+            read("docs/ARCHITECTURE.md"),
+        ),
         ("CHANGELOG.md".to_owned(), changelog[..older].to_owned()),
         (
             ".github/PULL_REQUEST_TEMPLATE.md".to_owned(),
