@@ -5,8 +5,8 @@ rules:
   # The workflow-level `contents: write` dist grants for the release.
   excessive-permissions:
     ignore: ["release.yml:18"]
-  # dist's own expressions in its generated steps, its cargo-auditable install
-  # among them.
+  # dist's own expressions in its generated steps; 147 is its cargo-auditable
+  # install.
   template-injection:
     ignore: ["release.yml:83", "release.yml:138", "release.yml:147", "release.yml:150", "release.yml:154", "release.yml:211", "release.yml:261", "release.yml:292"]
   # dist's build container, named by tag in its generated job.

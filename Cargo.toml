@@ -328,8 +328,6 @@ ci = ["github"]
 # way in, and `release.yml`'s own dispatch form is the way to rehearse, since it
 # defaults to the tag `dry-run`, meaning build everything and publish nothing.
 dispatch-releases = true
-# A build attestation per archive, which `gh attestation verify` checks, and the
-# crate list embedded in each binary, which `cargo audit bin` reads.
 github-attestations = true
 cargo-auditable = true
 # The release workflow's actions, pinned to the commits every other workflow

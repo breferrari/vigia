@@ -3953,8 +3953,7 @@ fn actions_one_version() {
             .or_default()
             .insert(rev.to_owned());
     }
-    // Every action release.yml uses is pinned through dist, or the next
-    // `dist generate` puts its tag back.
+    // `dist generate` writes back the tag of any action it does not pin.
     for action in &released {
         assert!(
             pins.contains(&format!("\"{action}\"")),
@@ -4025,8 +4024,7 @@ fn permissions_declared() {
     );
 }
 
-/// Each release archive is attested and each binary carries its crate list,
-/// and only the job that attests holds the token scopes for it.
+/// Each release archive is attested and each binary carries its crate list.
 #[test]
 fn release_attested() {
     let manifest = repo_file("Cargo.toml");
@@ -4056,6 +4054,16 @@ fn release_attested() {
     assert!(
         build.contains("uses: actions/attest@"),
         "the build job attests nothing"
+    );
+    let signing: Vec<&str> = jobs
+        .iter()
+        .filter(|(_, block)| block.contains("\"id-token\": \"write\""))
+        .map(|(job, _)| job.as_str())
+        .collect();
+    assert_eq!(
+        signing,
+        ["build-local-artifacts", "custom-publish-crates-io"],
+        "an OIDC token reaches a job that neither attests nor publishes"
     );
     assert!(
         build.contains("Install cargo-auditable"),
