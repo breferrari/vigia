@@ -6,8 +6,7 @@ name: flake rate
 #
 # It deliberately does NOT fail when the test fails. A probe that goes red is
 # a probe nobody reads the output of, and the output is the entire point.
-# Read the run summary. A run that executed no test is not a measurement, so
-# that one does fail.
+# Read the run summary. A run that ran no test fails.
 #
 # Sample count is `jobs * iterations`. Prefer iterations over jobs: the
 # compile is paid once per job and the runner pool is small on macOS, so
@@ -143,8 +142,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Exit 0 on a failing test, on purpose: see the header. A replica
-          # that could not run at all, or ran no test, is a different thing
-          # and does fail, because the guards above have already exited.
+          # that could not run, or ran no test, has already exited.
 
       - name: upload failing runs
         if: steps.measure.outputs.fail != '0'

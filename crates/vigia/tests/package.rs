@@ -1602,39 +1602,39 @@ fn ci_complete_judgement() {
     );
 }
 
-/// Drives `tests-ran.sh` over a fabricated `cargo test` log.
+/// Drives `tests-ran.sh` over a fabricated `cargo test` log, and returns
+/// whether it passed and what it printed.
 #[cfg(unix)]
-fn tests_ran(case: &str, log: &str) -> bool {
+fn tests_ran(case: &str, log: &str) -> (bool, String) {
     let dir = std::env::temp_dir().join(format!("vigia-tests-ran-{}-{case}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create the log directory");
     let path = dir.join("run.log");
     std::fs::write(&path, log).expect("write the log");
     let script = repo_root().join(".github/scripts/tests-ran.sh");
-    let status = std::process::Command::new("sh")
+    let output = std::process::Command::new("sh")
         .arg(&script)
         .arg(&path)
         .args(["watch", "lfs_"])
-        .status()
+        .output()
         .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
     let _ = std::fs::remove_dir_all(&dir);
-    status.success()
+    (
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    )
 }
 
 #[cfg(unix)]
 #[test]
-fn flake_rate_counts() {
+fn tests_ran_judgement() {
     let result = |passed: u32, failed: u32, ignored: u32| {
         format!(
             "test result: ok. {passed} passed; {failed} failed; {ignored} ignored; 0 measured; 3 filtered out; finished in 0.01s\n"
         )
     };
     for (case, log, ran) in [
-        ("one", format!("running 1 test\n{}", result(1, 0, 0)), true),
-        (
-            "failed",
-            format!("running 1 test\n{}", result(0, 1, 0)),
-            true,
-        ),
+        ("one", result(1, 0, 0), true),
+        ("failed", result(0, 1, 0), true),
         (
             "two",
             format!("{}{}", result(0, 0, 0), result(1, 0, 0)),
@@ -1645,28 +1645,36 @@ fn flake_rate_counts() {
             format!("running 0 tests\n{}", result(0, 0, 0)),
             false,
         ),
-        (
-            "ignored",
-            format!("running 1 test\n{}", result(0, 0, 1)),
-            false,
-        ),
+        ("ignored", result(0, 0, 1), false),
         (
             "unbuilt",
             "error: could not compile `vigia`\n".to_owned(),
             false,
         ),
     ] {
+        let (passed, printed) = tests_ran(case, &log);
         assert_eq!(
-            tests_ran(case, &log),
-            ran,
+            passed, ran,
             "tests-ran.sh judged the {case} log wrong:\n{log}"
         );
+        if !ran {
+            assert!(
+                printed.contains("'lfs_'") && printed.contains("'watch'"),
+                "the {case} error does not name the filter and target: {printed}"
+            );
+        }
     }
+    // Before the pass and fail branches, so it judges both.
     let flake = repo_file(".github/workflows/flake-rate.yml");
+    let check = flake
+        .find("sh .github/scripts/tests-ran.sh \"failures/run-$i.log\" \"$IN_TARGET\" \"$IN_TEST\" || exit 1")
+        .expect("flake-rate.yml stopped failing a run that ran no test");
+    let branch = flake
+        .find("if \"$passed\"; then")
+        .expect("flake-rate.yml branches on the result");
     assert!(
-        flake.contains("sh .github/scripts/tests-ran.sh"),
-        "flake-rate.yml stopped checking that a test ran, so a filter that matches \
-         nothing reports a clean rate"
+        check < branch,
+        "flake-rate.yml checks that a test ran on one branch only"
     );
 }
 
