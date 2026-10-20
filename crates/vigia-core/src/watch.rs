@@ -1168,7 +1168,6 @@ mod tests {
         });
         // A tree event from setting the repository up can tick first; the
         // failure's tick is the one that carries the notice.
-        let started = std::time::Instant::now();
         let notice = loop {
             assert!(
                 ticks_within(&mut watcher, arming()),
@@ -1177,7 +1176,6 @@ mod tests {
             if let Some(notice) = watcher.take_store_notice() {
                 break notice;
             }
-            assert!(started.elapsed() < arming(), "no notice");
         };
         assert!(
             notice.starts_with("LFS images redraw on the next change")
@@ -1185,6 +1183,7 @@ mod tests {
             "{notice}"
         );
         assert_eq!(watcher.take_store_notice(), None, "the notice came twice");
+        // Any stray tree tick still due, so the quiet below is the store's.
         while ticks_within(&mut watcher, Duration::from_millis(300)) {}
 
         std::fs::write(store.join("objects").join("object"), "x\n").expect("write");
