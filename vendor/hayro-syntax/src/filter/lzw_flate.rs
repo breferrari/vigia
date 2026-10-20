@@ -654,12 +654,19 @@ pub(crate) mod lzw {
                         return None;
                     }
 
+                    // What this code adds, before the output grows by it.
+                    let grows = match (new < table.size(), prev) {
+                        (true, _) => table.get(new).map_or(0, <[u8]>::len),
+                        (false, Some(prev)) => table.get(prev).map_or(0, |entry| entry.len() + 1),
+                        (false, None) => 0,
+                    };
+                    if !crate::limit::room(&mut decoded, grows) {
+                        return None;
+                    }
+
                     if new < table.size() {
                         let entry = table.get(new)?;
                         let first_byte = entry[0];
-                        if !crate::limit::room(&mut decoded, entry.len()) {
-                            return None;
-                        }
                         decoded.extend_from_slice(entry);
 
                         if let Some(prev_code) = prev {
@@ -671,9 +678,6 @@ pub(crate) mod lzw {
                         let first_byte = prev_entry[0];
 
                         let new_entry = table.register(prev_code, first_byte)?;
-                        if !crate::limit::room(&mut decoded, new_entry.len()) {
-                            return None;
-                        }
                         decoded.extend_from_slice(new_entry);
                     } else {
                         warn!("LZW decode error: code {new} not found and prev is None");
