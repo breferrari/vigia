@@ -1,8 +1,6 @@
 //! A changed binary paired as a rename, by git's rule. `gix` never scores a
 //! pair with a binary side, so these pairs are scored here.
 
-use std::collections::HashMap;
-
 use crate::picture::Sources;
 
 /// Git's scale for a similarity score.
@@ -14,7 +12,7 @@ const MINIMUM_SCORE: u64 = MAX_SCORE / 2;
 pub(crate) const RENAME_LIMIT: usize = 1000;
 /// The most candidate bytes one frame scores. A pair past it is left to the
 /// picture worker.
-pub(crate) const FRAME_BUDGET: u64 = 1024 * 1024;
+pub(crate) const FRAME_BUDGET: u64 = 256 * 1024;
 
 /// One pair of versions: the removal's blob stamp and the addition's stamp.
 pub type PairKey = (u64, u64);
@@ -51,7 +49,8 @@ pub fn pair_score(old: &[u8], new: &[u8]) -> u64 {
     let (old_spans, new_spans) = (spans(old, old_text), spans(new, new_text));
     let copied: u64 = old_spans
         .iter()
-        .map(|(hash, &count)| count.min(new_spans.get(hash).copied().unwrap_or(0)))
+        .zip(&new_spans)
+        .map(|(&old, &new)| old.min(new))
         .sum();
     copied * MAX_SCORE / max
 }
@@ -71,15 +70,17 @@ pub fn pairs(score: u64) -> bool {
     score >= MINIMUM_SCORE
 }
 
-/// Bytes per chunk hash, as git's `hash_chars` counts them. A text side drops
-/// the CR of a CRLF.
-fn spans(data: &[u8], text: bool) -> HashMap<u32, u64> {
-    const HASHBASE: u32 = 107_927;
-    let mut out = HashMap::new();
+/// Git's chunk hashes fall under this prime.
+const HASHBASE: u32 = 107_927;
+
+/// Bytes per chunk hash, as git's `hash_chars` counts them, indexed by the
+/// hash. A text side drops the CR of a CRLF.
+fn spans(data: &[u8], text: bool) -> Vec<u64> {
+    let mut out = vec![0; HASHBASE as usize];
     let (mut first, mut second, mut length) = (0u32, 0u32, 0u64);
     let mut add = |first: u32, second: u32, length: u64| {
         let hash = first.wrapping_add(second.wrapping_mul(0x61)) % HASHBASE;
-        *out.entry(hash).or_insert(0) += length;
+        out[hash as usize] += length;
     };
     for (at, &byte) in data.iter().enumerate() {
         if text && byte == b'\r' && data.get(at + 1) == Some(&b'\n') {

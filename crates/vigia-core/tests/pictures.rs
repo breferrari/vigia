@@ -837,3 +837,32 @@ fn image_renamed_changed_staged() {
         "{staged:?}"
     );
 }
+
+#[test]
+fn worktree_stamps_name_the_path() {
+    // Two images of one size and one modification time, as two writes in one
+    // tick leave them: on a system with no inode only the path tells them
+    // apart.
+    let scratch = Scratch::new("picture-stamp-path");
+    scratch.write("keep.txt", "x\n");
+    scratch.commit_all("initial");
+    let bytes = png(24, 24, 1);
+    scratch.write("a.png", &bytes);
+    scratch.write("b.png", &bytes);
+    let when = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    for name in ["a.png", "b.png"] {
+        std::fs::File::options()
+            .write(true)
+            .open(scratch.path_of(name))
+            .and_then(|file| file.set_modified(when))
+            .expect("set the modification time");
+    }
+    let stamp = |rela: &str| {
+        diff_of(&scratch, rela)
+            .picture
+            .and_then(|picture| picture.after)
+            .map(|side| side.stamp)
+            .expect("a picture")
+    };
+    assert_ne!(stamp("a.png"), stamp("b.png"), "two files share a stamp");
+}

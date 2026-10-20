@@ -131,9 +131,9 @@ fn binary_rename_cached() {
 
 #[test]
 fn binary_rename_over_frame_budget() {
-    // Six pairs of 200 KB, and every removal weighed against every addition:
-    // far past one frame's 1 MiB.
-    let olds: Vec<Vec<u8>> = (0..6).map(|n| noise(10 + n, 200_000)).collect();
+    // Six pairs of 50 KB, and every removal weighed against every addition:
+    // far past one frame's 256 KiB.
+    let olds: Vec<Vec<u8>> = (0..6).map(|n| noise(10 + n, 50_000)).collect();
     let files: Vec<(String, Vec<u8>)> = olds
         .iter()
         .enumerate()
@@ -150,7 +150,7 @@ fn binary_rename_over_frame_budget() {
     let mut frames = 0;
     loop {
         let bytes = scored(&mut frame);
-        assert!(bytes <= 1024 * 1024, "a frame scored {bytes} bytes");
+        assert!(bytes <= 256 * 1024, "a frame scored {bytes} bytes");
         frames += 1;
         if frame.unscored_pairs().is_empty() {
             break;
@@ -209,7 +209,7 @@ fn binary_rename_large_on_worker() {
 fn binary_rename_smallest_first() {
     // Two small pairs and one large one, more than a frame together: the
     // small ones are scored first.
-    let small: Vec<Vec<u8>> = (0..2).map(|n| noise(30 + n, 60_000)).collect();
+    let small: Vec<Vec<u8>> = (0..2).map(|n| noise(30 + n, 20_000)).collect();
     let large = noise(40, 450_000);
     let scratch = moved(
         "rename-smallest",
@@ -310,7 +310,7 @@ fn binary_rename_charged_once() {
     // The old side is read whole to learn it is binary, and that read serves
     // the score too: the frame pays for each side once.
     // Binary only before, so the old side is the one read to learn it.
-    let mut old: Vec<u8> = noise(70, 300_000)
+    let mut old: Vec<u8> = noise(70, 100_000)
         .into_iter()
         .map(|byte| byte.max(1))
         .collect();

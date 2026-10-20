@@ -489,7 +489,7 @@ impl Worktree {
                 Side::Worktree => {
                     let meta = std::fs::symlink_metadata(self.workdir.join(&change.path)).ok()?;
                     meta.is_file()
-                        .then(|| (at, meta.len(), picture::file_stamp(&meta)))
+                        .then(|| (at, meta.len(), picture::path_stamp(&change.path, &meta)))
                 }
             }
         };
@@ -1298,7 +1298,8 @@ impl Worktree {
         }
     }
 
-    /// Fill each side's stamp: the blob's id, or the worktree file's `stat`.
+    /// Fill each side's stamp: the blob's id, or the worktree file's path and
+    /// `stat`.
     fn stamp(&self, change: &FileChange, picture: &mut Picture) {
         if let (Some(side), Some(id)) = (picture.before.as_mut(), change.before) {
             side.stamp = picture::blob_stamp(&id);
@@ -1307,7 +1308,7 @@ impl Worktree {
             side.stamp = match change.after {
                 Some(Side::Blob(id)) => picture::blob_stamp(&id),
                 _ => std::fs::metadata(self.workdir.join(&change.path))
-                    .map_or(0, |meta| picture::file_stamp(&meta)),
+                    .map_or(0, |meta| picture::path_stamp(&change.path, &meta)),
             };
         }
     }

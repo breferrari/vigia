@@ -1287,11 +1287,11 @@ fn lfs_compare_frame() {
     );
 }
 
-/// A repository whose `a.bin` of 512 KiB is moved and edited, unstaged, so a
-/// cold frame scores one pair of 1 MiB, the most a frame scores. Without
+/// A repository whose `a.bin` of 128 KiB is moved and edited, unstaged, so a
+/// cold frame scores one pair of 256 KiB, the most a frame scores. Without
 /// `moved`, the same addition beside the file left in place.
 fn rename_repo(name: &str, moved: bool) -> Scratch {
-    let old = support::noise(1, 512 * 1024);
+    let old = support::noise(1, 128 * 1024);
     let new = support::tail_changed(&old, 0.1);
     let scratch = Scratch::new(name);
     scratch.write("a.bin", &old);
@@ -1303,7 +1303,7 @@ fn rename_repo(name: &str, moved: bool) -> Scratch {
     scratch
 }
 
-/// I9 over a cold frame that scores a binary rename of 1 MiB, the frame's
+/// I9 over a cold frame that scores a binary rename of 256 KiB, the frame's
 /// whole budget, interleaved with the same frame where nothing is scored.
 #[test]
 fn rename_frame_score() {
@@ -1339,7 +1339,7 @@ fn rename_frame_score() {
         at(&without, 0.99)
     );
     holds_p99(
-        "I9: a cold frame scoring a binary rename of 1 MiB",
+        "I9: a cold frame scoring a binary rename of 256 KiB",
         budget(I9_FRAME),
         &with,
         String::new,
