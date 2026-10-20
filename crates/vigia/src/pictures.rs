@@ -778,6 +778,12 @@ impl Pictures {
         }
     }
 
+    /// Pairs sent to be scored whose scores have not come back. A test seam.
+    #[doc(hidden)]
+    pub fn pairs_waiting(&self) -> usize {
+        self.waiting
+    }
+
     /// The rename scores found since the last call, for
     /// [`vigia_core::Frame::learn_pair`].
     pub fn found_pairs(&mut self) -> Vec<(vigia_core::PairKey, u64)> {

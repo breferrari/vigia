@@ -2507,19 +2507,24 @@ const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 const PAIRS_KEPT: usize = 4096;
 
 /// The most walks a frame of `files` changes takes to weigh every side, and
-/// to pair every score the worker sends back, before it goes quiet. A test
+/// to list every pair for the worker, before it goes quiet; `None` past what
+/// it is derived for: sides no larger than `largest_side`, at most a sniff,
+/// and scores that pair nothing, since a pairing score walks again. A test
 /// seam.
 #[doc(hidden)]
-pub fn listing_walks(files: usize) -> (u64, u64) {
-    // A side costs at most a header and a sniff, and a walk stops short only
-    // once a read no longer fits its budget. One more walk finds none left.
+pub fn listing_walks(files: usize, largest_side: u64) -> Option<(u64, u64)> {
+    if largest_side > rename::READ_COST {
+        return None;
+    }
+    // A removed side costs a header and a sniff, an added one a sniff, and a
+    // walk stops short only once a sniff no longer fits. The last finds none.
     let sides = (files as u64 * 2 * rename::READ_COST)
         .div_ceil(rename::FRAME_BUDGET - rename::READ_COST)
         + 1;
     // A pair walk follows a listed batch landing, and listing stops once the
-    // scores are full. One more walk finds the record full.
+    // scores are full. The last finds the record full.
     let pairs = PAIRS_KEPT.div_ceil(rename::LISTED_MAX) as u64 + 1;
-    (sides, pairs)
+    Some((sides, pairs))
 }
 
 /// `repo` with every `filter` section removed from its configuration.

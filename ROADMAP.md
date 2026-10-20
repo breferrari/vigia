@@ -448,7 +448,7 @@ Milestone: [Phase 13](https://github.com/breferrari/vigia/milestone/14). Interna
 | ⬜ | Gate each sheet key against its row and derive the wide keys cell | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | Make the rail's arrival width depend on the glyph rung | [#284](https://github.com/breferrari/vigia/issues/284) |
 | ⬜ | Classify every tracked markdown file under one written-layer rule | [#504](https://github.com/breferrari/vigia/issues/504) |
-| ✅ | Bound the rename listing test by walks. **Flaky since #675; taken ahead of its phase** | [#727](https://github.com/breferrari/vigia/issues/727) |
+| ✅ | Rename listing test bounds | [#727](https://github.com/breferrari/vigia/issues/727) |
 
 ## Phase 14 — the instruments
 
