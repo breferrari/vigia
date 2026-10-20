@@ -163,8 +163,8 @@ palette! {
     added_bar,
     /// The same, on a removed line.
     removed_bar,
-    /// A changed pixel in a picture's mask. Unset in every built-in, so it
-    /// takes [`Theme::removed_bar`]'s colour, as the mask did before it had a key.
+    /// A changed pixel in a picture's mask. Unset, it takes
+    /// [`Theme::removed_bar`]'s colour.
     picture_changed,
     /// The wash over rows a drag has selected. It stands in for the diff wash
     /// rather than layering over it, so the sigil column carries added against
