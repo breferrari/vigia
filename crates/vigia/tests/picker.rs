@@ -75,6 +75,10 @@ fn kitty_compression_read() {
     let text = asked_in_pty(Some(
         b"\x1b_Gi=31;OK\x1b\\\x1b_Gi=32;OK\x1b\\\x1b[6;20;10t\x1b[0n",
     ));
+    assert!(
+        text.contains("a=q,t=d,f=24,o=z;"),
+        "the query did not ask whether the terminal takes compression: {text}"
+    );
     let line = asked_line(&text);
     assert!(
         line.contains("Kitty") && line.contains("compress: true"),
