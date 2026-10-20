@@ -448,6 +448,7 @@ Milestone: [Phase 13](https://github.com/breferrari/vigia/milestone/14). Interna
 | ⬜ | Gate each sheet key against its row and derive the wide keys cell | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | Make the rail's arrival width depend on the glyph rung | [#284](https://github.com/breferrari/vigia/issues/284) |
 | ⬜ | Classify every tracked markdown file under one written-layer rule | [#504](https://github.com/breferrari/vigia/issues/504) |
+| ✅ | Bound the rename listing test by walks, not wall time. **Flaky since #675; taken ahead of its phase** | [#727](https://github.com/breferrari/vigia/issues/727) |
 
 ## Phase 14 — the instruments
 
@@ -690,6 +691,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 
 | Item | Moved | Why |
 |---|---|---|
+| A wall-clock bound on the rename listing test ([#727](https://github.com/breferrari/vigia/issues/727)) | Ahead of Phase 13, 2026-10-21 | It failed unrelated pull requests at random, three in one hour on 2026-10-20, so every pass paid for it. A diagnostic showed the scorer converging slowly on a loaded runner, not a walk re-arming, so the fix was a bound derived from the scorer's constants rather than a longer clock |
 | `notify` named as a dependency in `SPEC.md` §6 | Into Phase 1 | I1 requires filesystem events rather than a timer, so the choice had to be made before the shell. The same pass verified that it is C-toolchain-free on all three tier-1 targets |
 | Terminal restoration implemented with the shell, ahead of I8 | Into [#9](https://github.com/breferrari/vigia/issues/9) | Not scope creep and not I8 done early. A shell that takes the alternate screen without giving it back is not shippable at any stage, and `panic = "abort"` means a `Drop` alone cannot give it back, so the panic hook had to land with the code that takes the screen. What [#8](https://github.com/breferrari/vigia/issues/8) still owns is the whole of its proof, which is also the whole of the invariant |
 | I2 split into I2a and I2b | During Phase 1 | The original I2 conflated incremental re-diffing with incremental re-highlighting. The two had different dependencies and different phases, and Phase 1 was unable to close while one number meant two things |
