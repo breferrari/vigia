@@ -56,6 +56,21 @@ Every file gets the same row in both regions:
 
 They exist separately because a glance can only ask one question. You read the one you came for and ignore the rest.
 
+A renamed file names both paths, new first, as long as the row has room for both:
+
+<!-- From crates/vigia/tests/snapshots/render__rename_frame.snap (100x14), rows 1 to 9. -->
+```
+   header  │  vigia · current ▾ · 1 changed                                                           watching
+           │
+     list  │▸ R crates/vigia/src/shell.rs ← crates/vigia/src/main.rs                  ____________    +3    -1
+           │────────────────────────────────────────────────────────────────────────────────────────────────────
+     diff  │  R crates/vigia/src/shell.rs ← crates/vigia/src/main.rs                  ____________    +3    -1
+           │  @@ -258,7 +258,9 @@
+           │  258       pub fn advance(&mut self) {
+           │  259           let mut files = Vec::new();
+           │  260 -         for change in self.changes() {
+```
+
 A file with no line diff says why instead of drawing nothing. Here a binary file, a merge conflict and a rename with no edit:
 
 <!-- From crates/vigia/tests/snapshots/render__a_file_with_no_line_diff_says_why.snap (60x8), trimmed of nothing. -->

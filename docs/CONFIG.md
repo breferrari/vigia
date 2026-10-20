@@ -153,7 +153,33 @@ set -ga terminal-features ",*:clipboard"
 
 ### 🪟 The pane you want, every time
 
-`f`, `r`, `s`, `o`, `a`, `w` and `c` change what the body is made of. Press `m` and flip them there, or say so once by hand:
+`f`, `r`, `s`, `o`, `a`, `w` and `c` change what the body is made of. Press `m` and flip them there:
+
+<!-- From crates/vigia/tests/snapshots/menu__menu_frame.snap (80x24), rows 3 to 22. -->
+```
+▸ M src/mod_0.┌─ config menu ───────────────────────────────── ✕ ┐   +40   -40
+  M src/mod_1.│                                                  │   +40   -40
+  M src/mod_2.│  ▸ Follow changes                          on    │   +40   -40
+──────────────│    Left rail                              off    │──────────────
+  M src/mod_0.│    Single file                            off    │   +40   -40 ▲
+  @@ -1,40 +1,│    File list only                         off    │             █
+   1 - fn befo│    Staged changes                         off    │             │
+   2 - fn befo│    Wrap lines                             off    │             │
+   3 - fn befo│    Notes                                   on    │             │
+   4 - fn befo│    File icons                             off    │             │
+   5 - fn befo│    Path links                              on    │             │
+   6 - fn befo│                                                  │             │
+   7 - fn befo│    ──────────────────────────────────────────    │             │
+   8 - fn befo│                                                  │             │
+   9 - fn befo│    Save settings                          off    │             │
+  10 - fn befo│    Reset to defaults                             │             │
+  11 - fn befo│                                                  │             │
+  12 - fn befo└ ↑↓ move · Space toggles · Esc closes ────────────┘             │
+  13 - fn before_13() { let value = 91; }                                      │
+  14 - fn before_14() { let value = 98; }                                      ▼
+```
+
+Or say so once by hand:
 
 ```sh
 # ~/.config/vigia/config
