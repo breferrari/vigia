@@ -49,6 +49,8 @@ pub enum Stage {
     Encode = 3,
     /// The picture worker, outside any catch.
     Worker = 4,
+    /// The thread that scores renames, outside any catch.
+    Pairs = 5,
 }
 
 /// Make the next picture panic at `stage`, as a malformed file would. A test

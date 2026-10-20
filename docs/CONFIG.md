@@ -83,7 +83,7 @@ VIGIA_GLYPHS=auto            # decide for me, which is the default
 
 <br>
 
-A changed image draws its old and new pictures and where they differ. When the pane opens, it asks your terminal whether it draws Kitty graphics or Sixel, and how big a cell is in pixels. kitty, Ghostty, iTerm2 and Rio answer Kitty; Windows Terminal 1.22 and later, foot, and xterm with its Sixel support on answer Sixel. Inside tmux the question and the image pass through to the terminal outside it, and the pane turns tmux's `allow-passthrough` on to make that work. When the terminal does not answer, WezTerm and iTerm2 draw iTerm2 images, and kitty, Ghostty, foot and Windows Terminal draw as they would have answered. Everything else draws half-blocks, which need 24-bit colour.
+A changed image draws its old and new pictures and where they differ. When the pane opens, it asks your terminal whether it draws Kitty graphics or Sixel, and how big a cell is in pixels. kitty, Ghostty, iTerm2 and Rio answer Kitty; Windows Terminal 1.22 and later, foot, and xterm with its Sixel support on answer Sixel. Inside tmux the question and the image pass through to the terminal outside it, and the pane turns tmux's `allow-passthrough` on to make that work. When the terminal does not answer, WezTerm and iTerm2 draw iTerm2 images, and kitty, Ghostty, foot and Windows Terminal draw as they would have answered. Everything else draws half-blocks, which need 24-bit colour. After you reattach tmux from another terminal, press `Ctrl+L`: the terminal you are on now never received the pictures, and `Ctrl+L` sends them again.
 
 ```sh
 VIGIA_PICTURES=kitty        # kitty graphics, through Unicode placeholders

@@ -34,6 +34,14 @@ pub struct FrameStats {
     pub deferred: u64,
     /// Values [`Frame::diff_with`] derived from a diff, each once per diff.
     pub derived: u64,
+    /// Bytes read on the frame path to score binaries as renames.
+    pub paired_bytes: u64,
+    /// Rename pairs scored on the frame path.
+    pub pairs_scored: u64,
+    /// Rename sides read on the frame path, a header, a head or a whole side.
+    pub side_reads: u64,
+    /// Status walks: each [`Frame::advance`] that ran.
+    pub walks: u64,
 }
 
 /// A working-tree fingerprint that costs no read: size and modification time.
@@ -463,6 +471,10 @@ impl<'w> Frame<'w> {
         // The clean filter is rebuilt by the walk's first read rather than kept for
         // the life of the process, so a walk and the draw after it share one.
         self.worktree.invalidate_filter();
+        self.worktree.renew_pair_budget();
+        let paired_before = self.worktree.pair_bytes();
+        let pairs_before = self.worktree.pairs_scored();
+        let reads_before = self.worktree.side_reads();
         let mut walk = self.worktree.changes_at(&self.standing, options)?;
         for change in &mut walk {
             files.push(change?);
@@ -485,6 +497,17 @@ impl<'w> Frame<'w> {
             }
             hidden += walk.hidden();
         }
+        // A side the budget could not weigh is weighed by the next frame, with no
+        // event to bring it.
+        if self.worktree.sides_left() {
+            let now = SystemTime::now();
+            self.settles_at = Some(self.settles_at.map_or(now, |at| at.max(now)));
+        }
+
+        self.stats.paired_bytes += self.worktree.pair_bytes() - paired_before;
+        self.stats.pairs_scored += self.worktree.pairs_scored() - pairs_before;
+        self.stats.side_reads += self.worktree.side_reads() - reads_before;
+        self.stats.walks += 1;
 
         // Nothing above this line mutated the frame's picture of the worktree, which
         // is what makes a failed walk leave the previous frame intact.
@@ -625,6 +648,30 @@ impl<'w> Frame<'w> {
         }
     }
 
+    /// The pairs of a removal and an addition this frame could not afford to
+    /// score as a rename, for the picture worker.
+    pub fn unscored_pairs(&self) -> Vec<crate::Candidate> {
+        self.worktree.unscored_pairs()
+    }
+
+    /// Whether this frame had more pairs for the worker than it lists. The
+    /// next advance lists them.
+    pub fn pairs_unlisted(&self) -> bool {
+        self.worktree.pairs_unlisted()
+    }
+
+    /// How many times the rename scores were started again, after which a
+    /// pair sent to the worker before is sent again.
+    pub fn pair_epoch(&self) -> u64 {
+        self.worktree.pair_epoch()
+    }
+
+    /// File a rename score the worker found, by its pair. The next advance
+    /// pairs by it.
+    pub fn learn_pair(&mut self, key: crate::PairKey, score: u64) {
+        self.worktree.learn_pair(key, score);
+    }
+
     /// Draw a changed SVG as pictures, or diff it as text, as a pane that can
     /// draw no picture needs.
     pub fn draw_svg(&mut self, svg: bool) {
@@ -659,7 +706,8 @@ impl<'w> Frame<'w> {
     }
 
     /// How long until the last height kept waiting inside the settle margin
-    /// settles, or `None` when none is waiting. No filesystem event marks a write
+    /// settles, or a rename side left unweighed can be weighed, or `None` when
+    /// none is waiting. No filesystem event marks a write
     /// ending, so a wake at that moment has nothing to be armed from but this.
     /// Decided by each tick's walk, so a diff taken between two ticks can leave it
     /// one wake early, and a wake that finds nothing waiting costs a walk and no read.

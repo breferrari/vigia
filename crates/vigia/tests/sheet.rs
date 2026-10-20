@@ -981,7 +981,7 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
 }
 
 /// One value of every [`Action`] variant, for the two gates that walk them.
-const ALL_ACTIONS: [Action; 38] = [
+const ALL_ACTIONS: [Action; 39] = [
     Action::Quit,
     Action::Escape,
     Action::Scroll(1),
@@ -1020,6 +1020,7 @@ const ALL_ACTIONS: [Action; 38] = [
     Action::ListRow(0),
     Action::DiffTo(0),
     Action::Redraw,
+    Action::Refresh,
 ];
 
 /// Where a gesture can be asked for, as the reason a variant is or is not on the
@@ -1104,6 +1105,8 @@ fn reach_of(action: &Action) -> Reach {
         Action::DiffTo(_) => Reach::Mouse,
         // The digits, and a click on a listed file.
         Action::ListRow(_) => Reach::Both,
+        // `Ctrl+L`, and the sheet's `leaving` group names it.
+        Action::Refresh => Reach::Keyboard,
         Action::Redraw => Reach::Shell(
             "a resize, which the terminal reports and no reader asks for, so there \
              is nothing to teach",
@@ -1251,7 +1254,8 @@ fn mouse_phrases() -> Vec<&'static str> {
             | Action::PositionsPick
             | Action::PositionsRow(_)
             | Action::Escape
-            | Action::Redraw => Vec::new(),
+            | Action::Redraw
+            | Action::Refresh => Vec::new(),
         });
     }
 
@@ -3950,4 +3954,39 @@ fn a_sheet_missing_the_mouse_group_carries_no_line() {
         "the narrow sweep never reached a sheet short of gestures, so it proves \
          nothing"
     );
+}
+
+#[test]
+fn ctrl_l_on_sheet_row() {
+    // Folded into the sheet's own row at the wide spelling, and left out at the
+    // tight one as `q`'s row leaves out `Ctrl+C`: a change to either is a ruling.
+    let scratch = Scratch::large_diff("sheet-ctrl-l", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    for (at, wanted) in [
+        (
+            Rect::new(0, 0, WIDE, WHOLE_TABLE),
+            "?  Esc  Ctrl+L          this sheet · redraw the pane",
+        ),
+        (area(), "?  Esc       this sheet"),
+    ] {
+        let mut app = App::new();
+        toggle_at(&mut app, &mut frame, at);
+        let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let (_, drawn) = read_sheet(&buf, &laid);
+        let row = drawn
+            .lines()
+            .find(|row| row.contains("this sheet"))
+            .unwrap_or_else(|| panic!("no row names the sheet:\n{drawn}"));
+        assert_eq!(
+            row.trim_matches(['│', ' ']).trim_end(),
+            wanted,
+            "the sheet's row at {}x{} changed",
+            at.width,
+            at.height
+        );
+    }
 }

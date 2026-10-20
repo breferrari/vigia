@@ -603,6 +603,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             shell.settle_notes(began);
             // The margin's end after a print that moved, which no filesystem event marks.
             shell.settle_heights(&mut frame);
+            shell.settle_pairs(&mut frame);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, &mut aside, began)?;
             shell.request_warm(&worktree, &tx);
@@ -646,8 +647,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
-                    // The mode: while the reader's hand is in the box every key is the
-                    // box's and a press anywhere else closes it, and only what the box
+                    // The mode: while the reader's hand is in the box every key but
+                    // `Ctrl+L` is the box's and a press anywhere else closes it, and only what the box
                     // does not answer reaches the map below.
                     if shell.app.box_open() {
                         match notes::box_route(&event, shell.box_area()) {
@@ -891,6 +892,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         shell.settle_notes(began);
         // And the settle deadline, which can fall due under a drained batch too.
         shell.settle_heights(&mut frame);
+        // And a rename the worker scored, which pairs on this frame.
+        shell.settle_pairs(&mut frame);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -1315,6 +1318,15 @@ impl Shell {
         }
     }
 
+    /// Pair the renames the worker scored since the last frame: the walk again,
+    /// once, with their scores filed.
+    fn settle_pairs(&mut self, frame: &mut vigia_core::Frame) {
+        let found = self.pictures.found_pairs();
+        if let Err(e) = self.pictures.pair(frame, found) {
+            self.walk_failed(frame, &e);
+        }
+    }
+
     /// Say what a failed walk was, and come home where [`comes_home`] says to.
     ///
     /// A base can be rebased, amended or collected out from under a pane open for
@@ -1365,7 +1377,13 @@ impl Shell {
             self.noting = None;
             return Ok(true);
         }
-        if action != Action::Redraw {
+        if action == Action::Refresh {
+            self.pictures.refresh();
+            if let Err(e) = self.session.screen().clear() {
+                self.app.warn(format!("redraw: {e}"));
+            }
+        }
+        if !matches!(action, Action::Redraw | Action::Refresh) {
             self.deselect();
             self.noting = None;
         }
@@ -2189,6 +2207,8 @@ impl Shell {
                 self.app.select(None);
             }
         }
+        // Whatever this frame's walks could not afford to pair goes to the worker.
+        self.pictures.score_pairs(frame);
         // A span the collect resolved to nothing is not a selection, whatever the
         // pointer did: it draws nothing, and left standing it would take `Esc`.
         if !self.app.holds_a_selection() {
@@ -2553,6 +2573,19 @@ mod tests {
     }
 
     #[test]
+    fn refresh_clears_and_resends() {
+        // `Shell` holds a terminal, so the route is read rather than driven.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        assert!(
+            shipped.contains(
+                "if action == Action::Refresh {\n            self.pictures.refresh();\n            if let Err(e) = self.session.screen().clear() {\n                self.app.warn(format!(\"redraw: {e}\"));\n            }"
+            ),
+            "`Ctrl+L` no longer retires the Kitty pictures and clears the screen"
+        );
+    }
+
+    #[test]
     fn the_wash_is_dropped_on_every_route_that_ends_it() {
         // `Shell` is private and holds a terminal, so its rules are read here rather
         // than driven. Each of these was a defect: a span the collect resolved to
@@ -2566,7 +2599,7 @@ mod tests {
             "self.app.select(None);",
             // Neither is reachable from a test, and both shipped once.
             "if action == Action::Escape && (self.selected.is_some() || self.noting.is_some()) {",
-            "if action != Action::Redraw {",
+            "if !matches!(action, Action::Redraw | Action::Refresh) {",
             "if chrome.selected.is_none() {",
             // A note drag ends the same way when the layout moves under it.
             "chrome.noting = repainted(chrome.noting, was, painted);",
@@ -3253,6 +3286,14 @@ mod tests {
                      settled height on that path waits for the next event",
                 );
             assert!(walked < paint);
+            let paired = code[previous..paint]
+                .rfind("shell.settle_pairs(&mut frame)")
+                .map(|at| previous + at)
+                .expect(
+                    "a paint with no `settle_pairs` before it in the same arm, so a \
+                     rename the worker scored waits for the next event",
+                );
+            assert!(paired < paint);
             let noted = code[previous..paint]
                 .rfind("shell.settle_notes(began)")
                 .map(|at| previous + at)
@@ -3476,6 +3517,18 @@ mod tests {
         let paint = code.find("fn paint<").expect("`Shell::paint` is gone");
         let paint = &code[paint..];
         let paint = &paint[..paint.find("\n    }\n").expect("`paint` never closes")];
+        // What the walks could not afford to pair goes to the worker after the
+        // view is attached, on every paint.
+        let attached = paint
+            .rfind("self.pictures.attach(")
+            .expect("`paint` no longer attaches pictures");
+        let sent = paint
+            .find("self.pictures.score_pairs(frame)")
+            .expect("`paint` no longer sends the unscored pairs to be scored");
+        assert!(
+            attached < sent,
+            "`paint` sends pairs before the view is attached"
+        );
         let asked = paint
             .find("effect_interval(\n            self.effects_ran,")
             .expect("`paint` no longer asks `effect_interval` with the previous paint's answer");

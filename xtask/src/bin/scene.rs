@@ -118,10 +118,7 @@ const RASTER_STATES: [(&str, &str); 5] = [
     ("deleted", "deleted: one panel"),
     ("modified", "modified, same size: three panels"),
     ("resized", "resized: old and new"),
-    (
-        "after",
-        "a staged rename (press a), then changed (unstaged is #658)",
-    ),
+    ("after", "a staged rename (press a), then changed"),
 ];
 
 /// Every state `static` writes, by path, and what the pane shows for it.
@@ -144,6 +141,10 @@ fn states() -> Vec<(String, &'static str)> {
     states.extend(
         [
             ("png/one-pixel.png", "1 px changed"),
+            (
+                "png/moved.png",
+                "renamed and changed, unstaged: old and new",
+            ),
             ("png/profile.png", "colour profile changed"),
             ("gif/animated.gif", "first frames compared"),
             (
@@ -372,6 +373,7 @@ impl Scene {
             self.write(&raster.file("before"), assets::encoded(format, 96, 64, 40));
         }
         self.write("png/one-pixel.png", assets::png(96, 64, 50));
+        self.write("png/original.png", assets::edited_png(96, 64).0);
         self.write(
             "png/profile.png",
             assets::profiled_png(96, 64, 60, b"profile one"),
@@ -435,7 +437,9 @@ impl Scene {
         self.write("src/large.rs", edited(80, 20, 40));
         for raster in &RASTERS {
             let format = raster.format;
-            self.write(&raster.file("added"), assets::encoded(format, 96, 64, 15));
+            // Several times the deleted one's size, so git, and the pane, never
+            // weigh the two as a rename.
+            self.write(&raster.file("added"), assets::encoded(format, 300, 200, 15));
             self.remove(&raster.file("deleted"));
             self.write(
                 &raster.file("modified"),
@@ -445,6 +449,8 @@ impl Scene {
             self.rename_then_change(raster);
         }
         self.write("png/one-pixel.png", png_with_pixel(96, 64, 50, (40, 30)));
+        self.remove("png/original.png");
+        self.write("png/moved.png", assets::edited_png(96, 64).1);
         self.write(
             "png/profile.png",
             assets::profiled_png(96, 64, 60, b"profile two"),
@@ -665,6 +671,18 @@ mod tests {
             );
             assert_eq!(sides("after"), (true, true), "{}", raster.file("after"));
         }
+        assert_eq!(
+            at("png/moved.png").kind,
+            ChangeKind::Renamed {
+                from: "png/original.png".to_owned()
+            },
+            "png/moved.png is not an unstaged rename"
+        );
+        let moved = at("png/moved.png");
+        assert!(
+            moved.before && moved.after,
+            "png/moved.png has no size line: {moved:?}"
+        );
         for path in [
             "png/one-pixel.png",
             "png/profile.png",
@@ -1012,6 +1030,17 @@ mod tests {
                 );
             }
         }
+        // The unstaged run draws a binary moved and changed as a rename too.
+        let unstaged = draw_scene(&dir, 120, 40, false);
+        let moved = unstaged
+            .get("png/moved.png")
+            .unwrap_or_else(|| panic!("png/moved.png was never drawn: {:?}", unstaged.keys()));
+        assert_eq!(
+            moved.from.as_deref(),
+            Some("png/original.png"),
+            "png/moved.png is not drawn as a rename"
+        );
+        assert!(moved.picture_rows > 0, "png/moved.png drew no picture");
         // The staged run draws each rename as one, with its pictures.
         let found = draw_scene(&dir, 120, 40, true);
         for raster in &RASTERS {

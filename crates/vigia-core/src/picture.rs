@@ -431,14 +431,31 @@ pub(crate) fn blob_stamp(id: &gix::ObjectId) -> u64 {
     u64::from_le_bytes(head)
 }
 
-/// A file's stamp, from what `stat` says of it.
-pub(crate) fn file_stamp(meta: &std::fs::Metadata) -> u64 {
+/// A worktree file's stamp, from its path and what `stat` says of it.
+pub(crate) fn path_stamp(path: &str, meta: &std::fs::Metadata) -> u64 {
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(meta);
+    #[cfg(not(unix))]
+    let inode = 0;
+    stamp_of(path, meta.len(), meta.modified().ok(), inode)
+}
+
+/// The stamp of a worktree file `stat` could not describe: its path alone, so
+/// two such files never share one.
+pub(crate) fn unread_stamp(path: &str) -> u64 {
+    stamp_of(path, 0, None, 0)
+}
+
+/// The stamp of a file at `path` that `stat` describes. With the path:
+/// without an inode, as on Windows, two files of one size written in one
+/// tick share the rest.
+fn stamp_of(path: &str, len: u64, modified: Option<std::time::SystemTime>, inode: u64) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    meta.len().hash(&mut hasher);
-    meta.modified().ok().hash(&mut hasher);
-    #[cfg(unix)]
-    std::os::unix::fs::MetadataExt::ino(meta).hash(&mut hasher);
+    path.hash(&mut hasher);
+    len.hash(&mut hasher);
+    modified.hash(&mut hasher);
+    inode.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -562,6 +579,16 @@ mod tests {
     use super::*;
 
     const OID: &str = "abababababababababababababababababababababababababababababababab";
+
+    #[test]
+    fn stamp_names_the_path() {
+        // No inode, as on Windows: one size and one time, two paths.
+        let when = Some(std::time::SystemTime::UNIX_EPOCH);
+        assert_ne!(
+            stamp_of("a.png", 10, when, 0),
+            stamp_of("b.png", 10, when, 0)
+        );
+    }
 
     #[test]
     fn pointer_parses() {

@@ -5,7 +5,7 @@ mod support;
 use std::io::Cursor;
 
 use image::{ImageFormat, RgbaImage};
-use support::{Scratch, changes_sorted, encoded, lfs_pointer, png};
+use support::{Scratch, changes_sorted, edited_png, encoded, lfs_pointer, png};
 use vigia_core::{FileDiff, Format, ImageSide, Origin, Picture};
 
 /// The diff of the one change at `rela`.
@@ -775,4 +775,94 @@ fn image_sources() {
         (Some(png(8, 8, 1)), Some(png(8, 8, 2))),
         "the plain pair read back wrong"
     );
+}
+
+#[test]
+fn image_renamed_changed() {
+    let (old, new) = edited_png(64, 64);
+    let scratch = Scratch::new("picture-renamed-changed");
+    scratch.write("a.png", &old);
+    scratch.commit_all("initial");
+    std::fs::remove_file(scratch.path_of("a.png")).expect("remove");
+    scratch.write("b.png", &new);
+    let worktree = scratch.worktree();
+    let changes = changes_sorted(&worktree);
+    let change = changes
+        .iter()
+        .find(|c| c.path == "b.png")
+        .expect("b.png is listed");
+    assert_eq!(
+        change.kind,
+        vigia_core::ChangeKind::Renamed {
+            from: "a.png".to_owned()
+        },
+        "{changes:?}"
+    );
+    assert!(
+        !changes.iter().any(|c| c.path == "a.png"),
+        "a.png is listed beside its rename: {changes:?}"
+    );
+    let picture = worktree.diff(change).expect("diff").picture;
+    assert!(
+        picture.is_some_and(|picture| picture.before.is_some() && picture.after.is_some()),
+        "the renamed PNG did not read both pictures"
+    );
+}
+
+#[test]
+fn image_renamed_changed_staged() {
+    let (old, new) = edited_png(64, 64);
+    let scratch = Scratch::new("picture-renamed-changed-staged");
+    scratch.write("a.png", &old);
+    scratch.commit_all("initial");
+    std::fs::remove_file(scratch.path_of("a.png")).expect("remove");
+    scratch.write("b.png", &new);
+    scratch.git(&["add", "-A"]);
+    // Git pairs it, which is the rule the pane follows.
+    let git = scratch.git(&["diff", "--cached", "-M", "--name-status"]);
+    assert!(git.starts_with('R'), "git did not pair the fixture: {git}");
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    let staged: Vec<_> = frame
+        .files()
+        .iter()
+        .filter(|change| change.origin == Origin::Staged)
+        .collect();
+    assert!(
+        matches!(staged.as_slice(), [change] if change.path == "b.png"
+            && change.kind == vigia_core::ChangeKind::Renamed { from: "a.png".to_owned() }),
+        "{staged:?}"
+    );
+}
+
+#[test]
+fn worktree_stamps_name_the_path() {
+    // Two images of one size and one modification time, as two writes in one
+    // tick leave them: on a system with no inode only the path tells them
+    // apart.
+    let scratch = Scratch::new("picture-stamp-path");
+    scratch.write("keep.txt", "x\n");
+    scratch.commit_all("initial");
+    let bytes = png(24, 24, 1);
+    scratch.write("a.png", &bytes);
+    scratch.write("b.png", &bytes);
+    let when = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    for name in ["a.png", "b.png"] {
+        std::fs::File::options()
+            .write(true)
+            .open(scratch.path_of(name))
+            .and_then(|file| file.set_modified(when))
+            .expect("set the modification time");
+    }
+    let stamp = |rela: &str| {
+        diff_of(&scratch, rela)
+            .picture
+            .and_then(|picture| picture.after)
+            .map(|side| side.stamp)
+            .expect("a picture")
+    };
+    assert_ne!(stamp("a.png"), stamp("b.png"), "two files share a stamp");
 }
