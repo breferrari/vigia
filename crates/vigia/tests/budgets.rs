@@ -3483,19 +3483,17 @@ fn pdf_frame_read() {
         render(&mut buf, pane, &view, &theme, Glyphs::default(), &chrome);
         view
     };
-    let cold = Instant::now();
-    let view = paint(&mut frame, &mut app, &mut highlighter);
-    let cold = cold.elapsed();
-    let sized = view
-        .rows
-        .iter()
-        .filter(|row| matches!(row, Row::Sized { .. }))
-        .count();
+    // The first paint a reader sees, cold, in a pane of its own.
+    let (sized, cold_wall, cold_cpu) = pdf_cold_paint(&scratch, pane);
     assert_eq!(
         sized, 5,
         "not every PDF drew a size line, so this would time less"
     );
-    eprintln!("note: the first frame with {sized} changed 16 MiB PDFs on screen took {cold:?}");
+    eprintln!(
+        "note: the first frame with {sized} changed 16 MiB PDFs on screen took {cold_cpu:?} \
+         of thread CPU, {cold_wall:?} on the wall"
+    );
+    paint(&mut frame, &mut app, &mut highlighter);
     // Read once more when they settle, as every file read inside the margin is.
     settle(&mut frame);
 
@@ -3503,10 +3501,26 @@ fn pdf_frame_read() {
         return;
     }
     // Each is sized on the worker, so the frame that first sees them reads
-    // only their headers.
+    // only their headers. Gated on thread CPU: a fresh runner's disk and
+    // scanner can hold the wall clock on files written a moment ago.
     assert!(
-        cold < budget(I9_FRAME),
-        "I9: the first frame with five changed 16 MiB PDFs on screen took {cold:?}"
+        cold_cpu < budget(I9_FRAME),
+        "I9: the first frame with five changed 16 MiB PDFs on screen took {cold_cpu:?} \
+         of thread CPU ({cold_wall:?} on the wall)"
+    );
+    let mut colds = Samples::new(COLD_PDF_FRAMES);
+    for _ in 0..COLD_PDF_FRAMES {
+        colds.push(pdf_cold_paint(&scratch, pane).1);
+    }
+    holds_p99(
+        "I9: the first frame of a fresh pane with five changed 16 MiB PDFs on screen",
+        budget(I9_FRAME),
+        &colds,
+        String::new,
+        || {
+            let (_, wall, cpu) = pdf_cold_paint(&scratch, pane);
+            (wall, cpu)
+        },
     );
     let _timed = exclusively_timed();
     let mut timed = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
@@ -3533,6 +3547,67 @@ fn pdf_frame_read() {
         || format!("({sized} PDFs sized on screen)"),
         || timed(&mut frame, &mut app, &mut highlighter),
     );
+}
+
+/// Cold frames timed after the first, each in a pane of its own.
+#[cfg(feature = "pdf")]
+const COLD_PDF_FRAMES: usize = 20;
+
+/// The first frame of a fresh pane over `scratch`'s changed PDFs: how many drew
+/// a size line, and its wall and thread CPU time.
+#[cfg(feature = "pdf")]
+fn pdf_cold_paint(scratch: &Scratch, pane: Rect) -> (usize, Duration, Duration) {
+    use vigia::pictures::{Inks, Pictures};
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut buf = Buffer::empty(pane);
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        ratatui_image::picker::Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let screen_layout = layout_of(&app, pane, frame.files().len());
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        vigia::Stood {
+            standing: &Standing::Current,
+            now: 0,
+        },
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
+    let (view, wall, cpu) = timed_cpu(|| {
+        let mut view = app
+            .view(&mut frame, &mut highlighter, &history, screen_layout)
+            .expect("view");
+        pictures.attach(&mut view.rows, &frame);
+        render(
+            &mut buf,
+            pane,
+            &view,
+            &Theme::dark(),
+            Glyphs::default(),
+            &chrome,
+        );
+        view
+    });
+    let sized = view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Sized { .. }))
+        .count();
+    (sized, wall, cpu)
 }
 
 fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<u8>) {
