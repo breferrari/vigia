@@ -1,12 +1,18 @@
 # What zizmor may leave unfixed. The release.yml lines are dist's generated
-# output, which no dist setting changes.
+# output, which no dist setting changes; a line that moves after
+# `dist generate` is reported again rather than hidden.
 rules:
+  # The workflow-level `contents: write` dist grants for the release.
   excessive-permissions:
     ignore: ["release.yml:18"]
+  # dist's own expressions in its generated steps.
   template-injection:
     ignore: ["release.yml:83", "release.yml:134", "release.yml:144", "release.yml:148", "release.yml:201", "release.yml:251", "release.yml:282"]
+  # dist's build container, named by tag in its generated job.
   unpinned-images:
     ignore: ["release.yml:114"]
+  # dist calls the custom publish job with `secrets: inherit`, and spells the
+  # call as a path.
   secrets-inherit:
     ignore: ["release.yml:335"]
   self-repository:
