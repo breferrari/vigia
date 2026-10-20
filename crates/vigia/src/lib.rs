@@ -417,6 +417,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // that draws something.
         notice_effects: EffectManager::default(),
         painted: Instant::now(),
+        shared: Instant::now(),
         highlighter: Highlighter::new(),
         // Empty at startup, so every file in an already-dirty worktree draws cold until
         // something writes to it.
@@ -1076,6 +1077,8 @@ struct Shell {
     /// When the previous frame painted. The time since it is what an effect is
     /// told, through `effect_interval`, which may answer none of it.
     painted: Instant,
+    /// When the last share of the Kitty transmits waiting was written.
+    shared: Instant,
     /// The syntax classes of whatever is on screen, kept between frames.
     highlighter: Highlighter,
     /// What changed recently: the source for the sparkline, the recency gradient
@@ -1211,11 +1214,9 @@ impl Shell {
     fn write_out(&mut self, out: &str) {
         use std::io::Write;
         if !out.is_empty() {
-            let _ = self
-                .session
-                .screen()
-                .backend_mut()
-                .write_all(out.as_bytes());
+            let backend = self.session.screen().backend_mut();
+            let _ = backend.write_all(out.as_bytes());
+            let _ = backend.flush();
         }
     }
 
@@ -1310,13 +1311,12 @@ impl Shell {
                 // The effect says when it is finished, so the clock is asked for a
                 // frame only while one is running and goes untimed the moment none is.
                 arriving: self.effects_running().then(|| now + ARRIVING_FRAME),
-                // A frame's share of the transmits waiting goes out with each paint.
-                // From the last paint, so a run of wakes that paint nothing still
-                // comes due.
+                // A share of the transmits waiting goes out each turn, a frame after
+                // the last, so a run of wakes that paint nothing still comes due.
                 sending: self
                     .pictures
                     .sending()
-                    .then(|| self.painted + ARRIVING_FRAME),
+                    .then(|| self.shared + ARRIVING_FRAME),
                 // The frame after a departure ends is the one that drops its rows.
                 departing: self.ledger.ends_in(),
                 // And the frame after the box has left is the one that drops its.
@@ -2174,10 +2174,7 @@ impl Shell {
         // After the cells, so a key's frame waits only on the share already on its
         // way, and once a turn however many paints it took.
         self.write_pictures(pictures::TRANSMIT_FRAME);
-        {
-            use std::io::Write;
-            let _ = self.session.screen().backend_mut().flush();
-        }
+        self.shared = Instant::now();
         Ok(())
     }
 

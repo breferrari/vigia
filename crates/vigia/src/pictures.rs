@@ -1052,8 +1052,6 @@ impl Pictures {
     /// at least one.
     pub fn output(&mut self, budget: usize) -> String {
         use ratatui_image::picker::cap_parser::Parser;
-        // The frame this writes after has placed what the last one finished.
-        self.unplaced = false;
         if self.outbox.is_empty() {
             return self.retired();
         }
@@ -1963,7 +1961,12 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
             return undecoded();
         };
         if let Some(id) = id {
-            transmit.push_str(&taken(&protocol, slot));
+            let sent = taken(&protocol, slot);
+            // The crate spent its one transmit on a draw of no cells.
+            if sent.is_empty() {
+                return undecoded();
+            }
+            transmit.push_str(&sent);
             kitty.push(id);
             // An uncompressed transmit is base64 of the pixels, four bytes to three.
             stored += if compress {
@@ -2233,7 +2236,10 @@ mod tests {
             .find("\x1b_Ga=d")
             .expect("the delete was never written");
         assert!(
-            !wire[delete..].contains("m=1;"),
+            wire[delete..]
+                .split("\x1b_G")
+                .skip(1)
+                .all(|apc| apc.starts_with("a=d")),
             "the image retired before it began was sent after the delete"
         );
         // Exactly the first image, whole, then its delete: the second never began.
