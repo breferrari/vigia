@@ -1672,6 +1672,7 @@ fn halfblocks_ignore_cell() {
     frame.advance().expect("advance");
     pane.pictures.window_sized(window(100, 30, 1000, 600));
     pane.settled(&mut frame);
+    assert!(!pane.pictures.follows_cell(), "half-blocks read the window");
     assert!(!pane.pictures.window_sized(window(100, 30, 2000, 1200)));
     assert_eq!(
         pane.pictures.kept(),
