@@ -332,3 +332,55 @@ fn unlisted_pairs_listed_later() {
     }
     assert!(unlisted, "no frame had more pairs than it listed");
 }
+
+#[test]
+fn full_scores_stop_listing() {
+    // More unrelated pairs than the scores hold: the pane stops listing them
+    // rather than evict one answer with the next, and goes quiet.
+    let scratch = Scratch::new("rename-full-scores");
+    for n in 0..70u64 {
+        scratch.write(&format!("old/{n:02}.bin"), noise(400 + n, 2_000));
+    }
+    scratch.commit_all("initial");
+    for n in 0..70u64 {
+        std::fs::remove_file(scratch.path_of(&format!("old/{n:02}.bin"))).expect("remove");
+        scratch.write(&format!("new/{n:02}.bin"), noise(500 + n, 2_000));
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        },
+        Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let (began, mut quiet, mut walks) = (Instant::now(), 0, 0);
+    while quiet < 100 {
+        assert!(
+            began.elapsed() < Duration::from_secs(10),
+            "the pane still walks after 10s, {} walks",
+            frame.stats().walks
+        );
+        let now = std::time::SystemTime::now();
+        if let Some(wait) = frame.settles_in(now) {
+            std::thread::sleep(wait);
+            frame
+                .advance_if_settled(std::time::SystemTime::now())
+                .expect("advance");
+        }
+        pictures.score_pairs(&frame);
+        std::thread::sleep(Duration::from_millis(2));
+        let found = pictures.found_pairs();
+        pictures.pair(&mut frame, found).expect("pair");
+        quiet = if frame.stats().walks == walks {
+            quiet + 1
+        } else {
+            0
+        };
+        walks = frame.stats().walks;
+    }
+    assert_eq!(frame.pair_epoch(), 0, "the scores started again");
+}

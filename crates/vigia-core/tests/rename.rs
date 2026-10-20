@@ -354,3 +354,46 @@ fn binary_rename_small_before_text() {
     frame.advance().expect("advance");
     assert_eq!(kind_of(frame.files(), "y.bin"), &renamed("z.bin"));
 }
+
+#[test]
+fn staged_count_own_budget() {
+    // A burst the frame spends its budget on, unstaged, beside three staged
+    // binary renames the staged count weighs on a budget of its own.
+    let scratch = Scratch::new("rename-staged-count");
+    let olds: Vec<Vec<u8>> = (0..40).map(|n| noise(600 + n, 2_000)).collect();
+    for (n, old) in olds.iter().enumerate() {
+        scratch.write(&format!("old/{n:02}.bin"), old);
+    }
+    let staged: Vec<Vec<u8>> = (0..3).map(|n| noise(700 + n, 3_000)).collect();
+    for (n, old) in staged.iter().enumerate() {
+        scratch.write(&format!("s/{n}.bin"), old);
+    }
+    scratch.commit_all("initial");
+    for (n, old) in staged.iter().enumerate() {
+        std::fs::remove_file(scratch.path_of(&format!("s/{n}.bin"))).expect("remove");
+        scratch.write(&format!("t/{n}.bin"), tail_changed(old, 0.1));
+    }
+    scratch.git(&["add", "-A", "s", "t"]);
+    for (n, old) in olds.iter().enumerate() {
+        std::fs::remove_file(scratch.path_of(&format!("old/{n:02}.bin"))).expect("remove");
+        scratch.write(&format!("new/{n:02}.bin"), tail_changed(old, 0.1));
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..10 {
+        frame.advance().expect("advance");
+        if frame.settles_in(std::time::SystemTime::now()).is_none() {
+            break;
+        }
+    }
+    let listed = frame.unscored_pairs().len();
+    let counted = worktree
+        .count_of(vigia_core::Origin::Staged, None)
+        .expect("count");
+    assert_eq!(counted.shown, 3, "the staged renames counted unpaired");
+    assert_eq!(
+        frame.unscored_pairs().len(),
+        listed,
+        "the count changed the frame's list"
+    );
+}

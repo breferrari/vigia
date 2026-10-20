@@ -392,6 +392,20 @@ impl Worktree {
     ///
     /// `gix` cannot walk the worktree's status.
     pub fn count_of(&self, origin: Origin, hide: Option<&Hidden>) -> Result<Counted> {
+        // Its own rename budget, and the frame's pairs left as they were.
+        let budget = self.pair_budget.replace(rename::FRAME_BUDGET);
+        let unscored = self.unscored.take();
+        let left = (self.sides_left.get(), self.pairs_unlisted.get());
+        let counted = self.count_walk(origin, hide);
+        self.pair_budget.set(budget);
+        self.unscored.replace(unscored);
+        self.sides_left.set(left.0);
+        self.pairs_unlisted.set(left.1);
+        counted
+    }
+
+    /// [`Worktree::count_of`] on whatever rename budget is set.
+    fn count_walk(&self, origin: Origin, hide: Option<&Hidden>) -> Result<Counted> {
         // Rename tracking on, and the cheaper spelling is wrong here.
         let mut walk = self.changes_of(
             origin,
@@ -677,6 +691,13 @@ impl Worktree {
             let cost = unread(pair.from, pair.sizes.0) + unread(pair.to, pair.sizes.1);
             let score = match known {
                 Some(score) => score,
+                // Past what the scores hold with those listed, a new score
+                // would evict another.
+                None if self.pair_scores.borrow().len() + self.unscored.borrow().len()
+                    >= PAIRS_KEPT =>
+                {
+                    continue;
+                }
                 None if cost + rename::PAIR_COST <= self.pair_budget.get() => {
                     charge(pair.from, pair.sizes.0.max(rename::READ_COST));
                     charge(pair.to, pair.sizes.1.max(rename::READ_COST));
