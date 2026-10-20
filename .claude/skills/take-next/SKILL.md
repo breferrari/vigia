@@ -12,19 +12,19 @@ Take **one** task from `ROADMAP.md` and carry it to merged. Do not take part of 
 > [!IMPORTANT]
 > **Run this to the end. Plan approval in step 3 is the one routine stop.**
 >
-> The reader often leaves the skill running overnight, and a step that waits for an answer stalls the pass for hours. So split **what** from **how**. Step 3 settles what gets built, and a question costs nothing there. Everything after step 3 is execution, and this file answers execution questions:
+> Split **what** from **how**. Step 3 settles what gets built. Everything after step 3 is execution, and this file answers execution questions:
 >
 > - **The tools are pre-authorized.** The request to run this skill is also the request to run `/simplify`, `/two-axis-review`, `/code-review` and the agents that they start.
 > - **Apply review findings without asking.** Fix each finding that is worth a fix. In the PR body, list each finding that you skip, with a one-line reason. In a core area (step 6), if you cannot name why a finding is wrong, fix it. A finding that declines or narrows what the reader asked for is stop 4 below. Do not apply it as a fix.
 > - **A documented choice wins.** Take it and name it in the report. A documented refusal is a reason with a date. Make sure that the reason is still true (step 3).
-> - **An open choice goes to the branch that delivers what was asked.** Finish the pass and put the question in the report. Do not build less to be safe. A missing feature gives the reader nothing to review.
+> - **An open choice goes to the branch that delivers what was asked.** Finish the pass and put the question in the report. Do not build less to be safe.
 >
 > Four things stop the pass, and all four are about *what*:
 >
 > 1. A finding contradicts `SPEC.md` (step 4).
 > 2. The task is two tasks (step 3).
 > 3. An action is destructive outside this branch.
-> 4. You conclude that something the reader asked for must be declined or narrowed. Plan approval does not cover this. A decline inside a long plan is easy to miss. Approval of the plan is not approval of the decline. Ask the question in its own message, and wait.
+> 4. You conclude that something the reader asked for must be declined or narrowed. Plan approval does not cover this. Approval of the plan is not approval of the decline. Ask the question in its own message, and wait.
 >
 > **An unattended session may add. It may not subtract.**
 >
@@ -52,7 +52,7 @@ After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/
 
 `preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4 and 6 to 8. Fix each of those hits in this pass. Checks 0 and 5 are advisory: read them and act as they say.
 
-First, the script makes sure that the whole board arrived. A truncated fetch causes false drift in check 1 and hides real drift from 2, 4, 6 and 7. Then it runs these checks:
+First, the script makes sure that the whole board arrived. Then it runs these checks:
 
 0. No soak test runs on this machine (advisory).
 1. An issue title names each invariant in the spec.
@@ -70,8 +70,8 @@ Take the **topmost unstarted row** in the `ROADMAP.md` section `next.sh` named. 
 
 ### Declines
 
-- Reach a decline early. Whether the reason holds is a question of fact.
-- A decline has a higher bar than a build: its reason must survive a check. A bad build is visible in review. A bad refusal is not visible, and no gate can find a feature that nobody built. "It costs a wake", "it needs a timer" and "no API reports that" are claims with answers.
+- Reach a decline early.
+- A decline has a higher bar than a build: its reason must survive a check. "It costs a wake", "it needs a timer" and "no API reports that" are claims with answers.
 - If the reader asked for the thing, build it. "Possible, affordable, but I prefer another design" is a preference, not a reason.
 - Put the reason in `SPEC.md` in the fewest words that evidence can prove false. Put the evidence in `RULINGS.md`.
 
@@ -96,7 +96,7 @@ Then query `vigil` for the three things that the repo does not hold:
 - Lessons from other projects, for example a `gix` limitation or a measurement trap.
 - History from before the code, for example why the product is monitor-class.
 
-Know which of the three you need. Use `search` for the decision you will change. `recall` is often empty, and an empty result means nothing. Strategic context can leak into public text that you write with it in mind. The commit guard misses it.
+Know which of the three you need. Use `search` for the decision you will change. `recall` is often empty, and an empty result means nothing. Keep strategic context out of public text: the commit guard misses it.
 
 ## 3. Plan, and wait for approval
 
@@ -107,10 +107,16 @@ Enter plan mode. Do not write code before a person approves the plan. Step 6 com
 The plan contains these parts:
 
 - **What it rests on.** List the decisions by title, from `SPEC.md` and `vigil`. List each fact that argues against the approach, and why you continue. If the record is empty, write "nothing recorded". That empty result is a finding.
-- **Prior art.** Before you design what another tool, library or platform has already met (scheduling, caching, a protocol, a test method, a CI pattern), search the web: its docs, its source, its issues and PRs. Name what you read, with links, and what it changes in the plan. "Searched, found nothing" is a finding. Not searching is not allowed: a search is cheaper than a wrong design defended later. Read documentation at its latest: the current docs, and the docs for the exact version the repo uses (docs.rs at that version, the repository at its tag). Never memory or an older page. A difference between the two is a finding.
+- **Prior art.** Before the plan, write the questions it rests on: how others solved this, what breaks it, and what the tools it touches do at the version in use. Answer each one:
+  - **From a primary source:** the project's own docs at the version in use and at its latest, its source at a tag or commit, its issues and PRs, its maintainers' writing. Quote the fact, link it, pin its version. A blog, a forum answer, a search summary or an AI-written page is a lead: trace it to the original. Never memory or an older page; a difference between the version in use and the latest is itself a finding.
+  - **With the case against:** for each design choice, search for its known failures (issues describing the symptom, reverts, "doesn't work with"). A design question isn't answered until a source that could have contradicted it was looked for.
+  - **Tied to the plan:** each answer names the part of the plan it confirms, changes or kills.
+  - **Or open, visibly:** an unanswered question is marked *unverified*, with the queries run and the sources checked, and nothing built depends on it until it is answered.
+
+  A section that names sources without answering written questions fails. Searching is cheaper than defending a wrong design later.
 - **Premises.** For each premise, write what must be true, how it can be false, and the answer with its source. The source is one of: *measured*, *read in the dependency's source*, *checked against the world*, *recorded in `SPEC.md`*, or *assumed*. A premise that the plan depends on must not stay *assumed*. Settle it before you present the plan. Read the source in `~/.cargo/registry`, write a probe, measure, or search the web. For facts about other libraries and terminals, use the world as the source, not memory. Settle premises in dependency order. Finding facts is your job, not the reader's job. Only product decisions go to the reader, in the plan. A decline is the exception, because it is stop 4.
 - **Checks on the record.** Quote the words of each invariant that you cite. Make sure that they apply to this case: I1's budget is *0 wakeups while idle*, and a reader who uses the pane is not idle. Quote each refusal that you cite, with its date, and mark it checked or not checked. Make sure that its reason is still true. A reason about something missing ("no API for this") becomes false fastest. If the reason is false, the question is open again. Do not find a new reason for the same conclusion. Give each budget with its current headroom ("2.4ms of 16ms"), not alone.
-- **Promises you can diff.** List the files, signatures and error codes. List the tests by name, with what each test asserts. List each deviation from `SPEC.md` with its reason, and list what is out of scope. "Fix the thing" promises nothing and passes every check. Size the list to the diff.
+- **Promises you can diff.** List the files, signatures and error codes. List the tests by name, with what each test asserts. List each deviation from `SPEC.md` with its reason, and list what is out of scope. Size the list to the diff.
 
 Measure to learn the answer. Do not run a measurement that can only support a no.
 
@@ -122,16 +128,16 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 
 ## 4. Build
 
-- **Runners: CONTRIBUTING.md, Running things.** A suite runs under `cargo nextest run --profile ci`, installed if missing, not `cargo test`, which stops at the first red binary.
+- **Runners: CONTRIBUTING.md, Running things.** A suite runs under `cargo nextest run --profile ci`, installed if missing, not `cargo test`.
 - **One issue, one branch, one worktree, one PR.** Work in a worktree, not in the main checkout. The main checkout stays on `main`, so `origin/main` and the tree agree. First take a free `../vigia.*` worktree no other session uses (its `target/` is warm), and run `git -C <dir> checkout -B issue-<n>-<slug> origin/main`. If no worktree is free, add one with `git worktree add ../vigia.<n> -b issue-<n>-<slug> origin/main`. After the merge, remove the worktree that you added.
 - **If the reader is present,** run `vigia` in a side pane on the worktree.
 - **A run that lasts longer than the pass** needs a comment on its issue. When the run starts, write what runs, where the output goes, and when it ends.
-- **Open a draft PR early** with `gh pr create --draft`. CI skips drafts, so a push is free.
+- **Open a draft PR early** with `gh pr create --draft`.
 - **Write the failing test first** for each invariant. Watch it fail, then make it pass.
 - **A change to the frame path runs the budget gate.**
 - **Add no dependency that `SPEC.md` does not name.** First, propose it in the spec, in its own commit.
 - **If reality contradicts the spec, stop (stop 1).** Say which one you think is wrong, and wait. After the reader answers, change that one in its own commit. If reality contradicts the plan, decide which is wrong. If the plan is wrong, write the deviation and its reason on the issue at that time. Then correct the plan comment. Step 6 then compares against the plan as it is now.
-- **Each issue that you file gets a milestone and a roadmap row.** Fix in-scope findings in this PR. Do not move an in-scope finding to a new issue to close the PR. An out-of-scope finding goes to the phase it belongs in. Give it a row in that phase's table, its dated reason on the issue, and `gh issue create --title "..." --body-file f.md --milestone "<phase title>"`. When none fits, add a phase after the last, with a milestone and a section. A defect in a gate, a check, a skill or a workflow goes the same way. There is no shelf (retired 2026-10-19). If that work blocks a product pass, do it, and make it as small as the blockage.
+- **Each issue that you file gets a milestone and a roadmap row.** Fix in-scope findings in this PR. Do not move an in-scope finding to a new issue to close the PR. An out-of-scope finding goes to the phase it belongs in. Give it a row in that phase's table, its dated reason on the issue, and `gh issue create --title "..." --body-file f.md --milestone "<phase title>"`. When none fits, add a phase after the last, with a milestone and a section. A defect in a gate, a check, a skill or a workflow goes the same way. There is no shelf. If that work blocks a product pass, do it, and make it as small as the blockage.
 
 ## 5. Scope the checks
 
@@ -143,18 +149,18 @@ git diff --name-only --no-renames <base>..HEAD | sh .github/scripts/change-class
 
 ## 6. Review and prove
 
-**The kind of change decides the review.** Look-and-feel work (layout, colour, keys, chrome) runs `/simplify` and puts a screenshot in the PR. All other work runs the full sequence below. Docs-only diffs and small code diffs are the exceptions, at the end of this step. The rule goes one way only. The core areas are the frame path, the watch engine, the diff oracle, the budget gates and the invariants. If look-and-feel work touches a core area, that part runs the full sequence. Do not use the lighter review on a core area.
+**The kind of change decides the review.** Look-and-feel work (layout, colour, keys, chrome) runs `/simplify` and puts a screenshot in the PR. All other work runs the full sequence below. Docs-only diffs and small code diffs are the exceptions, at the end of this step. The core areas are the frame path, the watch engine, the diff oracle, the budget gates and the invariants. If look-and-feel work touches a core area, that part runs the full sequence.
 
 **Before the review, diff the result against the plan.** Mark each promise delivered or not delivered. In this pass, fix each quietly narrowed scope, each dropped case and each unused definition. If a deviation has no reason written when you took it, remove the deviation in this pass: make the code match the plan.
 
 The full sequence, in order. Apply what each step finds:
 
 1. `/simplify`.
-2. `/two-axis-review` against `origin/main`. The Spec axis compares the diff with the issue and the plan comment. The Standards axis mostly repeats `/simplify`. Act only on what `/simplify` did not find.
+2. `/two-axis-review` against `origin/main`. The Spec axis compares the diff with the issue and the plan comment. It also checks the plan's Prior art section: every question answered from a pinned primary source or visibly open, a case-against search for each design choice, and each answer tied to the plan. The Standards axis mostly repeats `/simplify`. Act only on what `/simplify` did not find.
 3. `/code-review high`.
 4. **Mutation check.** One run of about 10 mutants on the PR's own decisions, in 15 minutes or less: commit, then `.claude/scripts/mutate.mjs` with `VIGIA_TEST_CEILING=15`, a narrow command per entry, and `--limit 15`. A survivor gets a cheap test or a known-limits line, never an issue; an equivalent mutant on the PR's code gets the code deleted. No second round. On a PR that risks the engine (watch, status, renames, decode limits), the PO may ask for the `mutants` workflow before the proof packet: `gh workflow run mutants -f ref=<branch>`. It is not run by default.
 
-Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `/two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. Run `/harden` only when the reader asks. A PR opened beside the pass, such as a rule change asked for mid-run, runs this step for its class too. One exception to running once: a code change committed after `/code-review` gets one `/code-review` of that change.
+Run each tool once, not until clean. Docs-only diffs run `/simplify` and `/two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. Run `/harden` only when the reader asks. A PR opened beside the pass, such as a rule change asked for mid-run, runs this step for its class too. One exception to running once: a code change committed after `/code-review` gets one `/code-review` of that change.
 
 Give each agent a brief with every measurement it needs. The brief also says: *Read the code. Do not run builds, benchmarks or tests. If a measurement is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Review agents run on Sonnet.
 
