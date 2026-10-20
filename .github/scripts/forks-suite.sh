@@ -15,14 +15,20 @@ for dir in "$root"/vendor/*/; do
   repo=$(sed -n 's/^Upstream: `\([^`]*\)` at tag `\([^`]*\)`.*/\1/p' "$dir/PATCHES.md")
   tag=$(sed -n 's/^Upstream: `\([^`]*\)` at tag `\([^`]*\)`.*/\2/p' "$dir/PATCHES.md")
   suite=$(sed -n 's/^Suite: `\(.*\)`\.$/\1/p' "$dir/PATCHES.md")
+  # The crate's directory in the repository, when it is not the root.
+  within=$(sed -n 's/^Upstream: .* in `\([^`]*\)\/`\.$/\1/p' "$dir/PATCHES.md")
   if [ -z "$repo" ] || [ -z "$tag" ] || [ -z "$suite" ]; then
     echo "::error::vendor/$name: PATCHES.md needs an Upstream line and a Suite line"
     exit 1
   fi
+  if [ "$suite" = none ]; then
+    echo "vendor/$name: no code patch, so no suite of its own"
+    continue
+  fi
   git clone --quiet --depth 1 --branch "$tag" --recurse-submodules --shallow-submodules "$repo" "$work/$name"
   for patch in "$dir"/patches/*.patch; do
     case $patch in *-name-the-fork.patch) continue ;; esac
-    git -C "$work/$name" apply "$patch"
+    git -C "$work/$name" apply ${within:+--directory="$within"} "$patch"
   done
   echo "vendor/$name: $suite"
   # Upstream's manifest lacks the lint allowances our name-the-fork patch adds,

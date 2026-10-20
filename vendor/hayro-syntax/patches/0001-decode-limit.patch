@@ -1,0 +1,528 @@
+diff --git a/src/filter/ascii_85.rs b/src/filter/ascii_85.rs
+index 5a18cf8..cbfb79d 100644
+--- a/src/filter/ascii_85.rs
++++ b/src/filter/ascii_85.rs
+@@ -50,12 +50,15 @@ pub(crate) fn decode(data: &[u8]) -> Option<Vec<u8>> {
+             .checked_add(digits[3].checked_mul(POW_85[3])?)?
+             .checked_add(digits[4])?;
+ 
++        if !crate::limit::room(decoded, output_len) {
++            return None;
++        }
+         decoded.extend_from_slice(&value.to_be_bytes()[..output_len]);
+         group.clear();
+         Some(())
+     };
+ 
+-    let mut decoded = Vec::with_capacity(data.len() * 4 / 5);
++    let mut decoded = Vec::new();
+     let mut group = Vec::with_capacity(5);
+ 
+     loop {
+@@ -76,6 +79,10 @@ pub(crate) fn decode(data: &[u8]) -> Option<Vec<u8>> {
+             }
+             b'z' => {
+                 flush_group(&mut group, &mut decoded)?;
++                // Four bytes from one, within the decode limit.
++                if !crate::limit::room(&mut decoded, 4) {
++                    return None;
++                }
+                 decoded.extend_from_slice(&[0, 0, 0, 0]);
+             }
+             b'~' => {
+diff --git a/src/filter/ccitt.rs b/src/filter/ccitt.rs
+index 7a4af45..0c5ac5c 100644
+--- a/src/filter/ccitt.rs
++++ b/src/filter/ccitt.rs
+@@ -24,6 +24,10 @@ pub(crate) fn decode(
+         .unwrap_or(0)
+         .max(image_params.height);
+     let output_len = (columns as usize).checked_mul(rows as usize)?;
++    // A byte a pixel at most, within the decode limit.
++    if !crate::limit::admits(output_len as u64) {
++        return None;
++    }
+     let end_of_block = params.get::<bool>(END_OF_BLOCK).unwrap_or(true);
+ 
+     let settings = DecodeSettings {
+diff --git a/src/filter/dct.rs b/src/filter/dct.rs
+index a4fbd17..f3831a1 100644
+--- a/src/filter/dct.rs
++++ b/src/filter/dct.rs
+@@ -29,6 +29,13 @@ pub(crate) fn decode(
+         .set_max_height(u16::MAX as usize);
+     let mut decoder = zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(&*data), options);
+     decoder.decode_headers().ok()?;
++    // Each component's samples, a byte out and two for a progressive file's
++    // coefficients, within the decode limit.
++    let (width, height) = decoder.dimensions()?;
++    let components = u64::from(decoder.info()?.components);
++    if !crate::limit::admits(width as u64 * height as u64 * components * 3) {
++        return None;
++    }
+ 
+     let color_transform = params.get::<u8>(COLOR_TRANSFORM);
+     let input_color_space = decoder.input_colorspace().unwrap();
+diff --git a/src/filter/jbig2.rs b/src/filter/jbig2.rs
+index f0e42ef..e860b15 100644
+--- a/src/filter/jbig2.rs
++++ b/src/filter/jbig2.rs
+@@ -21,6 +21,10 @@ pub(crate) fn decode(
+         .and_then(|g| g.decoded().ok());
+ 
+     let image = hayro_jbig2::Image::new_embedded(data, globals.as_deref()).ok()?;
++    // A byte a pixel at most, within the decode limit.
++    if !crate::limit::admits(u64::from(image.width()) * u64::from(image.height())) {
++        return None;
++    }
+ 
+     // Whenever possible (if we don't have an indexed color space), we convert
+     // the data as 8-bit instead of 1-bit, so that it can be easier converted
+diff --git a/src/filter/jpx.rs b/src/filter/jpx.rs
+index 20fe8ad..5af6f9d 100644
+--- a/src/filter/jpx.rs
++++ b/src/filter/jpx.rs
+@@ -31,6 +31,19 @@ pub(crate) fn decode(data: &[u8], params: &ImageDecodeParams) -> Option<FilterRe
+ 
+     let width = image.width();
+     let height = image.height();
++    // Its samples, at no more than eight bytes each while they decode,
++    // within the decode limit.
++    let channels = u64::from(match image.color_space() {
++        ColorSpace::Gray => 1,
++        ColorSpace::RGB => 3,
++        ColorSpace::CMYK => 4,
++        ColorSpace::Unknown { num_channels } | ColorSpace::Icc { num_channels, .. } => {
++            *num_channels
++        }
++    }) + u64::from(image.has_alpha());
++    if !crate::limit::admits(u64::from(width) * u64::from(height) * channels * 8) {
++        return None;
++    }
+     let bpc = params.bpc.unwrap_or(image.original_bit_depth());
+     let cs = match image.color_space() {
+         ColorSpace::Gray => ImageColorSpace::Gray,
+diff --git a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
+index 8e4bdbe..fe334e5 100644
+--- a/src/filter/lzw_flate.rs
++++ b/src/filter/lzw_flate.rs
+@@ -15,20 +15,37 @@ pub(crate) mod flate {
+         use flate2::read::{DeflateDecoder, ZlibDecoder};
+         use std::io::Read;
+ 
+-        fn zlib_stream(data: &[u8]) -> Option<Vec<u8>> {
+-            let mut decoder = ZlibDecoder::new(data);
++        // Read no further than the decode limit: `Err(true)` once it is
++        // passed, which is not retried below, and `Err(false)` for a broken
++        // stream.
++        fn capped(mut decoder: impl Read) -> Result<Vec<u8>, bool> {
+             let mut result = Vec::new();
+-            decoder.read_to_end(&mut result).ok().map(|_| result)
+-        }
+-
+-        fn deflate_stream(data: &[u8]) -> Option<Vec<u8>> {
+-            let mut decoder = DeflateDecoder::new(data);
+-            let mut result = Vec::new();
+-            decoder.read_to_end(&mut result).ok().map(|_| result)
++            let mut chunk = [0; 64 * 1024];
++            loop {
++                match decoder.read(&mut chunk) {
++                    Ok(0) => return Ok(result),
++                    Ok(read) => {
++                        if !crate::limit::room(&mut result, read) {
++                            return Err(true);
++                        }
++                        result.extend_from_slice(&chunk[..read]);
++                    }
++                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
++                    Err(_) => return Err(false),
++                }
++            }
+         }
+ 
+-        let decoded = zlib_stream(data)
+-            .or_else(|| deflate_stream(data))
++        let decoded = match capped(ZlibDecoder::new(data)) {
++            Ok(decoded) => Some(decoded),
++            Err(true) => return None,
++            Err(false) => match capped(DeflateDecoder::new(data)) {
++                Ok(decoded) => Some(decoded),
++                Err(true) => return None,
++                Err(false) => None,
++            },
++        };
++        let decoded = decoded
+             .or_else(|| {
+                 warn!("flate stream is broken, decoding with fallback");
+ 
+@@ -45,6 +62,9 @@ pub(crate) mod flate {
+         apply_predictor(decoded, &params)
+     }
+ 
++    #[cfg(feature = "std")]
++    pub(crate) use fallback::capacity;
++
+     /// Ported from <https://github.com/mozilla/pdf.js/blob/master/src/core/flate_stream.js>
+     /// TODO: Rewrite this in idiomatic Rust.
+     mod fallback {
+@@ -55,6 +75,17 @@ pub(crate) mod flate {
+             flate_decode(data)
+         }
+ 
++        /// Whether inflating `data` stopped at the decode limit, and the most
++        /// capacity its output reached.
++        #[cfg(feature = "std")]
++        pub(crate) fn capacity(data: &[u8]) -> (bool, usize) {
++            let mut stream = FlateStream::new(data);
++            while !stream.eof && stream.pos < stream.data.len() {
++                stream.read_block();
++            }
++            (stream.over, stream.output.capacity())
++        }
++
+         fn flate_decode(data: &[u8]) -> Option<Vec<u8>> {
+             if data.len() >= 2 {
+                 let cmf = data[0];
+@@ -80,6 +111,8 @@ pub(crate) mod flate {
+             code_size: u8,
+             output: Vec<u8>,
+             eof: bool,
++            /// Whether the output passed the decode limit.
++            over: bool,
+         }
+ 
+         impl<'a> FlateStream<'a> {
+@@ -91,6 +124,7 @@ pub(crate) mod flate {
+                     code_size: 0,
+                     output: Vec::new(),
+                     eof: false,
++                    over: false,
+                 }
+             }
+ 
+@@ -99,9 +133,22 @@ pub(crate) mod flate {
+                     self.read_block();
+                 }
+ 
++                if self.over {
++                    return None;
++                }
+                 Some(core::mem::take(&mut self.output))
+             }
+ 
++            /// Make room for `more` bytes of output, or end the stream at the
++            /// decode limit.
++            fn fits(&mut self, more: usize) -> bool {
++                if !crate::limit::room(&mut self.output, more) {
++                    self.over = true;
++                    self.eof = true;
++                }
++                !self.over
++            }
++
+             fn get_byte(&mut self) -> Option<u8> {
+                 if self.pos >= self.data.len() {
+                     None
+@@ -253,6 +300,9 @@ pub(crate) mod flate {
+                     }
+                 } else {
+                     let block = self.get_bytes(block_len as usize);
++                    if !self.fits(block.len()) {
++                        return;
++                    }
+                     self.output.extend_from_slice(&block);
+                     if block.len() < block_len as usize {
+                         self.eof = true;
+@@ -283,6 +333,9 @@ pub(crate) mod flate {
+                     };
+ 
+                     if code1 < 256 {
++                        if !self.fits(1) {
++                            return;
++                        }
+                         self.output.push(code1 as u8);
+                     } else if code1 == 256 {
+                         return;
+@@ -332,6 +385,9 @@ pub(crate) mod flate {
+                         }
+ 
+                         // Copy from previous output
++                        if !self.fits(length) {
++                            return;
++                        }
+                         let start = self.output.len().wrapping_sub(distance);
+                         for _ in 0..length {
+                             if start < self.output.len() {
+@@ -612,6 +668,16 @@ pub(crate) mod lzw {
+                         return None;
+                     }
+ 
++                    // What this code adds, before the output grows by it.
++                    let grows = match (new < table.size(), prev) {
++                        (true, _) => table.get(new).map_or(0, <[u8]>::len),
++                        (false, Some(prev)) => table.get(prev).map_or(0, |entry| entry.len() + 1),
++                        (false, None) => 0,
++                    };
++                    if !crate::limit::room(&mut decoded, grows) {
++                        return None;
++                    }
++
+                     if new < table.size() {
+                         let entry = table.get(new)?;
+                         let first_byte = entry[0];
+@@ -720,10 +786,6 @@ impl PredictorParams {
+     fn bits_per_pixel(&self) -> u8 {
+         self.bits_per_component * self.colors
+     }
+-
+-    fn row_length_in_bytes(&self) -> usize {
+-        (self.columns * self.bits_per_pixel() as usize).div_ceil(8)
+-    }
+ }
+ 
+ impl Default for PredictorParams {
+@@ -756,7 +818,13 @@ fn apply_predictor(data: Vec<u8>, params: &PredictorParams) -> Option<Vec<u8>> {
+         i => {
+             let is_png_predictor = i >= 10;
+ 
+-            let row_len = params.row_length_in_bytes();
++            // `/Columns` is the file's to claim, so the row is sized with a
++            // check, and a row longer than the data, which yields nothing, is
++            // never allocated.
++            let row_len = params
++                .columns
++                .checked_mul(params.bits_per_pixel() as usize)?
++                .div_ceil(8);
+ 
+             let total_row_len = if is_png_predictor {
+                 // + 1 Because each row must start with the predictor that is used for PNG predictors.
+@@ -765,6 +833,10 @@ fn apply_predictor(data: Vec<u8>, params: &PredictorParams) -> Option<Vec<u8>> {
+                 row_len
+             };
+ 
++            if total_row_len > data.len() {
++                return Some(Vec::new());
++            }
++
+             let num_rows = data.len() / total_row_len;
+ 
+             if !matches!(params.bits_per_component, 1 | 2 | 4 | 8 | 16) {
+@@ -796,6 +868,11 @@ fn apply_predictor(data: Vec<u8>, params: &PredictorParams) -> Option<Vec<u8>> {
+                 );
+             }
+ 
++            // Unlike the eight-bit path, which undoes the rows in place, this
++            // one writes a second buffer, so both are held at once.
++            if !crate::limit::admits((data.capacity() + num_rows * row_len) as u64) {
++                return None;
++            }
+             let zero_row = vec![0; row_len];
+             let mut prev_row = BitChunks::new(&zero_row, bit_size, chunk_len)?;
+             let zero_col = BitChunk::new(0, chunk_len);
+diff --git a/src/filter/mod.rs b/src/filter/mod.rs
+index 0cbb515..f419462 100644
+--- a/src/filter/mod.rs
++++ b/src/filter/mod.rs
+@@ -10,7 +10,7 @@ mod dct;
+ mod jbig2;
+ #[cfg(feature = "images")]
+ mod jpx;
+-mod lzw_flate;
++pub(crate) mod lzw_flate;
+ mod png;
+ mod run_length;
+ 
+diff --git a/src/filter/run_length.rs b/src/filter/run_length.rs
+index e66d9ec..eb28b51 100644
+--- a/src/filter/run_length.rs
++++ b/src/filter/run_length.rs
+@@ -17,11 +17,18 @@ pub(crate) fn decode(data: &[u8]) -> Option<Vec<u8>> {
+                     break;
+                 };
+ 
++                if !crate::limit::room(&mut decoded, bytes.len()) {
++                    return None;
++                }
+                 decoded.extend(bytes);
+             }
+             _ => {
+                 let length = 257 - length as usize;
+-                decoded.extend([reader.read_byte()?].repeat(length));
++                let byte = reader.read_byte()?;
++                if !crate::limit::room(&mut decoded, length) {
++                    return None;
++                }
++                decoded.extend(core::iter::repeat_n(byte, length));
+             }
+         }
+     }
+diff --git a/src/lib.rs b/src/lib.rs
+index a22e641..a09993a 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -108,6 +108,9 @@ pub mod byte_reader;
+ #[doc(hidden)]
+ pub mod reader;
+ 
++mod limit;
++#[cfg(feature = "std")]
++pub use limit::{DecodeLimitExceeded, fallback_capacity, with_decode_limit};
+ pub use data::PdfData;
+ pub use filter::*;
+ pub use pdf::*;
+diff --git a/src/limit.rs b/src/limit.rs
+new file mode 100644
+index 0000000..3cda986
+--- /dev/null
++++ b/src/limit.rs
+@@ -0,0 +1,136 @@
++//! A limit on how many bytes stream decoding may produce on one thread.
++//!
++//! Decoding holds each stream's output whole, and a small file can name a
++//! stream that decodes to far more memory than the file's size. With a
++//! limit set, a decode that would pass it fails as an invalid stream does.
++
++use alloc::vec::Vec;
++
++#[cfg(feature = "std")]
++std::thread_local! {
++    static LEFT: core::cell::Cell<Option<u64>> = const { core::cell::Cell::new(None) };
++    static PASSED: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
++}
++
++/// A decode inside [`with_decode_limit`] would have passed its limit, and
++/// failed as an invalid stream does.
++#[cfg(feature = "std")]
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct DecodeLimitExceeded;
++
++/// Run `work` with at most `bytes` of decoded stream data allowed on this
++/// thread, counted across every stream it decodes. An error when any decode
++/// inside it would have passed the limit, since the document then reads as if
++/// that stream were missing. Inside another limit, the smaller of the two
++/// holds, and what `work` decodes is spent from the outer one too.
++#[cfg(feature = "std")]
++pub fn with_decode_limit<T>(
++    bytes: u64,
++    work: impl FnOnce() -> T,
++) -> Result<T, DecodeLimitExceeded> {
++    struct Restore {
++        outer: Option<u64>,
++        passed: bool,
++        start: u64,
++        clamped: bool,
++    }
++    impl Drop for Restore {
++        fn drop(&mut self) {
++            let end = LEFT.with(core::cell::Cell::get).unwrap_or(0);
++            let spent = self.start - end;
++            let inner_passed = PASSED.with(core::cell::Cell::get);
++            LEFT.with(|left| left.set(self.outer.map(|outer| outer - spent)));
++            PASSED.with(|passed| passed.set(self.passed || (self.clamped && inner_passed)));
++        }
++    }
++    let outer = LEFT.with(core::cell::Cell::get);
++    let start = outer.map_or(bytes, |outer| outer.min(bytes));
++    let _restore = Restore {
++        outer,
++        passed: PASSED.with(|passed| passed.replace(false)),
++        start,
++        clamped: outer.is_some_and(|outer| outer < bytes),
++    };
++    LEFT.with(|left| left.set(Some(start)));
++    let done = work();
++    if PASSED.with(core::cell::Cell::get) {
++        Err(DecodeLimitExceeded)
++    } else {
++        Ok(done)
++    }
++}
++
++/// Inflate raw deflate `data` with the fallback inflater under a limit of `bytes`: whether
++/// it stopped at the limit, and the most capacity its output reached. For
++/// tests of the limit.
++#[doc(hidden)]
++#[cfg(feature = "std")]
++pub fn fallback_capacity(bytes: u64, data: &[u8]) -> (bool, usize) {
++    let mut seen = (false, 0);
++    let _ = with_decode_limit(bytes, || seen = crate::filter::lzw_flate::flate::capacity(data));
++    seen
++}
++
++/// Note that a decode would have passed the limit.
++fn passed() {
++    #[cfg(feature = "std")]
++    PASSED.with(|passed| passed.set(true));
++}
++
++/// What may still be decoded, or `None` with no limit set.
++pub(crate) fn left() -> Option<u64> {
++    #[cfg(feature = "std")]
++    return LEFT.with(core::cell::Cell::get);
++    #[cfg(not(feature = "std"))]
++    return None;
++}
++
++/// Whether `bytes` more may be decoded, without spending them.
++pub(crate) fn admits(bytes: u64) -> bool {
++    let admitted = left().is_none_or(|left| bytes <= left);
++    if !admitted {
++        passed();
++    }
++    admitted
++}
++
++/// Spend `bytes` of the limit, or say it would pass it.
++pub(crate) fn spend(bytes: u64) -> bool {
++    #[cfg(feature = "std")]
++    return LEFT.with(|left| match left.get() {
++        None => true,
++        Some(have) if bytes <= have => {
++            left.set(Some(have - bytes));
++            true
++        }
++        Some(_) => {
++            left.set(Some(0));
++            passed();
++            false
++        }
++    });
++    #[cfg(not(feature = "std"))]
++    {
++        let _ = bytes;
++        true
++    }
++}
++
++/// Make room in `out` for `more` bytes, or say they would pass the limit.
++/// Capacity grows only to powers of two and never past what is left, so the
++/// largest buffer a growth copies from is a power of two under the limit: at
++/// most half of it, when the limit is a power of two.
++pub(crate) fn room(out: &mut Vec<u8>, more: usize) -> bool {
++    let need = out.len().saturating_add(more);
++    if !admits(need as u64) {
++        return false;
++    }
++    if need > out.capacity() {
++        let mut capacity = need.checked_next_power_of_two().unwrap_or(need);
++        if let Some(left) = left() {
++            capacity = capacity.min(usize::try_from(left).unwrap_or(usize::MAX));
++        }
++        out.reserve_exact(capacity - out.len());
++    }
++    true
++}
+diff --git a/src/object/stream.rs b/src/object/stream.rs
+index a39dce7..1d7d839 100644
+--- a/src/object/stream.rs
++++ b/src/object/stream.rs
+@@ -186,6 +186,9 @@ impl<'a> Stream<'a> {
+                 params,
+                 image_params,
+             )?;
++            if !crate::limit::spend(new.data.len() as u64) {
++                return Err(DecodeFailure::StreamDecode);
++            }
+             current = Some(new);
+         }
+ 

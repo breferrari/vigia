@@ -1865,22 +1865,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hayro"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4675ff5acd7ca41c0c34ccd2a3a154f5c86d8b5ec92bef0a114bfb194969e2af"
-dependencies = [
- "bytemuck",
- "fearless_simd 1.1.0",
- "hayro-interpret",
- "image",
- "kurbo",
- "pic-scale",
- "rustc-hash",
- "vello_cpu",
-]
-
-[[package]]
 name = "hayro-ccitt"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1894,25 +1878,6 @@ checksum = "24d285dc30731c8485de5fa732fbdf2b3affdf01e4da7c2135022ca6fa664bf6"
 dependencies = [
  "brotli",
  "hayro-postscript",
-]
-
-[[package]]
-name = "hayro-interpret"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac9df074ff163a63864cec9b0bf640ccbff8abf4e44481df7369ce0ac172ffbe"
-dependencies = [
- "bitflags 2.13.1",
- "hayro-cmap",
- "hayro-syntax",
- "kurbo",
- "moxcms",
- "phf",
- "rustc-hash",
- "siphasher",
- "skrifa 0.46.2",
- "smallvec",
- "yoke",
 ]
 
 [[package]]
@@ -1939,20 +1904,6 @@ name = "hayro-postscript"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "885c5ef0654933139a9b9546fc2c69e18d37f38aa2520f079092b1be18f1fcaa"
-
-[[package]]
-name = "hayro-syntax"
-version = "0.8.0"
-dependencies = [
- "flate2",
- "hayro-ccitt",
- "hayro-jbig2",
- "hayro-jpeg2000",
- "memchr",
- "rustc-hash",
- "smallvec",
- "zune-jpeg",
-]
 
 [[package]]
 name = "heapless"
@@ -3740,7 +3691,6 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vigia"
 version = "1.1.0"
 dependencies = [
- "hayro",
  "image",
  "insta",
  "libc",
@@ -3756,6 +3706,7 @@ dependencies = [
  "tachyonfx",
  "ureq",
  "vigia-core",
+ "vigia-hayro",
  "windows-sys 0.61.2",
 ]
 
@@ -3766,14 +3717,59 @@ dependencies = [
  "criterion",
  "fancy-regex 0.19.2",
  "gix",
- "hayro-syntax",
  "image",
  "libc",
  "notify",
  "svgtypes",
  "syntect",
+ "vigia-hayro-syntax",
  "vigia-syntect",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "vigia-hayro"
+version = "0.8.0"
+dependencies = [
+ "bytemuck",
+ "fearless_simd 1.1.0",
+ "image",
+ "kurbo",
+ "pic-scale",
+ "rustc-hash",
+ "vello_cpu",
+ "vigia-hayro-interpret",
+]
+
+[[package]]
+name = "vigia-hayro-interpret"
+version = "0.8.0"
+dependencies = [
+ "bitflags 2.13.1",
+ "hayro-cmap",
+ "kurbo",
+ "moxcms",
+ "phf",
+ "rustc-hash",
+ "siphasher",
+ "skrifa 0.46.2",
+ "smallvec",
+ "vigia-hayro-syntax",
+ "yoke",
+]
+
+[[package]]
+name = "vigia-hayro-syntax"
+version = "0.8.0"
+dependencies = [
+ "flate2",
+ "hayro-ccitt",
+ "hayro-jbig2",
+ "hayro-jpeg2000",
+ "memchr",
+ "rustc-hash",
+ "smallvec",
+ "zune-jpeg",
 ]
 
 [[package]]

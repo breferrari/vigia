@@ -1,7 +1,14 @@
-# hayro-syntax
+# vigia-hayro-syntax
 
-[![Crates.io](https://img.shields.io/crates/v/hayro-syntax.svg)](https://crates.io/crates/hayro-syntax)
-[![Documentation](https://docs.rs/hayro-syntax/badge.svg)](https://docs.rs/hayro-syntax)
+**This is a fork. Use [hayro-syntax](https://crates.io/crates/hayro-syntax) instead.**
+
+`vigia-hayro-syntax` is [hayro-syntax](https://github.com/LaurenzV/hayro) 0.8.0 with the patches listed in [`PATCHES.md`](https://github.com/breferrari/vigia/blob/vigia-hayro-0.8.0/vendor/hayro-syntax/PATCHES.md), published so that [vigia](https://github.com/breferrari/vigia) can ship them until a hayro release carries them. It is kept by vigia's maintainer, and it is not affiliated with or endorsed by hayro or its author. Report problems with this fork at <https://github.com/breferrari/vigia/issues>, not to hayro.
+
+hayro-syntax is licensed under Apache-2.0 or MIT, and so is this fork. Upstream's README follows, without its badges, which describe upstream's crate.
+
+---
+
+# hayro-syntax
 
 <!-- cargo-rdme start -->
 

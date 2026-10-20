@@ -3255,14 +3255,17 @@ fn the_spec_quotes_the_sheets_purpose_lines() {
 
 /// Direct dependencies that the `Built with` table in `docs/ARCHITECTURE.md`
 /// leaves out on purpose.
-const NOT_DOCUMENTED: [&str; 8] = [
+const NOT_DOCUMENTED: [&str; 10] = [
     "libc",
     "rustix",
     "rustls-graviola",
     "serde_json",
     "signal-hook",
     "ureq",
-    // The `syntect` row, under the name the fork is published as.
+    // The `hayro`, `hayro-syntax` and `syntect` rows, under the names their
+    // forks are published as.
+    "vigia-hayro",
+    "vigia-hayro-syntax",
     "vigia-syntect",
     "windows-sys",
 ];
@@ -3813,6 +3816,19 @@ fn forks_replace_crates() {
             "syntect-upstream = {{ package = \"syntect\", version = \"={version}\""
         )),
         "vigia-core's syntect-upstream is not the {version} the fork is cut from"
+    );
+}
+
+/// The workspace patches no crate: a `[patch]` reaches a checkout and never a
+/// crates.io build, so a fix carried that way ships to half the installs.
+#[test]
+fn no_patch_section() {
+    let manifest = repo_file("Cargo.toml");
+    assert!(
+        !manifest
+            .lines()
+            .any(|line| line.trim_start().starts_with("[patch")),
+        "Cargo.toml takes a [patch]; publish the fix as a vendor/ fork instead"
     );
 }
 

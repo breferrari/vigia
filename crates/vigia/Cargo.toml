@@ -31,10 +31,9 @@ categories = ["command-line-utilities", "development-tools"]
 # somebody's `cargo install`.
 exclude = ["tests/**"]
 
-# Off for `cargo install`: PDFs are drawn through a patched `hayro-syntax`
-# that only a checkout carries, so a crates.io build shows them as binary,
-# and `--features pdf` from crates.io does not compile. The release binaries
-# turn it on, in `[workspace.metadata.dist]`.
+# Off by default. `--features pdf` from crates.io builds through the published
+# `vigia-hayro*` forks. The release binaries turn it on, in
+# `[workspace.metadata.dist]`.
 [features]
 pdf = ["dep:hayro", "vigia-core/pdf"]
 

@@ -1,8 +1,13 @@
 [workspace]
 resolver = "3"
 members = ["crates/vigia-core", "crates/vigia", "xtask"]
-# Patched, not a member: see `vendor/hayro-syntax/PATCHES.md`.
-exclude = ["vendor/hayro-syntax", "vendor/syntect"]
+# Forks, not members: each `vendor/*/PATCHES.md` says what changed.
+exclude = [
+    "vendor/hayro",
+    "vendor/hayro-interpret",
+    "vendor/hayro-syntax",
+    "vendor/syntect",
+]
 
 [workspace.package]
 # Both crates move together, because both are published together and a registry
@@ -73,8 +78,10 @@ ratatui-image = { version = "=12.0.0-rc.3", default-features = false, features =
 resvg = { version = "0.48.1", default-features = false, features = ["raster-images", "text", "system-fonts", "memmap-fonts"] }
 # An SVG root's size for the size line, without parsing the document.
 svgtypes = "0.16.1"
-hayro = "0.8.0"
-hayro-syntax = "0.8.0"
+# `vigia-hayro` and `vigia-hayro-syntax`: hayro 0.8.0 with the decode limit in
+# `vendor/hayro-syntax/PATCHES.md`, through the whole chain.
+hayro = { package = "vigia-hayro", version = "=0.8.0", path = "vendor/hayro" }
+hayro-syntax = { package = "vigia-hayro-syntax", version = "=0.8.0", path = "vendor/hayro-syntax" }
 # The requirement `usvg` declares, so the two resolve to one copy.
 skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.
@@ -379,9 +386,3 @@ missing_panics_doc = "warn"
 missing_safety_doc = "warn"
 undocumented_unsafe_blocks = "warn"
 doc_markdown = "warn"
-
-# A PDF's streams are decoded within a limit only by this copy, which adds
-# one to `hayro-syntax` 0.8.0. `vendor/hayro-syntax/PATCHES.md` holds the
-# change, to diff against upstream.
-[patch.crates-io]
-hayro-syntax = { path = "vendor/hayro-syntax" }
