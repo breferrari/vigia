@@ -38,8 +38,11 @@ roadmap() { # lines -> roadmap.md
 open_issues() { # numbers -> open.json
   printf '%s\n' "$@" | jq -R 'select(length > 0) | {number: tonumber, title: "issue \(.)"}' | jq -s . > "$FIX/open.json"
 }
+next_on() { # args -> next.sh's output on the fixtures
+  NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" "$@" 2>&1 | tr -d '\r'
+}
 take() { # -> the section next.sh names
-  NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" 2>&1 | tr -d '\r' | sed -n 's/^section: //p'
+  next_on | sed -n 's/^section: //p'
 }
 case_is() { # name, expected
   actual=$(take)
@@ -49,49 +52,51 @@ case_is() { # name, expected
 echo "selection:"
 
 roadmap "## Phase 6 - measured" "⬜ 1" "## Phase 7 - distribution" "⬜ 2"; open_issues 1 2
-case_is "the first section in file order wins" "Phase 6 - measured"
+case_is "file order" "Phase 6 - measured"
 
-# The reader orders by section, and a section need not be a phase.
 roadmap "## Phase 10 - rust" "✅ 1" "## Foundation" "⬜ 2" "## Phase 11 - paint" "⬜ 3"; open_issues 2 3
-case_is "a section that is not a phase is taken in its place" "Foundation"
+case_is "non-phase section" "Foundation"
 
 roadmap "## Phase 6 - measured" "✅ 1" "## Phase 7 - distribution" "⬜ 2"; open_issues 1 2
-case_is "a section whose rows are all done is skipped, even on an open issue" "Phase 7 - distribution"
+case_is "done section skipped" "Phase 7 - distribution"
 
 roadmap "## Phase 6 - measured" "⬜ 1" "## Phase 7 - distribution" "⬜ 2"; open_issues 2
-case_is "a row on a closed issue does not make its section eligible" "Phase 7 - distribution"
+case_is "closed issue skipped" "Phase 7 - distribution"
 
 roadmap "## Phase 6 - measured" "🔨 1" "## Phase 7 - distribution" "⬜ 2"; open_issues 1 2
-case_is "a row in progress keeps its section eligible" "Phase 6 - measured"
+case_is "in-progress row" "Phase 6 - measured"
 
 roadmap "## Phase 6 - measured" "✅ 1" "## Shelf" "⬜ 2" "## Phase 9 - later" "⬜ 3"; open_issues 2 3
-case_is "nothing at or below the Shelf is taken" ""
+case_is "shelf stops walk" ""
 
 roadmap "## Phase 6 - measured" "✅ 1"; open_issues
-case_is "a finished roadmap gives empty" ""
+case_is "finished roadmap" ""
 
-# A row names its issue in its last cell, and prose may cite another before it.
+: > "$FIX/roadmap.md"; open_issues 1
+case_is "empty roadmap" ""
+
+roadmap "## Releases" "⬜ 1" "## Phase 6 - measured" "⬜ 2"; open_issues 1 2
+case_is "walk starts at phase" "Phase 6 - measured"
+
 printf '%s\n' "## Phase 6 - measured" "| | Task | Issue |" "|---|---|---|" \
   "| ⬜ | Closed by [#1](https://example.invalid/1) | [#2](https://example.invalid/2) |" > "$FIX/roadmap.md"
 open_issues 1
-case_is "a row's issue is the one in its last cell" ""
+case_is "last-cell issue" ""
 
 # --ranked shows the whole order the answer came from.
 roadmap "## Phase 6 - measured" "⬜ 1" "## Phase 7 - distribution" "✅ 2" "## Phase 8 - look" "⬜ 3" "⬜ 4"; open_issues 1 3 4
-ranked=$(NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" --ranked 2>&1 | tr -d '\r' | paste -sd '|' -)
-[ "$ranked" = "Phase 6 - measured|Phase 8 - look" ] && ok "--ranked lists every eligible section once, in order" \
-  || no "--ranked lists every eligible section once, in order" "Phase 6 - measured|Phase 8 - look" "$ranked"
+ranked=$(next_on --ranked | paste -sd '|' -)
+[ "$ranked" = "Phase 6 - measured|Phase 8 - look" ] && ok "ranked order" \
+  || no "ranked order" "Phase 6 - measured|Phase 8 - look" "$ranked"
 
-listed=$(NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" 2>&1 | tr -d '\r' | sed 1d | cut -f1 | paste -sd '|' -)
-[ "$listed" = "#1" ] && ok "the answer lists only its own section's open issues" \
-  || no "the answer lists only its own section's open issues" "#1" "$listed"
+listed=$(next_on | sed 1d | cut -f1 | paste -sd '|' -)
+[ "$listed" = "#1" ] && ok "own issues only" || no "own issues only" "#1" "$listed"
 
-# A short fetch would read open issues as closed and skip their sections.
 jq -n '[range(0; 1000) | {number: ., title: "x"}]' > "$FIX/open.json"
 if NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" >/dev/null 2>&1; then
-  no "an open-issue fetch at its limit is refused" "a non-zero exit" "exit 0"
+  no "fetch limit refused" "a non-zero exit" "exit 0"
 else
-  ok "an open-issue fetch at its limit is refused"
+  ok "fetch limit refused"
 fi
 
 echo "preflight (the board every comparison reads):"
@@ -259,19 +264,19 @@ printf '%s\n' "## Phase 8 - look" "| | Task | Issue |" "|---|---|---|" "| ✅ | 
 
 line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":0}]')
 [ "$line" = "ok every open milestone with work has a phase, and every open phase a milestone" ] \
-  && ok "comparison 6 reads clean when the two records agree" \
-  || no "comparison 6 reads clean when the two records agree" "ok" "$line"
+  && ok "records agree" \
+  || no "records agree" "ok" "$line"
 
 line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":0},{"title":"Phase 9 - pictures","state":"open","open_issues":2}]')
 [ "$line" = "DRIFT milestone with work and no roadmap section: Phase 9 - pictures" ] \
-  && ok "a milestone that matches no heading is reported" \
-  || no "a milestone that matches no heading is reported" "DRIFT milestone with work and no roadmap section: Phase 9 - pictures" "$line"
+  && ok "milestone without heading" \
+  || no "milestone without heading" "DRIFT milestone with work and no roadmap section: Phase 9 - pictures" "$line"
 
 printf '%s\n' "| ⬜ | three | [#3](https://example.invalid/3) |" "## Phase 12 - edges" "| | Task | Issue |" "|---|---|---|" "| ⬜ | two | [#2](https://example.invalid/2) |" >> "$FIX/roadmap6.md"
 line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":1}]')
 [ "$line" = "DRIFT roadmap phase with open rows and no open milestone: Phase 12 - edges" ] \
-  && ok "a heading that matches no milestone is reported" \
-  || no "a heading that matches no milestone is reported" "DRIFT roadmap phase with open rows and no open milestone: Phase 12 - edges" "$line"
+  && ok "heading without milestone" \
+  || no "heading without milestone" "DRIFT roadmap phase with open rows and no open milestone: Phase 12 - edges" "$line"
 
 echo "drift:"
 
@@ -279,8 +284,6 @@ present() { # needle, file, name
   grep -qF "$1" "$2" 2>/dev/null && ok "$3" || no "$3" "$1" "absent"
 }
 
-# One chooser, two callers. The skill sends a session to the script, and the
-# pre-flight reports the script's answer beside the milestone comparison.
 present 'sh .claude/skills/take-next/next.sh' "$SKILL" "SKILL.md sends a session to next.sh"
 present 'next.sh' "$PRE" "preflight.sh reports the section next.sh takes"
 

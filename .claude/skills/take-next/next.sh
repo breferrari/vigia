@@ -2,11 +2,9 @@
 # Names the roadmap section the next task is taken from, then lists its open
 # issues.
 #
-# The order is ROADMAP.md's section order on origin/main, which is versioned and
-# reviewed. A section is eligible when one of its rows is not marked done and
-# names an open issue, so a finished section is never an answer. The walk stops
-# at `## Shelf`: nothing at or below it is taken. Milestones play no part, so a
-# renamed or renumbered milestone cannot change which task comes next.
+# The order is ROADMAP.md's section order on origin/main. The walk runs from the
+# first `## Phase` heading to `## Shelf`, and a section is eligible when one of
+# its rows is not marked done and names an open issue. Milestones are not read.
 #
 # A row names its issue in its last cell. Some rows cite a second issue in their
 # task prose, so the last link on the line is the one read.
@@ -40,8 +38,9 @@ jq -r '.[] | "\(.number)\t\(.title)"' "$tmp/open.json" | tr -d '\r' > "$tmp/open
 awk -F'\t' '
   FILENAME == ARGV[1] { open[$1] = 1; next }
   /^## Shelf/ { exit }
+  /^## Phase / { walking = 1 }
   /^## / { section = substr($0, 4); next }
-  section == "" { next }
+  !walking { next }
   /^\| *(⬜|🔨) *\|.*\[#[0-9]+\]\([^)]*\) *\|$/ {
     line = $0
     n = ""

@@ -156,8 +156,6 @@ say "5. judgment — open SPEC.md §10 bullets (read these; ordering language me
 sed -n '/^## 10\./,/^## 11\./p' "$tmp/spec.md" | grep -E '^- \[ \]' | cut -c1-160 | sed 's/^/  /'
 
 say "6. milestone drift — the roadmap's phases vs the tracker's milestones:"
-# Step 1 reads the roadmap alone, so a milestone cannot steer it. What this
-# catches is the two records disagreeing about which phases exist at all.
 if [ -n "${PREFLIGHT_MILESTONES_FILE:-}" ]; then cp "$PREFLIGHT_MILESTONES_FILE" "$tmp/ms.json"
 elif [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
   gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" > "$tmp/ms.json"
