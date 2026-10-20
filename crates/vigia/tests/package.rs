@@ -1632,35 +1632,44 @@ fn tests_ran_judgement() {
             "test result: ok. {passed} passed; {failed} failed; {ignored} ignored; 0 measured; 3 filtered out; finished in 0.01s\n"
         )
     };
-    for (case, log, ran) in [
-        ("one", result(1, 0, 0), true),
-        ("failed", result(0, 1, 0), true),
+    let one = |result: String| format!("running 1 test\n{result}");
+    let unselected = "filter 'lfs_' ran no test in target 'watch'";
+    // `None` passes, and a string is what the error has to say.
+    for (case, log, error) in [
+        ("one", one(result(1, 0, 0)), None),
+        ("failed", one(result(0, 1, 0)), None),
+        ("crashed", "running 1 test\n".to_owned(), None),
         (
             "two",
-            format!("{}{}", result(0, 0, 0), result(1, 0, 0)),
-            true,
+            format!(
+                "running 0 tests\n{}{}",
+                result(0, 0, 0),
+                one(result(1, 0, 0))
+            ),
+            None,
         ),
         (
             "none",
             format!("running 0 tests\n{}", result(0, 0, 0)),
-            false,
+            Some(unselected),
         ),
-        ("ignored", result(0, 0, 1), false),
+        ("ignored", one(result(0, 0, 1)), Some(unselected)),
         (
             "unbuilt",
             "error: could not compile `vigia`\n".to_owned(),
-            false,
+            Some("target 'watch' never ran its tests"),
         ),
     ] {
         let (passed, printed) = tests_ran(case, &log);
         assert_eq!(
-            passed, ran,
+            passed,
+            error.is_none(),
             "tests-ran.sh judged the {case} log wrong:\n{log}"
         );
-        if !ran {
+        if let Some(error) = error {
             assert!(
-                printed.contains("'lfs_'") && printed.contains("'watch'"),
-                "the {case} error does not name the filter and target: {printed}"
+                printed.contains(error),
+                "the {case} error does not say {error:?}: {printed}"
             );
         }
     }
