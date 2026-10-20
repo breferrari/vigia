@@ -3298,9 +3298,11 @@ fn direct_dependencies() -> &'static [(String, bool)] {
             // A fork under `vendor/` is a dependency like any other, under the
             // name the code uses.
             .filter(|dependency| {
-                dependency["path"]
-                    .as_str()
-                    .is_none_or(|path| Path::new(path).starts_with(repo_root().join("vendor")))
+                dependency["path"].as_str().is_none_or(|path| {
+                    Path::new(path)
+                        .components()
+                        .any(|part| part.as_os_str() == "vendor")
+                })
             })
             .map(|dependency| {
                 let name = dependency["rename"]
@@ -3786,6 +3788,19 @@ fn forks_replace_crates() {
         forks += 1;
     }
     assert!(forks > 0, "no fork was found, so this test checks nothing");
+    // `xtask` builds the grammar dump with upstream `syntect`, since `two-face`
+    // hands it upstream's types; the two must stay the version the fork is cut from.
+    let base =
+        std::fs::read_to_string(repo_root().join("vendor/syntect/PATCHES.md")).expect("PATCHES.md");
+    let version = base
+        .lines()
+        .find_map(|line| line.strip_prefix("Base: `syntect` "))
+        .and_then(|rest| rest.split_whitespace().next())
+        .expect("a Base line for syntect");
+    assert!(
+        repo_file("xtask/Cargo.toml").contains(&format!("syntect = {{ version = \"={version}\"")),
+        "xtask's syntect is not the {version} the fork is cut from"
+    );
 }
 
 /// A vendored crate built on its own leaves its build output beside it, and

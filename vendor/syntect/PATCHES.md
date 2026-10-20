@@ -24,6 +24,10 @@ The manifest only: the package is named `vigia-syntect`, with a description that
 
 The registry's `.cargo-ok`, `.cargo_vcs_info.json` and `Cargo.lock` are not copied. Every other file is as published.
 
+## Versions
+
+The fork is published as `vigia-syntect` 5.3.0, its base's version. A later change to the fork bumps its patch number; the Base line still names what it is cut from.
+
 ## When it goes
 
 When a syntect release carries the memo, the workspace takes that release, this directory is deleted, and the published `vigia-syntect` versions are yanked.

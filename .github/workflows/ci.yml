@@ -463,9 +463,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
-      - name: each fork is its crate plus its patches
+      - name: fork source
         run: sh .github/scripts/forks.sh
-      - name: each fork passes its upstream suite
+      - name: fork suite
         run: sh .github/scripts/forks-suite.sh
 
   # Every workflow, on documents-only pull requests too.

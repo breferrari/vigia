@@ -1,8 +1,6 @@
 #!/bin/sh
-# Runs each fork's own upstream test suite against its patches: the upstream
-# repository at the tag its PATCHES.md names, with the code patches applied.
-# The published crate leaves out the test data the suite needs, which is why
-# this reads the repository rather than `vendor/`. A patch named
+# Each fork's upstream suite, run at the tag its PATCHES.md names with the code
+# patches applied: the published crate leaves out the suite's test data. A
 # `*-name-the-fork.patch` changes only the published manifest and is skipped.
 set -eu
 
