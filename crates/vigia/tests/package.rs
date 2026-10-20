@@ -3665,7 +3665,7 @@ fn jobs_time_bound() {
             Vec::<String>::new(),
             "{name} has jobs with no timeout-minutes"
         );
-        checked += jobs_of(&text).len();
+        checked += jobs_of(&without_comments(&text)).len();
     }
     assert!(
         checked >= 15,
