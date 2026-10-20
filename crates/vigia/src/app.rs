@@ -512,7 +512,7 @@ impl App {
 
     /// Open the box under `anchor`, holding `existing`'s text when the line
     /// already carries a note. From here until Enter, Esc or a press elsewhere,
-    /// every key is the box's.
+    /// every key but `Ctrl+L` is the box's.
     pub fn open_box(&mut self, anchor: Anchor, existing: Option<&Note>) {
         self.note_box = Some(NoteBox::open(anchor, existing));
     }

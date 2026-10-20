@@ -647,8 +647,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
-                    // The mode: while the reader's hand is in the box every key is the
-                    // box's and a press anywhere else closes it, and only what the box
+                    // The mode: while the reader's hand is in the box every key but
+                    // `Ctrl+L` is the box's and a press anywhere else closes it, and only what the box
                     // does not answer reaches the map below.
                     if shell.app.box_open() {
                         match notes::box_route(&event, shell.box_area()) {
@@ -1380,7 +1380,7 @@ impl Shell {
         if action == Action::Refresh {
             self.pictures.refresh();
             if let Err(e) = self.session.screen().clear() {
-                self.app.warn(e.to_string());
+                self.app.warn(format!("redraw: {e}"));
             }
         }
         if !matches!(action, Action::Redraw | Action::Refresh) {
@@ -2579,7 +2579,7 @@ mod tests {
         let shipped = source.split("#[cfg(test)]").next().expect("split");
         assert!(
             shipped.contains(
-                "if action == Action::Refresh {\n            self.pictures.refresh();\n            if let Err(e) = self.session.screen().clear() {"
+                "if action == Action::Refresh {\n            self.pictures.refresh();\n            if let Err(e) = self.session.screen().clear() {\n                self.app.warn(format!(\"redraw: {e}\"));\n            }"
             ),
             "`Ctrl+L` no longer retires the Kitty pictures and clears the screen"
         );
