@@ -1980,15 +1980,18 @@ mod tests {
         );
         // Staged: the edit's new side is now the staged picture's.
         let added = key(1, 4);
-        pictures.built.insert(
-            Arc::clone(&added),
-            Ready(Arc::new(Built {
-                kitty: vec![4],
+        for (id, key) in [(3, &edited), (4, &added)] {
+            let built = Built {
+                kitty: vec![id],
                 stored: 1,
                 ..undecoded()
-            })),
-        );
+            };
+            pictures
+                .built
+                .insert(Arc::clone(key), Ready(Arc::new(built)));
+        }
         pictures.keep(&HashSet::from([Arc::clone(&edited), Arc::clone(&added)]));
+        assert!(pictures.get(&edited).is_some(), "a shown picture went");
         pictures.keep(&HashSet::from([Arc::clone(&added)]));
         assert!(
             pictures.get(&edited).is_none(),
