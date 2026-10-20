@@ -312,8 +312,8 @@ impl Worktree {
             return None;
         }
         let object = self.lfs_path(oid).ok()?;
-        self.lfs_budget.set(self.lfs_budget.get() - size);
-        self.lfs_compares.set(self.lfs_compares.get() + 1);
+        self.lfs_budget.update(|v| v - size);
+        self.lfs_compares.update(|v| v + 1);
         same_bytes(path, &object, size)
     }
 
@@ -329,7 +329,7 @@ impl Worktree {
             .is_ok_and(|header| header.size() < picture::POINTER_MAX as u64);
         let found = small
             .then(|| {
-                self.lfs_blob_reads.set(self.lfs_blob_reads.get() + 1);
+                self.lfs_blob_reads.update(|v| v + 1);
                 self.blob(id, path).ok()
             })
             .flatten()
@@ -513,7 +513,7 @@ impl Worktree {
                 self.sides_left.set(true);
                 return false;
             }
-            self.pair_budget.set(self.pair_budget.get() - cost);
+            self.pair_budget.update(|v| v - cost);
             true
         };
         // Each side's size and stamp, from a header or a `stat`, before a byte.
@@ -533,7 +533,7 @@ impl Worktree {
                             if !spend(rename::READ_COST) {
                                 return None;
                             }
-                            self.side_reads.set(self.side_reads.get() + 1);
+                            self.side_reads.update(|v| v + 1);
                             let size = self.repo().find_header(id).ok()?.size();
                             let mut sizes = self.blob_sizes.borrow_mut();
                             if sizes.len() >= PAIRS_KEPT {
@@ -560,7 +560,7 @@ impl Worktree {
             read.borrow_mut()
                 .entry(at)
                 .or_insert_with(|| {
-                    self.side_reads.set(self.side_reads.get() + 1);
+                    self.side_reads.update(|v| v + 1);
                     let change = &changes[at];
                     let side = match change.kind {
                         ChangeKind::Removed => Side::Blob(change.before?),
@@ -593,8 +593,8 @@ impl Worktree {
             if size > self.pair_budget.get() {
                 return false;
             }
-            self.pair_budget.set(self.pair_budget.get() - size);
-            self.pair_bytes.set(self.pair_bytes.get() + size);
+            self.pair_budget.update(|v| v - size);
+            self.pair_bytes.update(|v| v + size);
             charged.borrow_mut().insert(at);
             true
         };
@@ -623,7 +623,7 @@ impl Worktree {
                     return None;
                 }
                 use std::io::Read;
-                self.side_reads.set(self.side_reads.get() + 1);
+                self.side_reads.update(|v| v + 1);
                 let mut head = Vec::new();
                 std::fs::File::open(self.workdir.join(&change.path))
                     .and_then(|file| {
@@ -705,9 +705,8 @@ impl Worktree {
                 None if cost + rename::PAIR_COST <= self.pair_budget.get() => {
                     charge(pair.from, pair.sizes.0.max(rename::READ_COST));
                     charge(pair.to, pair.sizes.1.max(rename::READ_COST));
-                    self.pair_budget
-                        .set(self.pair_budget.get() - rename::PAIR_COST);
-                    self.pairs_scored.set(self.pairs_scored.get() + 1);
+                    self.pair_budget.update(|v| v - rename::PAIR_COST);
+                    self.pairs_scored.update(|v| v + 1);
                     let score = match (spans_of(pair.from), spans_of(pair.to)) {
                         (Some(old), Some(new)) => old.score(&new),
                         _ => 0,
@@ -820,7 +819,7 @@ impl Worktree {
         let mut scores = self.pair_scores.borrow_mut();
         if scores.len() >= PAIRS_KEPT {
             scores.clear();
-            self.pair_epoch.set(self.pair_epoch.get() + 1);
+            self.pair_epoch.update(|v| v + 1);
         }
         scores.insert(key, score);
     }
@@ -1657,7 +1656,7 @@ impl Worktree {
             }
             self.lfs.set(lfs_configured(&repo));
             self.loaded_config.set(now);
-            self.reloads.set(self.reloads.get() + 1);
+            self.reloads.update(|v| v + 1);
             self.invalidate_filter();
         }
     }

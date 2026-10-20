@@ -3,6 +3,7 @@
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use std::assert_matches;
 use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
@@ -119,10 +120,10 @@ fn every_key_on_the_map_goes_to_the_open_box_and_means_itself_again_after() {
         BoxRoute::Send
     );
     assert_eq!(box_route(&press(KeyCode::Esc), over), BoxRoute::Cancel);
-    assert!(matches!(
+    assert_matches!(
         box_route(&with(KeyModifiers::ALT, KeyCode::Enter), over),
         BoxRoute::Edit(_)
-    ));
+    );
     // A release is not a key.
     let released = Event::Key(KeyEvent {
         kind: KeyEventKind::Release,
@@ -2414,8 +2415,8 @@ fn ctrl_l_through_box() {
         box_route(&with(KeyModifiers::CONTROL, KeyCode::Char('l')), None),
         BoxRoute::Through
     );
-    assert!(matches!(
+    assert_matches!(
         box_route(&press(KeyCode::Char('l')), None),
         BoxRoute::Edit(_)
-    ));
+    );
 }

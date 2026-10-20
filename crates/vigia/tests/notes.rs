@@ -5,6 +5,7 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::assert_matches;
 use std::fs;
 use std::time::{Duration, Instant};
 
@@ -1292,7 +1293,7 @@ fn alt_enter_breaks_the_body_and_the_note_rows_break_with_it() {
 
     rig.type_text("first");
     let newline = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
-    assert!(matches!(rig.key(&newline), BoxRoute::Edit(_)));
+    assert_matches!(rig.key(&newline), BoxRoute::Edit(_));
     rig.type_text("second");
     let open = rig.app.note_box().expect("the box");
     assert_eq!(open.lines(), ["first", "second"]);
@@ -1310,7 +1311,7 @@ fn alt_enter_breaks_the_body_and_the_note_rows_break_with_it() {
             .contains(Modifier::REVERSED)
     );
 
-    assert!(matches!(rig.enter(), Committed::Written(_)));
+    assert_matches!(rig.enter(), Committed::Written(_));
     let listing = rig.store.list().expect("list");
     assert_eq!(listing.notes[0].body, "first\nsecond");
     rig.advance(RESOLVE_ARRIVING);
@@ -3722,7 +3723,7 @@ fn a_line_that_moves_under_an_open_box_keeps_it() {
     assert!(rig.app.box_open());
     // And Enter pins the note to the number it was opened on, which is what a
     // note stores: the walk finds it by its text from there.
-    assert!(matches!(rig.enter(), Committed::Written(_)));
+    assert_matches!(rig.enter(), Committed::Written(_));
     let listing = rig.store.list().expect("list");
     assert_eq!(
         (listing.notes[0].line, listing.notes[0].text.as_str()),
@@ -3856,7 +3857,7 @@ fn a_continuation_row_anchors_to_its_head_line() {
     // And a press there opens the box on the whole line at the head's number.
     assert!(rig.press_opens(&painted, left, y + 1));
     rig.type_text("on the head");
-    assert!(matches!(rig.enter(), Committed::Written(_)));
+    assert_matches!(rig.enter(), Committed::Written(_));
     let written = &rig.store.list().expect("list").notes[0];
     assert_eq!(written.line, 5);
     assert_eq!(written.text, long.trim_end());
@@ -4269,12 +4270,12 @@ fn a_caret_above_a_grown_box_stays_on_screen_on_a_pane_that_cannot_hold_it() {
     for line in ["one", "two", "three", "four", "five"] {
         rig.type_text(line);
         let newline = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
-        assert!(matches!(rig.key(&newline), BoxRoute::Edit(_)));
+        assert_matches!(rig.key(&newline), BoxRoute::Edit(_));
     }
     rig.type_text("six");
     for _ in 0..3 {
         let up = Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert!(matches!(rig.key(&up), BoxRoute::Edit(_)));
+        assert_matches!(rig.key(&up), BoxRoute::Edit(_));
     }
     let (line, _) = rig.app.note_box().expect("the box").cursor();
     assert_eq!(line, 2, "the caret did not move off the last line");

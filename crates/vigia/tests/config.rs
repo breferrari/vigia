@@ -1,6 +1,7 @@
 //! `SPEC.md` §11.2 B6 as amended: the pane a reader starts with.
 
 use ratatui::layout::Rect;
+use std::assert_matches;
 use vigia::{Action, App, Config, ConfigError, Pointing, body_layout, config, diff_height};
 
 /// A home directory holding a config file, or holding none.
@@ -859,10 +860,10 @@ fn a_comment_still_ends_a_hide_value() {
 
     // Nothing but a comment is a missing value rather than an empty pattern,
     // which would have hidden every path in the tree.
-    assert!(matches!(
+    assert_matches!(
         config::parse("hide = # nothing\n"),
         Err(ConfigError::MissingValue { line: 1 })
-    ));
+    );
 }
 
 /// The repeated-key rule reaches the valued key, so `hide` twice names both lines
