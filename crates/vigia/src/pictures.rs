@@ -335,10 +335,14 @@ impl Inks {
         } else {
             (0, 0, 0)
         });
-        let changed = match theme.picture_changed.bg.or(theme.removed_bar.bg) {
-            Some(ratatui::style::Color::Rgb(r, g, b)) => (r, g, b),
-            _ => (0xf8, 0x51, 0x49),
+        // A pixel needs a real colour, so a named one falls through.
+        let rgb = |style: ratatui::style::Style| match style.bg {
+            Some(ratatui::style::Color::Rgb(r, g, b)) => Some((r, g, b)),
+            _ => None,
         };
+        let changed = rgb(theme.picture_changed)
+            .or_else(|| rgb(theme.removed_bar))
+            .unwrap_or((0xf8, 0x51, 0x49));
         Self { canvas, changed }
     }
 }
@@ -2171,7 +2175,7 @@ mod tests {
             foreground: None,
             ansi: [Some((0xaa, 0x33, 0x33)); 16],
         };
-        // What each built-in drew before the mask had a key of its own.
+        // Pinned by value, so a fallback that moved shows here.
         for (name, theme, today) in [
             ("ansi", crate::Theme::ansi(), (0xf8, 0x51, 0x49)),
             ("dark", crate::Theme::dark(), (0xf8, 0x51, 0x49)),
@@ -2203,6 +2207,11 @@ mod tests {
             changed("base = dark\nremoved_bar = on #123456").0,
             (0x12, 0x34, 0x56),
             "an unset picture_changed did not follow the theme's removed_bar"
+        );
+        assert_eq!(
+            changed("base = dark\nremoved_bar = on #123456\npicture_changed = on red").0,
+            (0x12, 0x34, 0x56),
+            "a named picture_changed hid the theme's removed_bar"
         );
     }
 
