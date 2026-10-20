@@ -1602,6 +1602,75 @@ fn ci_complete_judgement() {
     );
 }
 
+/// Drives `tests-ran.sh` over a fabricated `cargo test` log.
+#[cfg(unix)]
+fn tests_ran(case: &str, log: &str) -> bool {
+    let dir = std::env::temp_dir().join(format!("vigia-tests-ran-{}-{case}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create the log directory");
+    let path = dir.join("run.log");
+    std::fs::write(&path, log).expect("write the log");
+    let script = repo_root().join(".github/scripts/tests-ran.sh");
+    let status = std::process::Command::new("sh")
+        .arg(&script)
+        .arg(&path)
+        .args(["watch", "lfs_"])
+        .status()
+        .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
+    let _ = std::fs::remove_dir_all(&dir);
+    status.success()
+}
+
+#[cfg(unix)]
+#[test]
+fn flake_rate_counts() {
+    let result = |passed: u32, failed: u32, ignored: u32| {
+        format!(
+            "test result: ok. {passed} passed; {failed} failed; {ignored} ignored; 0 measured; 3 filtered out; finished in 0.01s\n"
+        )
+    };
+    for (case, log, ran) in [
+        ("one", format!("running 1 test\n{}", result(1, 0, 0)), true),
+        (
+            "failed",
+            format!("running 1 test\n{}", result(0, 1, 0)),
+            true,
+        ),
+        (
+            "two",
+            format!("{}{}", result(0, 0, 0), result(1, 0, 0)),
+            true,
+        ),
+        (
+            "none",
+            format!("running 0 tests\n{}", result(0, 0, 0)),
+            false,
+        ),
+        (
+            "ignored",
+            format!("running 1 test\n{}", result(0, 0, 1)),
+            false,
+        ),
+        (
+            "unbuilt",
+            "error: could not compile `vigia`\n".to_owned(),
+            false,
+        ),
+    ] {
+        assert_eq!(
+            tests_ran(case, &log),
+            ran,
+            "tests-ran.sh judged the {case} log wrong:\n{log}"
+        );
+    }
+    let flake = repo_file(".github/workflows/flake-rate.yml");
+    assert!(
+        flake.matches("sh .github/scripts/tests-ran.sh").count() >= 2
+            && flake.contains("-- --exact --list"),
+        "flake-rate.yml stopped checking that a test ran, so a filter that matches \
+         nothing reports a clean rate"
+    );
+}
+
 /// Drives `change-class.sh` with a list of paths and returns its last line.
 #[cfg(unix)]
 fn change_class(paths: &str) -> String {

@@ -6,7 +6,8 @@ name: flake rate
 #
 # It deliberately does NOT fail when the test fails. A probe that goes red is
 # a probe nobody reads the output of, and the output is the entire point.
-# Read the run summary.
+# Read the run summary. A run that executed no test is not a measurement, so
+# that one does fail.
 #
 # Sample count is `jobs * iterations`. Prefer iterations over jobs: the
 # compile is paid once per job and the runner pool is small on macOS, so
@@ -114,14 +115,24 @@ jobs:
           case "$iterations" in ''|*[!0-9]*) echo "iterations must be a positive integer" >&2; exit 1;; esac
           [ "$iterations" -ge 1 ] || { echo "iterations must be >= 1" >&2; exit 1; }
 
+          # Fails before any iteration is paid for when the filter names no
+          # test in this target.
+          listed=$(cargo test --release --test "$IN_TARGET" "$IN_TEST" -- --exact --list 2>/dev/null | grep -c ': test$' || true)
+          if [ "$listed" -eq 0 ]; then
+            echo "::error::filter '$IN_TEST' ran no test in target '$IN_TARGET'"
+            exit 1
+          fi
+
           fail=0
           mkdir -p failures
           for i in $(seq 1 "$iterations"); do
             if cargo test --release --test "$IN_TARGET" \
                  "$IN_TEST" -- --exact --nocapture > "failures/run-$i.log" 2>&1; then
+              sh .github/scripts/tests-ran.sh "failures/run-$i.log" "$IN_TARGET" "$IN_TEST" || exit 1
               printf 'run %3d/%s  pass\n' "$i" "$iterations"
               rm -f "failures/run-$i.log"
             else
+              sh .github/scripts/tests-ran.sh "failures/run-$i.log" "$IN_TARGET" "$IN_TEST" || exit 1
               fail=$((fail + 1))
               printf 'run %3d/%s  FAIL\n' "$i" "$iterations"
               # The breach line is the measurement. Surface it inline so the
@@ -139,8 +150,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Exit 0 on a failing test, on purpose: see the header. A replica
-          # that could not run at all is a different thing and does fail,
-          # because `set -u` and the guards above have already exited.
+          # that could not run at all, or ran no test, is a different thing
+          # and does fail, because the guards above have already exited.
 
       - name: upload failing runs
         if: steps.measure.outputs.fail != '0'
