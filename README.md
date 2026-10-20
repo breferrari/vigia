@@ -204,14 +204,21 @@ Budgets, not hopes. Each one has a test that fails when it is missed. Every regr
 
 ## 🎨 Make it yours
 
-A palette, a colour depth, which drawing glyphs your font carries, how a changed image is drawn (from 1.2.0, unreleased), what the pane opens as, and whether it looks for updates. Every one has a default, and the defaults are what ships.
+**It matches your terminal out of the box.** At startup `vigia` asks your terminal whether its background is dark or light and picks the matching palette. There is nothing to set up.
 
-```sh
-VIGIA_THEME=dark vigia          # ansi, dark, light or system, or a path to your own
-NO_COLOR=1 vigia                # every ladder collapses to something readable
+**To make it yours, write a theme file** at `~/.config/vigia/theme`. Start from a built-in palette (`dark`, `light` or `ansi`) and change only what you want:
+
+```ini
+base            = dark
+added           = #3fb950
+picture_changed = on #d29922
 ```
 
-[**Configuration**](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) is the whole of it, and [**Theme**](https://github.com/breferrari/vigia/blob/main/docs/THEME.md) names every colour the pane draws.
+It is read every time the pane starts. [**Theme**](https://github.com/breferrari/vigia/blob/main/docs/THEME.md) lists every colour you can set.
+
+**Settings** (staged changes, wrapping, the note rows, what the pane opens as) live in `~/.config/vigia/config`. Press `m` in the pane to switch them, and with `persist` on your choices are written back to that file.
+
+For a single run, `VIGIA_THEME` and `NO_COLOR` still work, and so do `VIGIA_PICTURES` for how pictures are drawn and `VIGIA_UPDATE=off` for the update check. [**Configuration**](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) covers them.
 
 ---
 
