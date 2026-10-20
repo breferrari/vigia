@@ -44,7 +44,7 @@ It shows the working-tree diff live, as the agent writes it. Click a line, type 
 ```sh
 brew install breferrari/tap/vigia                 # macOS and Linux
 vigia                                             # in the pane beside your agent, inside a repo
-claude mcp add --scope user vigia -- vigia mcp    # optional: let your notes reach Claude Code
+claude mcp add --scope user vigia -- vigia mcp    # optional: notes for Claude Code
 ```
 
 No Homebrew, or on Windows? [Install](#install) has a prebuilt installer for each.
@@ -63,7 +63,7 @@ You see a line you want changed. Click its line number, type one sentence, press
 ```
 
 1. **The pane writes the note first.** Each note is a file in a directory kept for this worktree under your state directory, never inside the worktree or `.git`. So a note survives a restart of the pane or the agent, and two repositories never see each other's notes.
-2. **Then it hands the note to the agent.** The footer says `sent` when a registered agent session took it, and `noted` when none did and the note is waiting for the agent to look. `sent` means the session took the line. It does not mean the agent has read it. If the agent is waiting on a permission prompt, the note queues and is handled once you answer (observed with Claude Code 2.1.304).
+2. **Then it hands the note to the agent.** The footer says `sent` when a registered agent session took it, and `noted` when none did and the note is waiting for the agent to look. `sent` means the session took the line. It does not mean the agent has read it. If the agent is waiting on a permission prompt, the note queues and is handled once you answer (observed 2026-10-20 with Claude Code 2.1.304 on macOS).
 3. **The agent gets the file, the line, your words and the code around it**, as plain text:
 
    ```
@@ -249,16 +249,18 @@ These pages track `main`. For a released version, browse its tag.
 
 **Does it need git-lfs?** No. An LFS image is read from the local LFS store, and the pane never starts `git-lfs`.
 
-**Does it work on Windows?** Yes. Use the PowerShell installer above, and Windows Terminal draws pictures sharp.
+**Does it work on Windows?** Yes. Use the PowerShell installer above. Windows Terminal 1.22 and later draws pictures sharp.
 
 **Which terminals draw sharp pictures?**
 
 | Draws | Terminals |
 |---|---|
-| Kitty graphics | kitty, Ghostty, and either one through tmux |
-| Sixel | foot, Windows Terminal |
-| iTerm2 images | iTerm2, WezTerm |
+| Kitty graphics | kitty, Ghostty, iTerm2, Rio |
+| Sixel | Windows Terminal 1.22 and later, foot, xterm with Sixel on |
+| iTerm2 images | WezTerm |
 | Half-blocks | everything else, given 24-bit colour |
+
+Inside tmux the picture passes through to the terminal outside it.
 
 ## 🗺️ Status
 

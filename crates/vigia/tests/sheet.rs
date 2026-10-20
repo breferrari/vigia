@@ -892,7 +892,7 @@ fn names(keys: &str, token: &str) -> bool {
 
 /// The gestures the key and mouse tables of `README.md` and `docs/KEYS.md`
 /// teach, as the cells a reader meets there.
-fn readme_gestures() -> Vec<String> {
+fn documented_gestures() -> Vec<String> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let readme = ["README.md", "docs/KEYS.md"]
         .map(|name| {
@@ -964,7 +964,7 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
     }
     let drawn = rows.join("\n");
 
-    for cell in readme_gestures() {
+    for cell in documented_gestures() {
         // Every token of a cell on ONE drawn row, not each token anywhere on the sheet.
         let wanted: Vec<&str> = cell
             .split_whitespace()
@@ -1182,7 +1182,7 @@ fn bound_keys() -> Vec<(KeyEvent, String)> {
 /// `SPEC.md` while absent from the document a reader meets first.
 #[test]
 fn every_letter_the_map_binds_is_taught_by_the_readme() {
-    let taught: Vec<String> = readme_gestures()
+    let taught: Vec<String> = documented_gestures()
         .iter()
         .flat_map(|cell| {
             cell.split_whitespace()

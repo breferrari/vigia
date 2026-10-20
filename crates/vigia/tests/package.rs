@@ -1358,7 +1358,7 @@ fn the_licence_each_crate_ships_is_the_repository_licence() {
 
 /// The grammar count `docs/READING.md` states is the one the dump holds.
 #[test]
-fn the_readme_states_the_grammar_count_the_dump_holds() {
+fn grammar_count_documented() {
     let roster = repo_file("crates/vigia-core/assets/GRAMMARS.txt");
     let held = roster
         .lines()
@@ -2887,11 +2887,11 @@ fn the_config_doc_teaches_a_config_file_that_parses_and_names_every_key() {
 /// The reverse direction belongs to `sheet.rs::every_gesture_the_readme_teaches_is_named_on_the_sheet`,
 /// since the table also teaches gestures no config key reaches.
 #[test]
-fn the_readme_key_table_names_every_gesture_a_config_key_reaches() {
+fn key_table_complete() {
     let readme = repo_file("docs/KEYS.md");
 
     // The table follows a bold caption and a row's left cell is what a reader
-    // looks for. `sheet.rs::readme_gestures` reads both tables the same way;
+    // looks for. `sheet.rs::documented_gestures` reads both tables the same way;
     // only the keyboard one can carry a config key's gesture.
     //
     // The end is the first line that is neither blank nor a row, which is the
@@ -3258,7 +3258,7 @@ fn the_spec_quotes_the_sheets_purpose_lines() {
 
 /// Direct dependencies that the `Built with` table in `docs/ARCHITECTURE.md`
 /// leaves out on purpose.
-const NOT_IN_README: [&str; 7] = [
+const NOT_DOCUMENTED: [&str; 7] = [
     "libc",
     "rustix",
     "rustls-graviola",
@@ -3343,9 +3343,9 @@ fn dependencies_in_spec() {
 }
 
 /// Every dependency but a dev one is in the `Built with` table or on
-/// [`NOT_IN_README`], and that list holds only dependencies absent from the table.
+/// [`NOT_DOCUMENTED`], and that list holds only dependencies absent from the table.
 #[test]
-fn dependencies_in_readme() {
+fn dependencies_documented() {
     let architecture = repo_file("docs/ARCHITECTURE.md");
     let table = section(&architecture, "# Built with");
     let in_table = |name: &str| {
@@ -3363,21 +3363,21 @@ fn dependencies_in_readme() {
     let unplaced: Vec<&str> = shipped
         .iter()
         .copied()
-        .filter(|name| !in_table(name) && !NOT_IN_README.contains(name))
+        .filter(|name| !in_table(name) && !NOT_DOCUMENTED.contains(name))
         .collect();
     assert!(
         unplaced.is_empty(),
         "{unplaced:?} is a direct dependency and docs/ARCHITECTURE.md's `Built with` table \
-         neither names it nor is it on NOT_IN_README. Add a row, or add it to the list"
+         neither names it nor is it on NOT_DOCUMENTED. Add a row, or add it to the list"
     );
 
-    let stale: Vec<&str> = NOT_IN_README
+    let stale: Vec<&str> = NOT_DOCUMENTED
         .into_iter()
         .filter(|name| in_table(name) || !shipped.contains(name))
         .collect();
     assert!(
         stale.is_empty(),
-        "NOT_IN_README lists {stale:?}, which the table names or no manifest declares"
+        "NOT_DOCUMENTED lists {stale:?}, which the table names or no manifest declares"
     );
 }
 
