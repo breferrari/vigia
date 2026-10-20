@@ -2390,3 +2390,19 @@ fn the_note_edge_is_one_column_at_the_content_origin_and_the_sheet_swallows_it()
     };
     assert_eq!(covered.note_edge_at(origin, 9), None);
 }
+
+#[test]
+fn ctrl_l_maps_refresh() {
+    assert_eq!(
+        action_for(
+            &with(KeyModifiers::CONTROL, KeyCode::Char('l')),
+            Regions::default()
+        ),
+        Some(Action::Refresh)
+    );
+    assert_ne!(
+        action_for(&press(KeyCode::Char('l')), Regions::default()),
+        Some(Action::Refresh),
+        "`l` alone redraws"
+    );
+}

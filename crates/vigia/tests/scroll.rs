@@ -722,7 +722,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 }
 
 /// How many variants [`Action`] has.
-const VARIANTS: usize = 28;
+const VARIANTS: usize = 29;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
 fn tag(action: Action) -> usize {
@@ -765,6 +765,7 @@ fn tag(action: Action) -> usize {
         Action::MenuRow(_) => 25,
         Action::TogglePersist => 26,
         Action::MenuReset => 27,
+        Action::Refresh => 28,
     }
 }
 
@@ -824,6 +825,7 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         // Mid-track, because the ends are degenerate.
         Action::DiffTo(vigia::TRACK_SCALE / 2),
         Action::Redraw,
+        Action::Refresh,
     ];
 
     let named: std::collections::BTreeSet<usize> = actions.into_iter().map(tag).collect();

@@ -745,6 +745,16 @@ impl Pictures {
         self.keep(&HashSet::new());
     }
 
+    /// Retire every kept Kitty picture, so it is built again and sent under a
+    /// new id: a terminal attached since it was sent never received it.
+    pub fn refresh(&mut self) {
+        let retired = &mut self.retired;
+        self.built.retain(|_, ready| {
+            retired.extend(&ready.0.kitty);
+            ready.0.kitty.is_empty()
+        });
+    }
+
     /// The Kitty deletes owed since the last call, to write before the next
     /// frame. Empty for any other protocol.
     pub fn retired(&mut self) -> String {

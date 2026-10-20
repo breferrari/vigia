@@ -887,7 +887,7 @@ impl App {
             Action::Escape if self.menu.is_some() => self.menu = None,
             Action::Escape if self.sheet.is_some() => self.sheet = None,
             Action::Escape => return Ok(false),
-            Action::Redraw => {}
+            Action::Redraw | Action::Refresh => {}
             // Re-engaging jumps rather than arming: `less +F` goes to the end when you
             // ask it to follow, and a reader who presses `f` is asking to see what
             // changed, not to wait for the next thing that does.

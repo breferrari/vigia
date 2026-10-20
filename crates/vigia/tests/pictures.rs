@@ -1399,3 +1399,154 @@ fn steps_up_past_end() {
         last = up.rows[0].clone();
     }
 }
+
+#[test]
+fn kitty_resent_on_refresh() {
+    let (scratch, mut pane) = protocol_pane("pictures-kitty-refresh", ProtocolType::Kitty);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let mut sent = kitty_ids(&pane.draw(&view));
+    assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
+    assert!(
+        kitty_ids(&pane.draw(&view)).is_empty(),
+        "a second draw sent the images again"
+    );
+    let mut every: Vec<u32> = sent.clone();
+    for press in 0..5 {
+        pane.pictures.refresh();
+        let deletes = pane.pictures.retired();
+        for id in &sent {
+            assert_eq!(
+                deletes.matches(&format!("a=d,d=I,i={id},q=2")).count(),
+                1,
+                "press {press}: image {id} was not deleted once: {deletes:?}"
+            );
+        }
+        let view = pane.settled(&mut frame);
+        sent = kitty_ids(&pane.draw(&view));
+        assert_eq!(
+            sent.len(),
+            3,
+            "press {press}: three images were not sent again"
+        );
+        assert!(
+            sent.iter().all(|id| !every.contains(id)),
+            "press {press}: an id was sent twice: {sent:?} after {every:?}"
+        );
+        every.extend(&sent);
+        assert_eq!(pane.pictures.kept(), 1, "press {press}: pictures piled up");
+    }
+}
+
+#[test]
+fn sixel_redrawn_on_refresh() {
+    for (protocol, sequence) in [
+        (ProtocolType::Sixel, "\x1bP"),
+        (ProtocolType::Iterm2, "1337;File="),
+    ] {
+        let (scratch, mut pane) =
+            protocol_pane(&format!("pictures-refresh-{protocol:?}"), protocol);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let view = pane.settled(&mut frame);
+        pane.pictures.refresh();
+        assert_eq!(
+            pane.pictures.retired(),
+            "",
+            "{protocol:?} owed a Kitty delete"
+        );
+        assert_eq!(pane.pictures.kept(), 1, "{protocol:?} was built again");
+        let mut terminal = Terminal::new(Written::new(pane.width, pane.height)).expect("terminal");
+        let draw = |terminal: &mut Terminal<Written>| {
+            terminal
+                .draw(|f| {
+                    let area = f.area();
+                    render(
+                        f.buffer_mut(),
+                        area,
+                        &view,
+                        &Theme::dark(),
+                        Glyphs::default(),
+                        &pane.chrome(),
+                    );
+                })
+                .expect("draw");
+            std::mem::take(&mut terminal.backend_mut().written)
+        };
+        assert!(
+            draw(&mut terminal).iter().any(|s| s.contains(sequence)),
+            "{protocol:?} was not written at first"
+        );
+        assert!(
+            !draw(&mut terminal).iter().any(|s| s.contains(sequence)),
+            "{protocol:?} was written again with nothing changed"
+        );
+        terminal.clear().expect("clear");
+        assert!(
+            draw(&mut terminal).iter().any(|s| s.contains(sequence)),
+            "{protocol:?} was not written again after a clear"
+        );
+    }
+}
+
+/// A test terminal that keeps each symbol a draw writes.
+struct Written {
+    inner: TestBackend,
+    written: Vec<String>,
+}
+
+impl Written {
+    fn new(width: u16, height: u16) -> Self {
+        Self {
+            inner: TestBackend::new(width, height),
+            written: Vec::new(),
+        }
+    }
+}
+
+impl ratatui::backend::Backend for Written {
+    type Error = <TestBackend as ratatui::backend::Backend>::Error;
+
+    fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+    where
+        I: Iterator<Item = (u16, u16, &'a ratatui::buffer::Cell)>,
+    {
+        let cells: Vec<_> = content.collect();
+        self.written
+            .extend(cells.iter().map(|(_, _, cell)| cell.symbol().to_owned()));
+        self.inner.draw(cells.into_iter())
+    }
+    fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.hide_cursor()
+    }
+    fn show_cursor(&mut self) -> Result<(), Self::Error> {
+        self.inner.show_cursor()
+    }
+    fn get_cursor_position(&mut self) -> Result<ratatui::layout::Position, Self::Error> {
+        self.inner.get_cursor_position()
+    }
+    fn set_cursor_position<P: Into<ratatui::layout::Position>>(
+        &mut self,
+        position: P,
+    ) -> Result<(), Self::Error> {
+        self.inner.set_cursor_position(position)
+    }
+    fn clear(&mut self) -> Result<(), Self::Error> {
+        self.inner.clear()
+    }
+    fn clear_region(&mut self, clear: ratatui::backend::ClearType) -> Result<(), Self::Error> {
+        self.inner.clear_region(clear)
+    }
+    fn size(&self) -> Result<ratatui::layout::Size, Self::Error> {
+        self.inner.size()
+    }
+    fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
+        self.inner.window_size()
+    }
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        self.inner.flush()
+    }
+}

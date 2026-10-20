@@ -903,6 +903,9 @@ Where this disagrees with the code, the code is the bug.
 | click either scrollbar's end | step that region by one |
 | click a listed file | put the diff at that file |
 | terminal resize | redraw, no state change |
+| `Ctrl-L` | clear and redraw the pane; Kitty pictures on screen are deleted and sent again |
+
+**`Ctrl-L` clears and redraws the pane, and Kitty pictures on screen are deleted and sent again.** A Kitty image is sent to the terminal once, so a terminal that attached to tmux after it was sent has none under its placeholders. `Ctrl-L` deletes each Kitty image on screen and builds its picture again under a new id, so nothing is left in the terminal's image store; a Sixel or iTerm2 picture is written again by the redraw itself. It changes no state, closes no overlay and walks nothing. A rebuild on focus is refused: tmux reports focus only with `focus-events on`, off by default, and with it on every pane switch would send every picture again. *Ruled 2026-10-20, PO for the reader* ([#648](https://github.com/breferrari/vigia/issues/648)). User-facing: `Ctrl+L` redraws the pane, and after a tmux reattach it sends the pictures again.
 
 **`d` and `u` move half a page, with no overlap row.** They are `less`'s own bindings. The follow-mode paragraph below already claims `less +F` semantics, so the precedent is internal as well as cultural. A whole page steps `height - 1`, so one row survives the seam and the reader keeps their place. A half page already leaves half the screen in place. Taking a row off it would pay twice for one anchor and put `d` and `u` out of step with each other. Both directions round down, so the pair is an exact inverse on an odd body as well as an even one. **`Ctrl-D` and `Ctrl-U` are refused on purpose.** `Ctrl-D` is one of four ways out, and turning a way out into a scroll is a surprise this map avoids everywhere else. `D` and `U` are unbound for the same reason as `F`: they sit one row above a pair where case tells the two apart.
 
@@ -1372,7 +1375,7 @@ The wide spelling, at eighty columns:
 │ w                       wrap a long line, or clip it │
 │ c                       show or hide the note rows   │
 │ Enter  Esc              send the note, or cancel     │
-│ ?  Esc                  this sheet                   │
+│ ?  Esc  Ctrl+L          this sheet · redraw the pane │
 │ q  Ctrl+C  Ctrl+D       quit                         │
 │ mouse ────────────────────────────────────────────── │
 │ wheel                   scroll what you point at     │
@@ -1479,7 +1482,7 @@ Every page of a pane is one box, with the unused tail blank inside the frame. Th
 **What it spends, since the arrow pair is scarce.** The one feature that would want these keys back is a horizontal pan. §11.1 declined that as *"a key and a mode this spec does not name"*. B19's wrap toggle needs no arrows, so nothing open is blocked. If a pan is ever ruled in, it takes `h` and `l`, or it takes these back. This sentence records that, so the choice is not a hidden reservation.
 
 
-**The sheet names the arrows at the wide spelling only, and that is arithmetic.** The tight keyboard key field is eleven columns and the arrowed cell is thirteen. Carrying the arrows there would cost panes of 35 and 36 columns their twelve gestures. Losing gestures to an *alias* for two columns of pane is the wrong trade. `q  Esc  Ctrl+C  Ctrl+D` already drops its aliases at the tight spelling.
+**The sheet names the arrows at the wide spelling only, and that is arithmetic.** The tight keyboard key field is eleven columns and the arrowed cell is thirteen. Carrying the arrows there would cost panes of 35 and 36 columns their twelve gestures. Losing gestures to an *alias* for two columns of pane is the wrong trade. `q  Esc  Ctrl+C  Ctrl+D` already drops its aliases at the tight spelling. **`Ctrl+L` shares the sheet's own row and drops the same way**: wide it is `?  Esc  Ctrl+L`, `this sheet · redraw the pane`, and tight it is `?  Esc`, `this sheet`. Its own row would make the sheet two pages at 80 by 24, and a tight form would move the 30-column floor. *Ruled 2026-10-20, PO for the reader* ([#648](https://github.com/breferrari/vigia/issues/648)). User-facing: none.
 
 
 **B16 — whether the diff can be pinned to one file, and what every other key means while it is.** *Ruled 2026-08-25, session: it can, on `s`, off by default, and every key keeps its meaning over a smaller subject. Shipped the same day. See §11.1.* ([#297](https://github.com/breferrari/vigia/issues/297).) It was asked for from the pane. An agent works inside one file for minutes at a time, and a continuous diff makes the reader hold two positions at once: where they are in the file and where they are in the changeset. Pinning removes the second. It is `f`'s sibling one step over. Follow decides which file the pane goes to. Pinning decides how much of the rest of the tree the reader's own scrolling reaches once it is there.
