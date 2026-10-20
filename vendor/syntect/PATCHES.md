@@ -20,6 +20,10 @@ Measured on an Apple M1 Max, release, with bat's grammars from `two-face` 0.5.2,
 
 The manifest only: the package is named `vigia-syntect`, with a description that points at upstream, docs.rs and repository links for the fork, and `Cargo.toml.orig`, `PATCHES.md` and `patches/` left out of the package. `cargo package` refuses a source that contains a `Cargo.toml.orig`. It also allows `mismatched_lifetime_syntaxes`, which current rustc raises on 5.3.0's `yaml_load.rs`: a path dependency's warnings are not capped, and CI denies warnings. The library is still named `syntect`.
 
+## `0003-fork-notice.patch`
+
+`Readme.md`, which crates.io shows as the fork's page: a notice at the top that this is a fork of syntect 5.3.0 with these patches, kept for vigia, not affiliated with or endorsed by syntect or its author, with a link to upstream and a line saying to use syntect instead. Upstream's badges are removed, since they describe upstream's crate. Upstream's text follows unchanged.
+
 ## Left out
 
 The registry's `.cargo-ok`, `.cargo_vcs_info.json` and `Cargo.lock` are not copied. Every other file is as published.
