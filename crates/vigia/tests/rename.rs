@@ -399,7 +399,7 @@ fn full_scores_stop_listing() {
             side_walks <= side_walks_max && pair_walks <= pair_walks_max,
             "{side_walks} walks to weigh sides (at most {side_walks_max}) and {pair_walks} to pair (at most {pair_walks_max})"
         );
-        // Quiet only once the worker holds nothing, or a slow batch ends the loop.
+        // Not quiet while a score is in flight, or a slow batch would end the loop early.
         quiet = if frame.stats().walks == walks && !landed && pictures.pairs_waiting() == 0 {
             quiet + 1
         } else {
