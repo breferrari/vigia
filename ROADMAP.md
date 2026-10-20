@@ -346,7 +346,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in
 | ✅ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
 | ✅ | Run no filter driver during status **Found while building #655** | [#659](https://github.com/breferrari/vigia/issues/659) |
 | ✅ | Redraw an LFS image when its object arrives **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
-| ⬜ | Leave picture rows out of the scrollbar's count **Found by review on #657** | [#660](https://github.com/breferrari/vigia/issues/660) |
+| ✅ | Leave picture rows out of the scrollbar's count **Found by review on #657** | [#660](https://github.com/breferrari/vigia/issues/660) |
 | ✅ | Resend Kitty images after a tmux reattach **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
 | ✅ | Follow cell size changes after startup **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
 | ✅ | Pair a renamed and changed image as a rename **Found while building #655** | [#658](https://github.com/breferrari/vigia/issues/658) |
