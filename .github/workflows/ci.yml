@@ -24,10 +24,13 @@ concurrency:
   #
   # Only the newest run on a ref is kept, main included. Every pull request's
   # head is tested before it merges, so a cancelled run on main loses only the
-  # check of that exact squash, and the newest run covers every merge before
-  # it. The cost: when the newest main run fails, finding which merge broke it
-  # starts from the pull requests' own runs.
-  group: ci-${{ github.ref }}-${{ github.event.pull_request.draft }}
+  # check of that exact squash. The cost: a conflict between two merges that
+  # each passed alone is first seen in the newest main run, and finding which
+  # merge caused it starts from the pull requests' own runs.
+  #
+  # The event is in the key so a manual dispatch on main is not cancelled by
+  # the next push, nor cancels it.
+  group: ci-${{ github.event_name }}-${{ github.ref }}-${{ github.event.pull_request.draft }}
   cancel-in-progress: true
 
 permissions: {}
@@ -586,6 +589,9 @@ jobs:
   # notice an absent matrix would go absent with it, which is the failure it
   # exists to catch wearing the fix's clothes.
   #
+  # Outside a pull request a cancelled run is a superseded one, and no check
+  # reads it, so it is skipped there rather than turning its commit red.
+  #
   # It carries no draft guard and still runs on a draft, so the required check
   # always reports rather than going absent. What it must not do is judge a
   # draft's skips as failure: that turned the check red on every push to a
@@ -629,7 +635,7 @@ jobs:
 
   ci-complete:
     name: ci complete
-    if: always()
+    if: ${{ always() && !(cancelled() && github.event_name != 'pull_request') }}
     needs: [changes, lint, test, budgets, benches, pure-rust, deny, zizmor, musl, docs]
     runs-on: ubuntu-latest
     permissions:

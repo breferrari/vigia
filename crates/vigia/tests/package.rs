@@ -3245,15 +3245,13 @@ fn ready_run_survives() {
         .lines()
         .find(|line| line.trim_start().starts_with("group:"))
         .expect("ci.yml has a concurrency group");
-    assert!(
-        group.contains("github.event.pull_request.draft"),
-        "the concurrency group is not keyed on the draft flag, so a push and the \
-         ready event cancel each other and the survivor can be the skipped run: {group}"
-    );
-    assert!(
-        !group.contains("github.sha"),
-        "main's runs are grouped per commit, so a burst of merges runs every one \
-         to the end and holds runners from the pull requests: {group}"
+    assert_eq!(
+        group.trim(),
+        "group: ci-${{ github.event_name }}-${{ github.ref }}-${{ github.event.pull_request.draft }}",
+        "the concurrency group changed: without the draft flag a push and the ready event \
+         cancel each other and the survivor can be the skipped run; without the event a \
+         dispatch and a push on main cancel each other; with the commit a burst of merges \
+         runs every one to the end"
     );
     let concurrency = ci
         .split_once("\nconcurrency:\n")
@@ -3263,7 +3261,7 @@ fn ready_run_survives() {
         concurrency
             .lines()
             .any(|line| line.trim() == "cancel-in-progress: true"),
-        "a superseded run is left to finish"
+        "a superseded run is left to finish:\n{concurrency}"
     );
 }
 
