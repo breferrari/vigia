@@ -27,6 +27,9 @@ pub enum Format {
     Tga,
     /// An SVG document, known by its `.svg` name and its root `<svg>` tag.
     Svg,
+    /// A PDF document, known by its `.pdf` name and its `%PDF-` header, and
+    /// sized in points.
+    Pdf,
 }
 
 impl Format {
@@ -66,6 +69,7 @@ impl fmt::Display for Format {
             Self::Qoi => "QOI",
             Self::Tga => "TGA",
             Self::Svg => "SVG",
+            Self::Pdf => "PDF",
         })
     }
 }
@@ -87,6 +91,14 @@ pub struct ImageSide {
     pub stamp: u64,
 }
 
+impl ImageSide {
+    /// Whether its size is known: a PDF side the frame path left to the
+    /// worker is not, until the worker has sized it.
+    pub fn sized(&self) -> bool {
+        self.width > 0
+    }
+}
+
 /// Both sides of a changed image. A side is `None` where the change has none:
 /// an added image has no old side and a deleted one no new side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,13 +109,99 @@ pub struct Picture {
     pub after: Option<ImageSide>,
 }
 
+/// The most of a PDF the frame path reads, whole, for its size. A PDF's index
+/// is at its end, so it is read whole or not at all.
+pub(crate) const PDF_LIMIT: u64 = 16 * 1024 * 1024;
+
+/// The most stream data the frame path lets one PDF decode while it sizes
+/// it.
+#[cfg(feature = "pdf")]
+const PDF_DECODED_HERE: u64 = 16 * 1024 * 1024;
+
+/// The largest PDF the frame path reads and sizes itself. A larger one is
+/// sized on the worker, and its line names only its bytes until then.
+pub(crate) const PDF_SIZED_HERE: u64 = 1024 * 1024;
+
+/// A PDF side the worker sizes: its bytes known, its size not yet.
+pub(crate) fn pdf_unsized(bytes: u64) -> ImageSide {
+    ImageSide {
+        format: Format::Pdf,
+        width: 0,
+        height: 0,
+        bytes,
+        stamp: 0,
+    }
+}
+
+/// How far into a file a PDF's `%PDF-` may start.
+pub(crate) const PDF_HEAD: usize = 1024;
+
+/// Whether `head`, a file's first bytes, starts a PDF.
+pub(crate) fn pdf_headed(head: &[u8]) -> bool {
+    head[..head.len().min(PDF_HEAD)]
+        .windows(5)
+        .any(|w| w == b"%PDF-")
+}
+
+/// Whether `path` is named as a PDF, in a build that draws PDFs.
+pub(crate) fn pdf_named(path: &str) -> bool {
+    cfg!(feature = "pdf") && pdf_path(path)
+}
+
+/// Whether `path` is named as a PDF, whether or not this build draws one.
+pub(crate) fn pdf_path(path: &str) -> bool {
+    named(path, "pdf")
+}
+
+/// Whether `path` ends in `.extension`, in any case.
+fn named(path: &str, extension: &str) -> bool {
+    path.rsplit_once('.')
+        .is_some_and(|(_, found)| found.eq_ignore_ascii_case(extension))
+}
+
+/// One PDF side, held whole: its first page's size in points, or `None`
+/// for one that is not a PDF, needs a password, or does not parse.
+pub(crate) fn pdf_side(bytes: Vec<u8>) -> Option<ImageSide> {
+    let length = bytes.len() as u64;
+    if length > PDF_LIMIT || !pdf_headed(&bytes) {
+        return None;
+    }
+    // A document an agent wrote must not be able to close the pane.
+    let (width, height) = crate::caught(|| pdf_size(bytes)).flatten()?;
+    Some(ImageSide {
+        format: Format::Pdf,
+        width,
+        height,
+        bytes: length,
+        stamp: 0,
+    })
+}
+
+/// The first page's size in points, rounded up.
+#[cfg(feature = "pdf")]
+fn pdf_size(bytes: Vec<u8>) -> Option<(u32, u32)> {
+    crate::armed(crate::Stage::Header);
+    // Parsing decodes object and xref streams, each held whole.
+    let (width, height) = hayro_syntax::with_decode_limit(PDF_DECODED_HERE, || {
+        let pdf = hayro_syntax::Pdf::new(std::sync::Arc::new(bytes)).ok()?;
+        Some(pdf.pages().first()?.render_dimensions())
+    })
+    .ok()??;
+    let side = |length: f32| (length.is_finite() && length > 0.0).then(|| length.ceil() as u32);
+    Some((side(width)?, side(height)?))
+}
+
+#[cfg(not(feature = "pdf"))]
+fn pdf_size(_: Vec<u8>) -> Option<(u32, u32)> {
+    None
+}
+
 /// How much of a worktree SVG the frame path reads for its size.
 pub(crate) const SVG_HEAD: u64 = 64 * 1024;
 
 /// Whether `path` is named as an SVG.
 pub(crate) fn svg_named(path: &str) -> bool {
-    path.rsplit_once('.')
-        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("svg"))
+    named(path, "svg")
 }
 
 /// One SVG side from the start of its document, which is `bytes` long: its

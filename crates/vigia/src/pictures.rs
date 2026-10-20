@@ -14,6 +14,23 @@ use vigia_core::{Format, ImageSide, Picture, Source, Sources};
 
 use crate::view::Row;
 
+#[cfg(feature = "pdf")]
+mod pdf;
+
+/// Without PDF support the core makes no PDF picture, so neither is reached.
+#[cfg(not(feature = "pdf"))]
+mod pdf {
+    use super::{Built, Job, PdfDrawn, undecoded};
+
+    pub(super) fn sized(_: &Job) -> Built {
+        undecoded()
+    }
+
+    pub(super) fn drawn(_: &Job) -> Option<PdfDrawn> {
+        None
+    }
+}
+
 /// Columns between two panels.
 pub const GAP: u16 = 2;
 /// The narrowest a panel may be and still be drawn.
@@ -144,6 +161,18 @@ pub fn shape(picture: &Picture, width: u16, rows: u16, truecolour: bool) -> Opti
     if !truecolour {
         return None;
     }
+    // A side the worker has yet to size reserves nothing, and still asks it.
+    if [picture.before, picture.after]
+        .iter()
+        .flatten()
+        .any(|side| !side.sized())
+    {
+        return Some(Shape {
+            kind: Kind::New,
+            rows: 0,
+            slots: Vec::new(),
+        });
+    }
     let third = width.saturating_sub(2 * GAP) / 3;
     let one = |kind: Kind, side: &ImageSide| {
         // The bar takes the slot's first column.
@@ -228,11 +257,27 @@ pub struct Built {
     pub profiles_differ: bool,
     /// The ids of its Kitty images, which the terminal holds until told to drop them.
     pub kitty: Vec<u32>,
+    /// Which page of a PDF was drawn, and whether the page count changed.
+    pub page_note: Option<String>,
+    /// The sizes found for sides the frame path left unsized, by their stamp.
+    pub sizes: Vec<(u64, u32, u32)>,
+    /// A bar the picture draws in place of its shape's: a PDF page one side
+    /// added or removed.
+    pub bar: Option<Bar>,
 }
 
 impl Built {
     /// What the size line adds once the comparison is done.
     pub fn suffix(&self) -> Option<String> {
+        let found = self.found();
+        match (&self.page_note, found) {
+            (Some(page), Some(found)) => Some(format!("{page} · {found}")),
+            (page, found) => page.clone().or(found),
+        }
+    }
+
+    /// What the comparison found, without the page it was found on.
+    fn found(&self) -> Option<String> {
         if self.profiles_differ {
             return Some("colour profile changed".to_owned());
         }
@@ -451,6 +496,8 @@ pub struct Pictures {
     picker: Option<mpsc::Sender<Picker>>,
     /// How many images this cache's worker has decoded.
     decoded: Arc<AtomicU64>,
+    /// Sizes the worker found since [`Pictures::found_sizes`] last took them.
+    found: Vec<(u64, u32, u32)>,
 }
 
 /// A Kitty image id no other picture, nor another pane on the same terminal,
@@ -495,6 +542,9 @@ fn undecoded() -> Built {
         verdict: Verdict::Undecoded,
         profiles_differ: false,
         kitty: Vec::new(),
+        page_note: None,
+        sizes: Vec::new(),
+        bar: None,
     }
 }
 
@@ -556,7 +606,15 @@ impl Pictures {
             tmux: false,
             picker: Some(picked),
             decoded,
+            found: Vec::new(),
         }
+    }
+
+    /// The sizes the worker found for sides the frame path left unsized, by
+    /// stamp, since the last call. The frame takes them with
+    /// [`vigia_core::Frame::learn_size`].
+    pub fn found_sizes(&mut self) -> Vec<(u64, u32, u32)> {
+        std::mem::take(&mut self.found)
     }
 
     /// How many images this cache's worker has decoded, every picture it has
@@ -610,6 +668,7 @@ impl Pictures {
         while let Ok((key, built)) = self.done.try_recv() {
             self.pending.remove(&key);
             if let Some(built) = built {
+                self.found.extend(&built.sizes);
                 self.built.insert(key, Ready(Arc::new(built)));
             }
         }
@@ -710,6 +769,11 @@ const MAX_SIDE: u32 = 16_384;
 /// The most one decode may allocate.
 const MAX_ALLOC: u64 = 512 * 1024 * 1024;
 
+/// Whether an image of `width` by `height` is within what a decode may take.
+fn decodable(width: u32, height: u32) -> bool {
+    width <= MAX_SIDE && height <= MAX_SIDE && u64::from(width) * u64::from(height) * 4 <= MAX_ALLOC
+}
+
 fn image_format(format: Format) -> Option<ImageFormat> {
     Some(match format {
         Format::Png => ImageFormat::Png,
@@ -721,15 +785,15 @@ fn image_format(format: Format) -> Option<ImageFormat> {
         Format::Tiff => ImageFormat::Tiff,
         Format::Qoi => ImageFormat::Qoi,
         Format::Tga => ImageFormat::Tga,
-        Format::Svg => return None,
+        Format::Svg | Format::Pdf => return None,
     })
 }
 
-/// The long side an SVG is rendered at, which every panel is shrunk from,
-/// unless its filters cost more than [`FILTER_BUDGET`] there.
-const SVG_LONG_SIDE: f32 = 1024.0;
-/// The shortest long side an SVG is rendered at before it is refused.
-const SVG_SHORTEST: f32 = 64.0;
+/// The long side an SVG or a PDF page is rendered at, which every panel is
+/// shrunk from, unless what it draws costs more than its budget there.
+const LONG_SIDE: f32 = 1024.0;
+/// The shortest long side one is rendered at before it is refused.
+const SHORTEST_SIDE: f32 = 64.0;
 /// What one SVG's filters may cost, in kernel cells times pixels. Sixty-four
 /// blurs at 256 pixels a side, about 250ms.
 const FILTER_BUDGET: f64 = 1024.0 * 256.0 * 256.0;
@@ -944,8 +1008,7 @@ fn embedded(
         .ok()?
         .into_dimensions()
         .ok()?;
-    if width > MAX_SIDE || height > MAX_SIDE || u64::from(width) * u64::from(height) * 4 > MAX_ALLOC
-    {
+    if !decodable(width, height) {
         return refuse();
     }
     (resvg::usvg::ImageHrefResolver::default_data_resolver())(mime, data, options)
@@ -1011,24 +1074,24 @@ fn filter_cost(prices: &[Price], size: f32, long: f32) -> f64 {
     cells * f64::from(long) * f64::from(long)
 }
 
-/// The longest side, up to [`SVG_LONG_SIDE`], at which every side's filters
+/// The longest side, up to [`LONG_SIDE`], at which every side's filters
 /// cost no more than [`FILTER_BUDGET`], or `None` when even
-/// [`SVG_SHORTEST`] costs more.
+/// [`SHORTEST_SIDE`] costs more.
 fn long_side(sides: &[(Vec<Price>, f32)]) -> Option<f32> {
     let fits = |long: f32| {
         sides
             .iter()
             .all(|(prices, size)| filter_cost(prices, *size, long) <= FILTER_BUDGET)
     };
-    if fits(SVG_LONG_SIDE) {
-        return Some(SVG_LONG_SIDE);
+    if fits(LONG_SIDE) {
+        return Some(LONG_SIDE);
     }
-    if !fits(SVG_SHORTEST) {
+    if !fits(SHORTEST_SIDE) {
         return None;
     }
     // The cost only grows with the side, so the longest that fits is found by
     // halving.
-    let (mut fit, mut over) = (SVG_SHORTEST as u32, SVG_LONG_SIDE as u32);
+    let (mut fit, mut over) = (SHORTEST_SIDE as u32, LONG_SIDE as u32);
     while over - fit > 1 {
         let middle = (fit + over) / 2;
         if fits(middle as f32) {
@@ -1105,6 +1168,16 @@ fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>)> {
         None => Some(None),
     };
     Some((render(old)?, render(new)?))
+}
+
+/// What the worker draws of a changed PDF.
+struct PdfDrawn {
+    pub(crate) old: Option<Decoded>,
+    pub(crate) new: Option<Decoded>,
+    /// What the line says about the page.
+    pub(crate) note: Option<String>,
+    /// The bar of a page one side added or removed, drawn alone.
+    pub(crate) alone: Option<Bar>,
 }
 
 /// A side decoded, and its colour profile.
@@ -1323,8 +1396,18 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         (None, None) => Some(None),
         _ => None,
     };
-    let sides = if job.formats.0 == Some(Format::Svg) || job.formats.1 == Some(Format::Svg) {
+    let vector = |format| job.formats.0 == Some(format) || job.formats.1 == Some(format);
+    if vector(Format::Pdf) && job.key.shape.slots.is_empty() {
+        return pdf::sized(job);
+    }
+    let (mut page, mut alone) = (None, None);
+    let sides = if vector(Format::Svg) {
         svg_sides(job)
+    } else if vector(Format::Pdf) {
+        pdf::drawn(job).map(|drawn| {
+            (page, alone) = (drawn.note, drawn.alone);
+            (drawn.old, drawn.new)
+        })
     } else {
         side(&job.sources.before, job.formats.0).zip(side(&job.sources.after, job.formats.1))
     };
@@ -1355,7 +1438,24 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
     let mut shrunk: HashMap<(Side, u32, u32), RgbImage> = HashMap::new();
     let mut panels = Vec::new();
     let mut kitty = Vec::new();
-    for (&slot, &(side, paint)) in job.key.shape.slots.iter().zip(job.key.shape.kind.paints()) {
+    // A page drawn alone takes the first slot, after its bar, as an added or
+    // deleted image does.
+    let (slots, paints): (Vec<Slot>, &[(Side, Paint)]) = match (alone, job.key.shape.slots.first())
+    {
+        (Some(bar), Some(first)) => (
+            vec![Slot {
+                x: first.x + 1,
+                width: first.width.saturating_sub(1),
+                rows: first.rows,
+            }],
+            match bar {
+                Bar::Added => Kind::Added.paints(),
+                Bar::Removed => Kind::Deleted.paints(),
+            },
+        ),
+        _ => (job.key.shape.slots.clone(), job.key.shape.kind.paints()),
+    };
+    for (&slot, &(side, paint)) in slots.iter().zip(paints) {
         let image = match side {
             Side::Old => old.as_ref(),
             Side::New => new.as_ref(),
@@ -1400,6 +1500,9 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
         verdict,
         profiles_differ,
         kitty,
+        page_note: page,
+        sizes: Vec::new(),
+        bar: alone,
     }
 }
 
@@ -2014,6 +2117,9 @@ mod tests {
             verdict,
             profiles_differ,
             kitty: Vec::new(),
+            page_note: None,
+            sizes: Vec::new(),
+            bar: None,
         };
         assert_eq!(
             built(

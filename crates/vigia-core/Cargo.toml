@@ -30,6 +30,11 @@ syntect.workspace = true
 fancy-regex.workspace = true
 image.workspace = true
 svgtypes.workspace = true
+hayro-syntax = { workspace = true, optional = true }
+
+[features]
+# See `vigia`'s `pdf` feature.
+pdf = ["dep:hayro-syntax"]
 
 # Test fixtures are built by shelling out to `git` (see tests/support) rather
 # than through a fixture crate. That keeps the dependency list exactly what

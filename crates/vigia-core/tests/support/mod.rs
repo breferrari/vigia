@@ -126,6 +126,54 @@ fn thread_cpu() -> Option<Duration> {
     None
 }
 
+/// The most this process has held resident so far, in MiB, or `None` where
+/// the platform cannot say. A peak, so memory a decode freed still counts.
+/// Only nextest gives each test a process of its own; under `cargo test`
+/// another test's peak would answer, so this is `None` there.
+pub fn peak_resident() -> Option<u64> {
+    let own = std::env::var("NEXTEST_EXECUTION_MODE").is_ok_and(|mode| mode == "process-per-test");
+    own.then(process_peak).flatten()
+}
+
+#[cfg(unix)]
+fn process_peak() -> Option<u64> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: `getrusage` fills the struct through the pointer, which points at
+    // a live local of exactly that type, and reads nothing else.
+    let ok = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } == 0;
+    // SAFETY: a zero return means the call filled the whole struct.
+    let peak = ok.then(|| unsafe { usage.assume_init() }.ru_maxrss as u64)?;
+    // Bytes on macOS, KiB elsewhere.
+    Some(if cfg!(target_os = "macos") {
+        peak >> 20
+    } else {
+        peak >> 10
+    })
+}
+
+#[cfg(windows)]
+fn process_peak() -> Option<u64> {
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    let size = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    let mut counters = PROCESS_MEMORY_COUNTERS {
+        cb: size,
+        ..Default::default()
+    };
+    // SAFETY: a pseudo-handle that needs no close, and a live local of the
+    // type the call writes, whose size it is told.
+    let ok = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &raw mut counters, size) } != 0;
+    ok.then_some(counters.PeakWorkingSetSize as u64 >> 20)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_peak() -> Option<u64> {
+    None
+}
+
 /// Assert an absolute p99 budget, **re-measuring once before believing a breach**.
 pub fn holds_p99(
     claim: &str,

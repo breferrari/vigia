@@ -4776,7 +4776,7 @@ impl Painter<'_> {
             }
             SlicedImage::new(protocol, (0, -above).into()).render(room, self.buf);
         }
-        let bar = key.shape.kind.bar().map(|bar| match bar {
+        let bar = built.bar.or(key.shape.kind.bar()).map(|bar| match bar {
             crate::pictures::Bar::Added => self.theme.added_bar,
             crate::pictures::Bar::Removed => self.theme.removed_bar,
         });

@@ -156,6 +156,22 @@ fn svg_attribute_keeps_text() {
 }
 
 #[test]
+fn svg_named_driver_keeps_text() {
+    // A driver name asks for the text diff by element.
+    let root = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24">"#;
+    let scratch = Scratch::new("svg-driver");
+    scratch.write(".gitattributes", "*.svg diff=xml\n");
+    scratch.write("icon.svg", icon(root, "red"));
+    scratch.commit_all("initial");
+    scratch.write("icon.svg", icon(root, "blue"));
+    let diff = diff_of(&scratch, "icon.svg");
+    assert!(
+        diff.picture.is_none() && !diff.hunks.is_empty(),
+        "a named diff driver did not keep an SVG's text diff"
+    );
+}
+
+#[test]
 fn svgz_stays_binary() {
     let scratch = Scratch::new("svgz");
     scratch.write("icon.svgz", [0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3, 1, 2, 0]);

@@ -12,11 +12,11 @@ authors.workspace = true
 keywords = ["git", "diff", "tui", "monitor", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 
-# `SPEC.md` section 9 counts thirty-three *files* here that read outside this
-# package: thirty reach `vigia-core/tests/support` by `#[path]`, and five read
+# `SPEC.md` section 9 counts thirty-four *files* here that read outside this
+# package: thirty-one reach `vigia-core/tests/support` by `#[path]`, and five read
 # repository documents through `CARGO_MANIFEST_DIR`, of which `soak.rs` and
-# `sheet.rs` are in both groups, which is what makes the total thirty-three rather
-# than thirty-five. No destination is inside this directory, so a packaged copy
+# `sheet.rs` are in both groups, which is what makes the total thirty-four rather
+# than thirty-six. No destination is inside this directory, so a packaged copy
 # carries a test suite that cannot compile.
 #
 # Excluding the tests is section 9's own resolution, and the direction is the
@@ -31,11 +31,19 @@ categories = ["command-line-utilities", "development-tools"]
 # somebody's `cargo install`.
 exclude = ["tests/**"]
 
+# Off for `cargo install`: PDFs are drawn through a patched `hayro-syntax`
+# that only a checkout carries, so a crates.io build shows them as binary,
+# and `--features pdf` from crates.io does not compile. The release binaries
+# turn it on, in `[workspace.metadata.dist]`.
+[features]
+pdf = ["dep:hayro", "vigia-core/pdf"]
+
 [dependencies]
 image.workspace = true
 ratatui.workspace = true
 ratatui-image.workspace = true
 resvg.workspace = true
+hayro = { workspace = true, optional = true }
 skrifa.workspace = true
 ratatui-textarea.workspace = true
 serde_json.workspace = true

@@ -191,6 +191,10 @@ jobs:
       # code is not compiled on Linux, so one run there lints a third of what
       # the deny above covers.
       - run: cargo clippy --all-targets
+      # The workspace turns PDFs on through the scene bed, so the build
+      # without them is linted on its own.
+      - name: clippy without PDFs
+        run: cargo clippy -p vigia -p vigia-core --all-targets
 
       # Correctness first, in debug, where the structural budget gates still
       # apply and the absolute ones report that they are skipped.
@@ -228,14 +232,23 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: nextest
+      # PDFs are a feature that `cargo install` builds leave out and the
+      # release turns on, so it is named here rather than left to whichever
+      # member happens to enable it.
       - name: test
-        run: cargo nextest run --workspace --profile ci
+        run: cargo nextest run --workspace --profile ci --features vigia/pdf
         env:
           VIGIA_BUDGET_SLACK: "3"
       - name: doctests, which nextest does not run
         run: cargo test --workspace --doc
         env:
           VIGIA_BUDGET_SLACK: "3"
+      - name: without PDFs, as cargo install builds
+        run: cargo nextest run --profile ci -p vigia-core --test pdf_off
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+      - name: build without PDFs
+        run: cargo build -p vigia
 
   # The budgets in their own job per platform, beside the test job rather
   # than after it. They are a separate release build either way, and running
@@ -273,7 +286,7 @@ jobs:
       # the exact shape §7 keeps recording, arrived at through the test
       # *selector* rather than through the gate: green, and about nothing.
       - name: budgets
-        run: cargo test --release --test budgets
+        run: cargo test --release --test budgets --features vigia/pdf
         env:
           VIGIA_BUDGET_SLACK: "3"
 
@@ -294,7 +307,7 @@ jobs:
       # [#36](https://github.com/breferrari/vigia/issues/36) tracks the
       # underlying flakiness of these gates on hosted runners.
       - name: first paint, which is I7 and is not in budgets.rs
-        run: cargo test --release --test first_paint
+        run: cargo test --release --test first_paint --features vigia/pdf
         env:
           VIGIA_BUDGET_SLACK: "3"
 
@@ -378,7 +391,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo build --release --target x86_64-unknown-linux-musl
+      - run: cargo build --release --target x86_64-unknown-linux-musl --features vigia/pdf
       # The claim in CLAUDE.md is a static binary with no cross-toolchain.
       # Building is half of it; being actually static is the other half.
       - name: assert the binary is static

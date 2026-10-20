@@ -16,10 +16,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 33;
+const ESCAPING_FILES: usize = 34;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "thirty-three";
+const ESCAPING_FILES_SPELLED: &str = "thirty-four";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -3465,25 +3465,117 @@ fn lock_packages(lock: &str) -> impl Iterator<Item = (&str, Option<&str>)> {
     })
 }
 
-/// How many copies of `crate_name` the lock resolves.
-fn copies_of(lock: &str, crate_name: &str) -> usize {
-    lock_packages(lock)
+/// The versions of `crate_name` the lock resolves, sorted.
+fn versions_of<'a>(lock: &'a str, crate_name: &str) -> Vec<&'a str> {
+    let mut versions: Vec<&str> = lock_packages(lock)
         .filter(|(name, _)| *name == crate_name)
-        .count()
+        .filter_map(|(_, version)| version)
+        .collect();
+    versions.sort_unstable();
+    versions
+}
+
+/// The versions SPEC §6 names for `crate_name` in its list of the font
+/// crates' copies: "`skrifa` 0.44.0 and 0.46.2".
+fn named_versions<'a>(spec: &'a str, crate_name: &str) -> Vec<&'a str> {
+    let sentence = spec
+        .split("so the lock holds exactly these copies")
+        .nth(1)
+        .and_then(|rest| rest.split(". ").next())
+        .expect("SPEC §6 names the font crates' copies");
+    let mut versions: Vec<&str> = sentence
+        .split(&format!("`{crate_name}` "))
+        .nth(1)
+        .map(|rest| {
+            rest.split([',', '`'])
+                .next()
+                .unwrap_or_default()
+                .split(" and ")
+                .map(str::trim)
+                .collect()
+        })
+        .unwrap_or_default();
+    versions.sort_unstable();
+    versions
 }
 
 #[test]
-fn one_skrifa() {
-    // `vigia` takes the requirement `usvg` declares, so the two unify.
+fn font_copies_named() {
+    // `hayro` needs a `skrifa` no `usvg` shares, so two copies are deliberate,
+    // and a third, or one nobody named, is not.
+    let (lock, spec) = (repo_file("Cargo.lock"), repo_file("SPEC.md"));
+    for crate_name in ["skrifa", "read-fonts", "fearless_simd"] {
+        let named = named_versions(&spec, crate_name);
+        assert!(!named.is_empty(), "SPEC §6 names no copy of {crate_name}");
+        assert_eq!(
+            versions_of(&lock, crate_name),
+            named,
+            "the lock's copies of {crate_name} are not the ones SPEC §6 names"
+        );
+    }
+    let three = "[[package]]\nname = \"skrifa\"\nversion = \"0.44.0\"\n\n[[package]]\nname = \"skrifa\"\nversion = \"0.45.0\"\n\n[[package]]\nname = \"skrifa\"\nversion = \"0.46.2\"\n";
     assert_eq!(
-        copies_of(&repo_file("Cargo.lock"), "skrifa"),
-        1,
-        "vigia's skrifa and usvg's no longer resolve to one copy"
+        versions_of(three, "skrifa"),
+        ["0.44.0", "0.45.0", "0.46.2"],
+        "the check no longer sees every copy"
     );
-    let split = "[[package]]\nname = \"skrifa\"\nversion = \"0.44.0\"\n\n[[package]]\nname = \"skrifa\"\nversion = \"0.45.0\"\n";
-    assert_eq!(
-        copies_of(split, "skrifa"),
-        2,
-        "the check no longer sees a second copy"
+}
+
+/// PDFs ship in the release binaries and stay out of a `cargo install`
+/// build, whose `hayro-syntax` lacks the patched decode limit. CI tests both.
+#[test]
+fn pdf_feature_shipped() {
+    let root = without_comments(&repo_file("Cargo.toml"));
+    let dist = root
+        .split_once("[workspace.metadata.dist]")
+        .map(|(_, rest)| rest.split("\n[").next().unwrap_or(rest))
+        .expect("Cargo.toml has a dist section");
+    assert!(
+        dist.contains("features = [\"pdf\"]"),
+        "the release binaries are built without PDFs: {dist}"
     );
+    for manifest in ["crates/vigia/Cargo.toml", "crates/vigia-core/Cargo.toml"] {
+        let manifest = without_comments(&repo_file(manifest));
+        assert!(
+            manifest.contains("\npdf = [") && !manifest.contains("\ndefault = ["),
+            "a default feature set would put the unpatched PDF reader in a crates.io build"
+        );
+    }
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    assert!(
+        step_block(&ci, "test").contains("--features vigia/pdf"),
+        "the test step runs without PDFs"
+    );
+    assert!(
+        step_block(&ci, "without PDFs, as cargo install builds").contains("--test pdf_off"),
+        "no step tests a build without PDFs"
+    );
+}
+
+/// A vendored crate built on its own leaves its build output beside it, and
+/// that output holds local paths. None of it is tracked, and git ignores it.
+#[test]
+fn vendored_output_untracked() {
+    let out = Command::new("git")
+        .args(["ls-files", "vendor"])
+        .current_dir(repo_root())
+        .output()
+        .expect("git runs");
+    assert!(out.status.success(), "git ls-files failed");
+    let built: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|path| {
+            let mut parts = path.split('/').skip(2);
+            matches!(parts.next(), Some("target" | "Cargo.lock"))
+        })
+        .map(str::to_owned)
+        .collect();
+    assert!(built.is_empty(), "build output is tracked: {built:?}");
+    let ignore = repo_file(".gitignore");
+    for pattern in ["/vendor/*/target", "/vendor/*/Cargo.lock"] {
+        assert!(
+            ignore.lines().any(|line| line == pattern),
+            ".gitignore does not ignore {pattern}"
+        );
+    }
 }

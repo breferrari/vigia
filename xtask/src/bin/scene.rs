@@ -168,6 +168,25 @@ fn states() -> Vec<(String, &'static str)> {
                 "svg/costly.svg",
                 "SVG refused for cost: could not be decoded",
             ),
+            ("pdf/modified.pdf", "PDF, its one page changed"),
+            ("pdf/added.pdf", "PDF added: one panel"),
+            ("pdf/deleted.pdf", "PDF deleted: one panel"),
+            (
+                "pdf/page-three.pdf",
+                "page 3 of 12 drawn, the page that changed",
+            ),
+            ("pdf/pages.pdf", "12 → 13 pages: page 13 alone, as added"),
+            ("pdf/fewer.pdf", "13 → 12 pages: page 13 alone, as removed"),
+            ("pdf/cut.pdf", "cut short: binary"),
+            ("pdf/locked.pdf", "needs a password: binary"),
+            (
+                "pdf/heavy.pdf",
+                "a page too costly to draw: could not be decoded",
+            ),
+            (
+                "pdf/large.pdf",
+                "4 MiB: its bytes first, its size from the worker",
+            ),
         ]
         .into_iter()
         .map(|(path, shows)| (path.to_owned(), shows)),
@@ -228,6 +247,42 @@ fn two_frame_gif(seed: u8) -> Vec<u8> {
         assets::gradient(48, 32, seed),
         assets::gradient(48, 32, seed.wrapping_add(100)),
     ])
+}
+
+/// Twelve pages, each its own colour, with `page` (from 1) from `seed`.
+fn twelve_pages(page: usize, seed: u8) -> Vec<u8> {
+    let ops: Vec<Vec<u8>> = (1..=12)
+        .map(|n| assets::icon_ops(if n == page { seed } else { n as u8 * 10 }))
+        .collect();
+    let pages: Vec<(u32, u32, &[u8])> = ops.iter().map(|ops| (24, 24, ops.as_slice())).collect();
+    assets::pdf(&pages)
+}
+
+/// `count` pages, all alike.
+fn repeated_pages(count: usize) -> Vec<u8> {
+    let ops = assets::icon_ops(1);
+    assets::pdf(&vec![(24, 24, ops.as_slice()); count])
+}
+
+/// A page whose one 10 KB content stream is listed `repeat` times: a short
+/// file with a long page.
+fn heavy_pdf(repeat: usize) -> Vec<u8> {
+    let mut ops = assets::icon_ops(200);
+    ops.push(b'\n');
+    while ops.len() < 10_000 {
+        ops.extend_from_slice(b"0.5 0.5 0.5 rg 1 1 3 3 re f\n");
+    }
+    assets::pdf_doc(&[(24, 24, &ops)], "", repeat, &[], "")
+}
+
+/// A 4 MiB PDF, past what the frame path sizes itself.
+fn large_pdf() -> Vec<u8> {
+    let mut ops = assets::icon_ops(200);
+    ops.push(b'\n');
+    while ops.len() < 4 << 20 {
+        ops.extend_from_slice(b"0.5 0.5 0.5 rg 1 1 3 3 re f\n");
+    }
+    assets::pdf(&[(24, 24, &ops)])
 }
 
 /// Bytes that are binary and no image: NULs, from `seed`.
@@ -345,6 +400,12 @@ impl Scene {
         self.write("svg/icon.svg", assets::icon_svg(1));
         self.write("svg/label.svg", assets::labelled_svg("Save"));
         self.write("svg/costly.svg", assets::icon_svg(3));
+        for name in ["modified", "deleted", "cut", "locked", "heavy", "large"] {
+            self.write(&format!("pdf/{name}.pdf"), assets::icon_pdf(1));
+        }
+        self.write("pdf/page-three.pdf", twelve_pages(3, 30));
+        self.write("pdf/pages.pdf", repeated_pages(12));
+        self.write("pdf/fewer.pdf", repeated_pages(13));
         // Committed as text before the attribute exists, so no filter runs.
         let object = lfs_object();
         let (oid, pointer) = assets::lfs_pointer(&object, LFS_SEED);
@@ -415,6 +476,22 @@ impl Scene {
         self.write("svg/icon.svg", assets::icon_svg(2));
         self.write("svg/label.svg", assets::labelled_svg("Load"));
         self.write("svg/costly.svg", assets::costly_svg());
+        self.write("pdf/modified.pdf", assets::icon_pdf(200));
+        // Unlike the deleted one, so the two are not paired as a rename.
+        self.write("pdf/added.pdf", twelve_pages(5, 77));
+        self.remove("pdf/deleted.pdf");
+        self.write("pdf/page-three.pdf", twelve_pages(3, 250));
+        self.write("pdf/pages.pdf", repeated_pages(13));
+        self.write("pdf/fewer.pdf", repeated_pages(12));
+        let whole = assets::icon_pdf(2);
+        // Each with a few NULs past its end, as a real PDF's streams carry.
+        self.write("pdf/cut.pdf", [&whole[..60], b"\0\0\0"].concat());
+        self.write(
+            "pdf/locked.pdf",
+            [assets::locked_pdf(), b"%\0\0\0\n".to_vec()].concat(),
+        );
+        self.write("pdf/heavy.pdf", heavy_pdf(2_400));
+        self.write("pdf/large.pdf", large_pdf());
         // After the last index write: status must read it again and neither
         // start the driver nor list it.
         self.racy("lfs/unchanged.png");
@@ -631,7 +708,29 @@ mod tests {
                 "{path} has no size line: {listed:?}"
             );
         }
-        for path in ["broken/truncated-header.png", "bin/blob.dat"] {
+        for path in [
+            "pdf/modified.pdf",
+            "pdf/page-three.pdf",
+            "pdf/pages.pdf",
+            "pdf/fewer.pdf",
+            "pdf/heavy.pdf",
+            "pdf/large.pdf",
+        ] {
+            let listed = at(path);
+            assert!(
+                listed.before && listed.after,
+                "{path} has no size line: {listed:?}"
+            );
+        }
+        let sides = |path: &str| (at(path).before, at(path).after);
+        assert_eq!(sides("pdf/added.pdf"), (false, true));
+        assert_eq!(sides("pdf/deleted.pdf"), (true, false));
+        for path in [
+            "broken/truncated-header.png",
+            "bin/blob.dat",
+            "pdf/cut.pdf",
+            "pdf/locked.pdf",
+        ] {
             let listed = at(path);
             assert!(
                 listed.binary && !listed.before && !listed.after,
@@ -707,22 +806,29 @@ mod tests {
                 frame.files().len(),
                 vigia::list_rows_wanted(frame.files()),
             );
-            // Once to queue what is on screen, and once more with it built.
-            let mut view = None;
-            for pass in 0..2 {
+            // Queued, built, and drawn again; as the shell does, a size the
+            // worker found is given to the frame, and drawn once more.
+            let view = loop {
                 let mut drawn = app
                     .view(&mut frame, &mut highlighter, &history, body)
                     .expect("view");
                 pictures.attach(&mut drawn.rows, &frame);
-                if pass == 0 {
-                    assert!(
-                        pictures.settle(Duration::from_secs(60)),
-                        "the pictures were not built"
-                    );
+                assert!(
+                    pictures.settle(Duration::from_secs(60)),
+                    "the pictures were not built"
+                );
+                let mut drawn = app
+                    .view(&mut frame, &mut highlighter, &history, body)
+                    .expect("view");
+                pictures.attach(&mut drawn.rows, &frame);
+                let sizes = pictures.found_sizes();
+                if sizes.is_empty() {
+                    break drawn;
                 }
-                view = Some(drawn);
-            }
-            let view = view.expect("two passes");
+                for (stamp, width, height) in sizes {
+                    frame.learn_size(stamp, width, height);
+                }
+            };
             render(
                 &mut Buffer::empty(area),
                 area,
@@ -868,9 +974,56 @@ mod tests {
                     "{path} at {width}x{height}"
                 );
             }
-            for path in ["broken/truncated-header.png", "bin/blob.dat"] {
-                assert_eq!(at(path).reasons, ["binary"], "{path} at {width}x{height}");
+            for path in [
+                "broken/truncated-header.png",
+                "bin/blob.dat",
+                "pdf/cut.pdf",
+                "pdf/locked.pdf",
+            ] {
+                // A file near the end can be in two views.
+                let reasons = &at(path).reasons;
+                assert!(
+                    !reasons.is_empty() && reasons.iter().all(|reason| reason == "binary"),
+                    "{path} at {width}x{height}: {reasons:?}"
+                );
             }
+            for path in [
+                "pdf/modified.pdf",
+                "pdf/page-three.pdf",
+                "pdf/pages.pdf",
+                "pdf/fewer.pdf",
+                "pdf/large.pdf",
+            ] {
+                assert!(
+                    at(path).picture_rows > 0,
+                    "{path} drew no picture at {width}x{height}"
+                );
+            }
+            assert!(
+                said("pdf/page-three.pdf").starts_with("page 3 of 12 · "),
+                "{:?}",
+                at("pdf/page-three.pdf")
+            );
+            assert!(
+                said("pdf/pages.pdf").starts_with("page 13 of 13 added · 12 → 13 pages"),
+                "{:?}",
+                at("pdf/pages.pdf")
+            );
+            assert!(
+                said("pdf/fewer.pdf").starts_with("page 13 of 13 removed · 13 → 12 pages"),
+                "{:?}",
+                at("pdf/fewer.pdf")
+            );
+            assert_eq!(
+                said("pdf/heavy.pdf"),
+                "could not be decoded",
+                "at {width}x{height}"
+            );
+            assert!(
+                sized("pdf/large.pdf").0.starts_with("PDF 24×24 pt"),
+                "the worker's size never reached the line: {:?}",
+                at("pdf/large.pdf")
+            );
             for path in [
                 "src/added.rs",
                 "src/deleted.rs",

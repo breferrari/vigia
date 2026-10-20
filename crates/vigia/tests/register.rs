@@ -474,7 +474,11 @@ fn markdown() -> Vec<(String, String)> {
             }
             if path.is_dir() {
                 walk(&path, out);
-            } else if path.extension().is_some_and(|e| e == "md") && !name.contains("NOTICE") {
+            } else if path.extension().is_some_and(|e| e == "md")
+                && !name.contains("NOTICE")
+                // A vendored crate's own documents are its authors' text.
+                && !(path.components().any(|c| c.as_os_str() == "vendor") && name != "PATCHES.md")
+            {
                 out.push(path);
             }
         }

@@ -341,7 +341,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in
 | ✅ | Decoder panic stops the pane. **Found by review on #643; before #637 and #638, which each add a decoder** | [#645](https://github.com/breferrari/vigia/issues/645) |
 | ✅ | SVG image panels | [#637](https://github.com/breferrari/vigia/issues/637) |
 | ✅ | Scene test bed for every picture state. **Asked by the reader; before #638, which needs eyes on its pictures** | [#655](https://github.com/breferrari/vigia/issues/655) |
-| ⬜ | PDF image panels | [#638](https://github.com/breferrari/vigia/issues/638) |
+| ✅ | PDF image panels | [#638](https://github.com/breferrari/vigia/issues/638) |
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
 | ✅ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
 | ✅ | Run no filter driver during status **Found while building #655** | [#659](https://github.com/breferrari/vigia/issues/659) |

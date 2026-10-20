@@ -754,7 +754,7 @@ impl Worktree {
         }
 
         let diff = self.diff_attribute(change)?;
-        if let Some((mut picture, cost)) = self.drawn_svg(change, svg, diff) {
+        if let Some((mut picture, cost)) = self.drawn_vector(change, svg, diff) {
             let mut drawn = hunk::compute(change.path.clone(), &[], &[], Some(false));
             drawn.bytes = cost;
             self.stamp(change, &mut picture);
@@ -828,21 +828,74 @@ impl Worktree {
         Picture::of(before, after)
     }
 
-    /// The picture of a changed SVG drawn in place of its text, and the bytes
-    /// read to learn it: none when an attribute says how to diff it, or a side
-    /// gives no size.
-    fn drawn_svg(
+    /// The picture of a changed SVG or PDF, and the bytes read to learn it:
+    /// none when an attribute says how to diff it, or a side gives no size.
+    fn drawn_vector(
         &self,
         change: &FileChange,
         svg: bool,
         diff: Option<bool>,
     ) -> Option<(Picture, u64)> {
-        if !svg || diff.is_some() || !picture::svg_named(&change.path) {
+        if !svg || diff.is_some() {
             return None;
         }
         let mut cost = 0;
-        self.svg_picture(change, &mut cost)
-            .map(|picture| (picture, cost))
+        let picture = if picture::svg_named(&change.path) {
+            self.svg_picture(change, &mut cost)
+        } else if picture::pdf_named(&change.path) {
+            self.pdf_picture(change, &mut cost)
+        } else {
+            return None;
+        };
+        picture.map(|picture| (picture, cost))
+    }
+
+    /// The picture of a changed PDF when every side it has gives a size. Each
+    /// side is read whole, up to [`picture::PDF_LIMIT`].
+    fn pdf_picture(&self, change: &FileChange, cost: &mut u64) -> Option<Picture> {
+        use std::io::Read;
+        let blob = |id: gix::ObjectId, cost: &mut u64| {
+            // Its size from the object's header, without inflating it.
+            let length = self.repo().find_header(id).ok()?.size();
+            if length > picture::PDF_LIMIT {
+                return None;
+            }
+            if length > picture::PDF_SIZED_HERE {
+                return Some(picture::pdf_unsized(length));
+            }
+            let held = self.blob(id, &change.path).ok()?;
+            *cost += held.len() as u64;
+            picture::pdf_side(held)
+        };
+        let after = match change.after {
+            Some(Side::Worktree) => {
+                let path = self.workdir.join(&change.path);
+                let meta = std::fs::symlink_metadata(&path).ok()?;
+                // A link's bytes are its target, and a fifo blocks whoever opens it.
+                if !meta.is_file() || meta.len() > picture::PDF_LIMIT {
+                    return None;
+                }
+                if meta.len() > picture::PDF_SIZED_HERE {
+                    // Only its header here; the worker reads the rest.
+                    let mut head = Vec::new();
+                    std::fs::File::open(&path)
+                        .ok()?
+                        .take(picture::PDF_HEAD as u64)
+                        .read_to_end(&mut head)
+                        .ok()?;
+                    *cost += head.len() as u64;
+                    Some(picture::pdf_headed(&head).then(|| picture::pdf_unsized(meta.len())))
+                } else {
+                    let bytes = std::fs::read(&path).ok()?;
+                    *cost += bytes.len() as u64;
+                    Some(picture::pdf_side(bytes))
+                }
+            }
+            Some(Side::Blob(id)) => Some(blob(id, cost)),
+            None => None,
+        };
+        let before = change.before.map(|id| blob(id, cost));
+        Picture::of(before, after)
     }
 
     /// The picture of a changed SVG when every side it has gives a size. Reads
@@ -1053,7 +1106,7 @@ impl Worktree {
         }
 
         let diff = self.diff_attribute(change)?;
-        if let Some((_, cost)) = self.drawn_svg(change, svg, diff) {
+        if let Some((_, cost)) = self.drawn_vector(change, svg, diff) {
             let mut drawn = hunk::measure(&[], &[], Some(false));
             drawn.bytes = cost;
             return Ok(drawn);
@@ -1089,17 +1142,24 @@ impl Worktree {
         hunk::is_binary(&window).then_some(window)
     }
 
-    /// What `.gitattributes` says about diffing `change`. See
-    /// [`Filter::diff_attribute`].
+    /// What `.gitattributes` says about diffing `change`: as text, never as
+    /// text, or nothing. See [`Filter::diff_attribute`].
     fn diff_attribute(&self, change: &FileChange) -> Result<Option<bool>> {
+        use crate::filter::Diff;
         let (diff, cleaned) = self.with_filter(|filter| filter.diff_attribute(&change.path))?;
         // A stored pointer against the content it stands for does not diff. Git
         // runs no clean filter on a symlink.
         let pointer = change.before.is_some() && change.after == Some(Side::Worktree);
-        Ok(if cleaned && pointer && !change.maybe_symlink {
-            Some(false)
-        } else {
-            diff
+        if cleaned && pointer && !change.maybe_symlink {
+            return Ok(Some(false));
+        }
+        Ok(match diff {
+            None => None,
+            Some(Diff::Unset) => Some(false),
+            Some(Diff::Set) => Some(true),
+            // No textconv runs here, so a PDF's driver would diff its bytes.
+            Some(Diff::Driver) if picture::pdf_path(&change.path) => None,
+            Some(Diff::Driver) => Some(true),
         })
     }
 

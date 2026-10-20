@@ -472,6 +472,13 @@ fn svg_first_paint() {
     );
 }
 
+/// The same with a changed PDF first.
+#[cfg(feature = "pdf")]
+#[test]
+fn pdf_first_paint() {
+    picture_first_paint("a.pdf", support::icon_pdf(1), support::icon_pdf(200));
+}
+
 /// I7 with a changed picture first: `path` committed as `old` and rewritten
 /// as `new`, and the first frame decodes nothing.
 fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
@@ -489,7 +496,9 @@ fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
     let began = Instant::now();
     let worktree = Worktree::discover(scratch.root()).expect("discover");
     let mut frame = worktree.frame();
+    let opened = began.elapsed();
     frame.advance().expect("advance");
+    let advanced = began.elapsed();
     let mut highlighter = Highlighter::eager();
     let mut app = App::new();
     app.draw_pictures(true);
@@ -513,12 +522,15 @@ fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
         Default::default(),
         "",
     );
+    let made = began.elapsed();
     let body = body_layout(pane, &chrome, frame.files().len(), frame.files().len());
     let mut buf = Buffer::empty(pane);
     let mut view = app
         .view(&mut frame, &mut highlighter, &history, body)
         .expect("view");
+    let viewed = began.elapsed();
     pictures.attach(&mut view.rows, &frame);
+    let attached = began.elapsed();
     render(
         &mut buf,
         pane,
@@ -528,6 +540,9 @@ fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
         &chrome,
     );
     let first = began.elapsed();
+    eprintln!(
+        "note: first paint with {path}: opened {opened:?}, advanced {advanced:?}, pictures made {made:?}, viewed {viewed:?}, attached {attached:?}, painted {first:?}"
+    );
 
     assert_eq!(
         pictures::decodes_off_worker(),

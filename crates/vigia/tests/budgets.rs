@@ -3331,6 +3331,210 @@ fn pictures_frame_svg() {
     );
 }
 
+/// The same with a changed PDF's pictures on screen.
+#[cfg(feature = "pdf")]
+#[test]
+fn pictures_frame_pdf() {
+    pictures_frame_of(
+        ProtocolType::Halfblocks,
+        "a/doc.pdf",
+        support::icon_pdf(1),
+        support::icon_pdf(200),
+    );
+}
+
+/// The worker draws a page of 20 MB of content within its bound: priced by
+/// its length, it renders small. Measured 2026-10-19 on macOS, release:
+/// 0.29 to 0.51 seconds from 3 to 20 MB, the longest at 20.
+#[cfg(feature = "pdf")]
+#[test]
+fn pdf_stream_bound() {
+    use vigia::pictures::{Inks, Pictures};
+
+    let mut ops = support::icon_ops(200);
+    ops.push(b'\n');
+    while ops.len() < 10_000 {
+        ops.extend_from_slice(b"0.5 0.5 0.5 rg 1 1 3 3 re f\n");
+    }
+    let heavy = support::pdf_doc(&[(24, 24, &ops)], "", 2_000, &[], "");
+    let scratch = Scratch::new("pdf-stream-bound");
+    scratch.write("a.pdf", support::icon_pdf(1));
+    scratch.commit_all("baseline");
+    scratch.write("a.pdf", &heavy);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let pane = Rect::new(0, 0, 120, 40);
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        ratatui_image::picker::Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let layout = layout_of(&app, pane, frame.files().len());
+    let history = History::new();
+    let mut highlighter = Highlighter::eager();
+    let mut view = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+    let began = Instant::now();
+    pictures.attach(&mut view.rows, &frame);
+    assert!(
+        pictures.settle(Duration::from_secs(60)),
+        "the picture was not built"
+    );
+    let took = began.elapsed();
+    eprintln!("note: a page of 20 MB of content built in {took:?}, off the paint");
+    assert!(
+        took < budget(Duration::from_millis(600)),
+        "the worker took {took:?} for a page of 20 MB of content"
+    );
+}
+
+/// A PDF of about 16 MiB, the most the frame path reads: an image's worth of
+/// bytes it skips, and a content stream that inflates to 15 MiB, which it
+/// measures.
+#[cfg(feature = "pdf")]
+fn heaviest_pdf(seed: u8) -> Vec<u8> {
+    let image_bytes: Vec<u8> = (0..15u32 << 20).map(|n| (n as u8) ^ seed).collect();
+    let mut image = format!(
+        "<< /Type /XObject /Subtype /Image /Width 2048 /Height 2048 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n",
+        image_bytes.len()
+    )
+    .into_bytes();
+    image.extend_from_slice(&image_bytes);
+    image.extend_from_slice(b"\nendstream");
+    let zeros = support::zlib_zeros(15 << 20);
+    let mut content = format!(
+        "<< /Filter /FlateDecode /Length {} >>\nstream\n",
+        zeros.len()
+    )
+    .into_bytes();
+    content.extend_from_slice(&zeros);
+    content.extend_from_slice(b"\nendstream");
+    support::pdf_doc(
+        &[(24, 24, &support::icon_ops(seed))],
+        "/XObject << /Im1 5 0 R >>",
+        1,
+        &[&image, &content],
+        "",
+    )
+}
+
+/// I9 while five PDFs of about 16 MiB each are changed on screen: the frame
+/// that first sees them reads their headers alone, and no frame after it
+/// reads them at all.
+#[cfg(feature = "pdf")]
+#[test]
+fn pdf_frame_read() {
+    use vigia::pictures::{Inks, Pictures};
+
+    let scratch = Scratch::new("i9-pdf-read");
+    for n in 0..5 {
+        scratch.write(&format!("a/doc_{n}.pdf"), heaviest_pdf(n));
+    }
+    scratch.commit_all("baseline");
+    for n in 0..5 {
+        scratch.write(&format!("a/doc_{n}.pdf"), heaviest_pdf(n + 100));
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let pane = Rect::new(0, 0, 120, 40);
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let theme = Theme::dark();
+    let mut buf = Buffer::empty(pane);
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        ratatui_image::picker::Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let screen_layout = layout_of(&app, pane, frame.files().len());
+    let mut paint = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
+        let chrome = app.chrome(
+            "fixture",
+            None,
+            vigia::Stood {
+                standing: &Standing::Current,
+                now: 0,
+            },
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
+        let mut view = app
+            .view(frame, highlighter, &history, screen_layout)
+            .expect("view");
+        pictures.attach(&mut view.rows, frame);
+        render(&mut buf, pane, &view, &theme, Glyphs::default(), &chrome);
+        view
+    };
+    let cold = Instant::now();
+    let view = paint(&mut frame, &mut app, &mut highlighter);
+    let cold = cold.elapsed();
+    let sized = view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Sized { .. }))
+        .count();
+    assert_eq!(
+        sized, 5,
+        "not every PDF drew a size line, so this would time less"
+    );
+    eprintln!("note: the first frame with {sized} changed 16 MiB PDFs on screen took {cold:?}");
+    // Read once more when they settle, as every file read inside the margin is.
+    settle(&mut frame);
+
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    // Each is sized on the worker, so the frame that first sees them reads
+    // only their headers.
+    assert!(
+        cold < budget(I9_FRAME),
+        "I9: the first frame with five changed 16 MiB PDFs on screen took {cold:?}"
+    );
+    let _timed = exclusively_timed();
+    let mut timed = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
+        time_cpu(|| {
+            paint(frame, app, highlighter);
+        })
+    };
+    for _ in 0..WARMUP_FRAMES {
+        timed(&mut frame, &mut app, &mut highlighter);
+    }
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        frames.push(timed(&mut frame, &mut app, &mut highlighter).0);
+    }
+    eprintln!(
+        "note: frames with five 16 MiB PDFs on screen p50 {:?}, p99 {:?}",
+        frames.percentile(0.5),
+        frames.percentile(0.99)
+    );
+    holds_p99(
+        "I9 over half: a frame with five changed 16 MiB PDFs on screen, after the one that read them",
+        budget(I9_FRAME / 2),
+        &frames,
+        || format!("({sized} PDFs sized on screen)"),
+        || timed(&mut frame, &mut app, &mut highlighter),
+    );
+}
+
 fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<u8>) {
     use vigia::pictures::{self, Inks, Pictures};
 

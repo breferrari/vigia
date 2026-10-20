@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/vigia-core", "crates/vigia", "xtask"]
+# Patched, not a member: see `vendor/hayro-syntax/PATCHES.md`.
+exclude = ["vendor/hayro-syntax"]
 
 [workspace.package]
 # Both crates move together, because both are published together and a registry
@@ -71,6 +73,8 @@ ratatui-image = { version = "=12.0.0-rc.3", default-features = false, features =
 resvg = { version = "0.48.1", default-features = false, features = ["raster-images", "text", "system-fonts", "memmap-fonts"] }
 # An SVG root's size for the size line, without parsing the document.
 svgtypes = "0.16.1"
+hayro = "0.8.0"
+hayro-syntax = "0.8.0"
 # The requirement `usvg` declares, so the two resolve to one copy.
 skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.
@@ -324,6 +328,8 @@ ci = ["github"]
 # way in, and `release.yml`'s own dispatch form is the way to rehearse, since it
 # defaults to the tag `dry-run`, meaning build everything and publish nothing.
 dispatch-releases = true
+# PDF pictures, which `cargo install` builds leave out (`crates/vigia`).
+features = ["pdf"]
 # The release workflow does not run on pull requests. dist's default runs
 # its plan job on every PR and lists the other six jobs as skipped; the
 # config is checked by `bump and release` with `rehearse=true` instead.
@@ -364,3 +370,9 @@ missing_panics_doc = "warn"
 missing_safety_doc = "warn"
 undocumented_unsafe_blocks = "warn"
 doc_markdown = "warn"
+
+# A PDF's streams are decoded within a limit only by this copy, which adds
+# one to `hayro-syntax` 0.8.0. `vendor/hayro-syntax/PATCHES.md` holds the
+# change, to diff against upstream.
+[patch.crates-io]
+hayro-syntax = { path = "vendor/hayro-syntax" }
