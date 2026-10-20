@@ -1170,12 +1170,9 @@ rail = off
     // And the file is still the one the next launch will refuse, so nothing was
     // repaired behind their back.
     assert_matches!(
-
-            config::parse(&out),
-            Err(ConfigError::RepeatedKey { key, .. }) if key == "rail"
-        ,
-        "the rewrite made a file `parse` accepts out of one it refuses:
-    {out}"
+        config::parse(&out),
+        Err(ConfigError::RepeatedKey { key, .. }) if key == "rail",
+        "the rewrite made a file `parse` accepts out of one it refuses:\n{out}"
     );
 }
 

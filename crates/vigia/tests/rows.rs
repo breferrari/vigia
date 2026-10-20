@@ -888,10 +888,8 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
         .expect("view");
 
     assert_matches!(
-
-            view.rows.first(),
-            Some(Row::File(entry)) if entry.churn.is_none()
-        ,
+        view.rows.first(),
+        Some(Row::File(entry)) if entry.churn.is_none(),
         "a binary file's heading is {:?}, and a +/- count for it would be a lie",
         view.rows.first()
     );
