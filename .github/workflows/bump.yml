@@ -87,7 +87,7 @@ jobs:
       # default fails quietly rather than loudly: a shallow checkout carries no
       # tags, so the range the notes are written from has no previous release to
       # start at and the section comes out holding the whole history or nothing.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
           fetch-depth: 0

@@ -62,7 +62,7 @@ jobs:
       NEXTEST_PROFILE: mutants
       VIGIA_TEST_CEILING: "15"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
