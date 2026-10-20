@@ -2504,7 +2504,8 @@ type LfsKey = (Fingerprint, gix::ObjectId);
 const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 
 /// The most rename scores kept before the cache starts again.
-const PAIRS_KEPT: usize = 4096;
+#[doc(hidden)]
+pub const PAIRS_KEPT: usize = 4096;
 
 /// `repo` with every `filter` section removed from its configuration.
 fn without_drivers(repo: &gix::Repository) -> Result<gix::Repository> {

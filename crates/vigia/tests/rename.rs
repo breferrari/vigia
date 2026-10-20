@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use ratatui_image::picker::Picker;
 use support::{Scratch, changes_sorted, noise, tail_changed};
 use vigia::pictures::{Inks, Pictures};
-use vigia_core::ChangeKind;
+use vigia_core::{ChangeKind, FRAME_BUDGET, LISTED_MAX, PAIRS_KEPT, READ_COST};
 
 #[test]
 fn binary_rename_paired_by_worker() {
@@ -357,24 +357,39 @@ fn full_scores_stop_listing() {
         Picker::halfblocks(),
         Box::new(|| {}),
     );
+    // Counted, not timed: a slow runner scores slowly, and only a walk that
+    // re-arms itself walks more. A side costs at most a header and a sniff, and
+    // a walk stops short only once a read no longer fits its budget.
+    let side_walks_max =
+        (frame.files().len() as u64 * 2 * READ_COST).div_ceil(FRAME_BUDGET - READ_COST) + 1;
+    // Each pair walk follows a listed batch landing, and listing stops once the
+    // scores are full.
+    let pair_walks_max = PAIRS_KEPT.div_ceil(LISTED_MAX) + 1;
     let (began, mut quiet, mut walks) = (Instant::now(), 0, 0);
+    let (mut side_walks, mut pair_walks) = (0, 0);
     while quiet < 100 {
         assert!(
-            began.elapsed() < Duration::from_secs(10),
-            "the pane still walks after 10s, {} walks",
+            began.elapsed() < Duration::from_mins(1),
+            "the pane still walks after a minute, {} walks",
             frame.stats().walks
         );
         let now = std::time::SystemTime::now();
         if let Some(wait) = frame.settles_in(now) {
             std::thread::sleep(wait);
+            let before = frame.stats().walks;
             frame
                 .advance_if_settled(std::time::SystemTime::now())
                 .expect("advance");
+            side_walks += frame.stats().walks - before;
         }
         pictures.score_pairs(&frame);
         std::thread::sleep(Duration::from_millis(2));
         let found = pictures.found_pairs();
-        pictures.pair(&mut frame, found).expect("pair");
+        pair_walks += u64::from(pictures.pair(&mut frame, found).expect("pair"));
+        assert!(
+            side_walks <= side_walks_max && pair_walks <= pair_walks_max as u64,
+            "{side_walks} walks to weigh sides (at most {side_walks_max}) and {pair_walks} to pair (at most {pair_walks_max})"
+        );
         quiet = if frame.stats().walks == walks {
             quiet + 1
         } else {
