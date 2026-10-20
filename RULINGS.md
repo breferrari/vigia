@@ -566,12 +566,10 @@ Ruled 2026-10-19, reader, relayed by the coordinator session. A pull request tha
 
 ## #638 — a decode limit in hayro-syntax
 
-Ruled 2026-10-19, reader, relayed by the coordinator session. `hayro` holds every stream it decodes whole, and a stream can decode to a thousand times its size: 1019 KiB of object stream decoded to 1 GiB inside `Pdf::new`, measured 2026-10-19, release, macOS aarch64. The ruling is a vendored `hayro-syntax` 0.8.0 with a thread-local decode limit, used through `[patch.crates-io]`, and PDFs behind a `pdf` feature that a crates.io build leaves off (SPEC §6).
+Ruled 2026-10-19, reader, relayed by the coordinator session. `hayro` holds every stream it decodes whole, and a stream can decode to a thousand times its size: 1019 KiB of object stream decoded to 1 GiB inside `Pdf::new`, measured 2026-10-19, release, macOS aarch64. The ruling is a vendored `hayro-syntax` 0.8.0 with a thread-local decode limit, published with the rest of the `hayro` chain as the `vigia-hayro*` forks (ruled 2026-10-21, reader), and PDFs behind a `pdf` feature, off by default (SPEC §6).
 
 **A parallel scanner was not kept.** The first build measured each stream before `hayro` parsed the file, with a tokenizer and `flate2`. Review found it failed open: it had to guess which streams `hayro` would decode, and an encrypted stream, the raw-deflate fallback, a comment inside a dictionary, an object stream decoded whatever its `/Type`, an inherited resource and an inline image each went past it. Every one is a decode it did not predict. The limit inside `hayro-syntax` sees every decode, because every decode goes through `Stream`.
 
-**A fork published as its own crate was not taken.** It would let a crates.io build draw PDFs, at the cost of a second name for the same code that has to follow every upstream release. The patch is about a hundred lines, and `PATCHES.md` keeps it diffable.
-
 **Accepting the gap was not taken.** A PDF an agent writes would be able to take a gigabyte of memory from a pane meant to run for days.
 
-The patch is offered upstream: a comment on [LaurenzV/hayro#1301](https://github.com/LaurenzV/hayro/pull/1301), which proposes limits, asks for them to be off by default. When `hayro` ships a limit, the vendored copy and the feature go.
+The patch is offered upstream: a comment on [LaurenzV/hayro#1301](https://github.com/LaurenzV/hayro/pull/1301), which proposes limits, asks for them to be off by default. When `hayro` ships a limit, the forks go and the workspace takes that release.
