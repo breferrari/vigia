@@ -103,9 +103,12 @@ fn binary_rename_size_gate() {
     let old = noise(3, 10_000);
     let new = [old.clone(), noise(4, 11_000)].concat();
     let scratch = moved("rename-size", &[("a.bin", old)], &[("b.bin", new)]);
-    let changes = changes_sorted(&scratch.worktree());
-    assert_eq!(kind_of(&changes, "a.bin"), &ChangeKind::Removed);
-    assert_eq!(kind_of(&changes, "b.bin"), &ChangeKind::Added);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    // Not read at all: the sizes decide first.
+    assert_eq!(scored(&mut frame), 0, "a pair the sizes rule out was read");
+    assert_eq!(kind_of(frame.files(), "a.bin"), &ChangeKind::Removed);
+    assert_eq!(kind_of(frame.files(), "b.bin"), &ChangeKind::Added);
 }
 
 #[test]
@@ -226,4 +229,46 @@ fn binary_rename_large_on_worker() {
     frame.advance().expect("advance");
     assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
     assert!(frame.unscored_pairs().is_empty());
+}
+
+#[test]
+fn binary_rename_smallest_first() {
+    // Two small pairs and one large one, more than a frame together: the
+    // small ones are scored first.
+    let small: Vec<Vec<u8>> = (0..2).map(|n| noise(30 + n, 60_000)).collect();
+    let large = noise(40, 450_000);
+    let scratch = moved(
+        "rename-smallest",
+        &[
+            ("s0.bin", small[0].clone()),
+            ("s1.bin", small[1].clone()),
+            ("l.bin", large.clone()),
+        ],
+        &[
+            ("t0.bin", tail_changed(&small[0], 0.1)),
+            ("t1.bin", tail_changed(&small[1], 0.1)),
+            ("m.bin", tail_changed(&large, 0.1)),
+        ],
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "t0.bin"), &renamed("s0.bin"));
+    assert_eq!(kind_of(frame.files(), "t1.bin"), &renamed("s1.bin"));
+}
+
+#[test]
+fn text_rename_left_to_gix() {
+    // Long lines each changed at the end: git's chunk score keeps most of
+    // them, and gix's line score keeps none. Text keeps gix's score.
+    let line = |n: usize, tail: &str| format!("{}{n:04}{tail}\n", "x".repeat(200));
+    let old: String = (0..100).map(|n| line(n, "old")).collect();
+    let new: String = (0..100).map(|n| line(n, "new")).collect();
+    let scratch = moved(
+        "rename-text",
+        &[("a.txt", old.into_bytes())],
+        &[("b.txt", new.into_bytes())],
+    );
+    let changes = changes_sorted(&scratch.worktree());
+    assert_eq!(kind_of(&changes, "b.txt"), &ChangeKind::Added);
 }
