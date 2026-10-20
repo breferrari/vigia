@@ -40,10 +40,11 @@ sh .claude/skills/take-next/preflight.sh       # does the spec still agree with 
 
 `next.sh` selects the earliest eligible section of `ROADMAP.md` on `origin/main`:
 
-- **Order is the roadmap's section order.** It is versioned and reviewed, so a change to it shows in a diff. A section need not be a phase: the reader can put a block among the phases. The walk starts at the first `## Phase` heading, so a block above it is not read. A section whose heading names a release, as in "right after 1.2.0", is not taken until that release's tag is on origin, and nothing after it is taken before it: `next.sh` answers `waiting:` instead. Milestones play no part in the order, so renaming one changes nothing.
-- **A section is eligible when a row not marked done names an open issue.** A finished section is never selected. The walk stops at `## Shelf`. An empty answer means everything above it is done: find out whether that is true.
+- **Order is the roadmap's section order**, from the first `## Phase` heading to `## Shelf`. A section need not be a phase. Milestones are not read.
+- **A section is eligible when a row not marked done names an open issue.** An empty answer means all is done.
+- **A heading naming a release ("right after 1.2.0") waits for its tag on origin**, and blocks the sections after it: the answer is `waiting:`.
 
-After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/take-next/selftest.sh`. Close a milestone when it has no open issues: a section and a milestone can hold different issues.
+After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/take-next/selftest.sh`. Close a milestone when it has no open issues.
 
 `ROADMAP.md` declares the next task and links every issue, open or closed. The tracker holds the state of each issue. If the two disagree, fix the roadmap in the same pass.
 
@@ -59,7 +60,7 @@ First, the script makes sure that the whole board arrived. A truncated fetch cau
 3. The mark on each roadmap row agrees with the state of its issue, and the issue exists.
 4. Each open issue has a milestone.
 5. The open bullets in `SPEC.md` §10 are printed for you to read. A bullet with ordering words (*before*, *first*, *until*, *blocked*) and no issue is a blocker. File an issue for it. Then decide whether it is in scope or goes first. Do this before you plan.
-6. The roadmap and the tracker agree on which phases exist. Each open milestone with work has a `## Phase <n>` section of the same title, and each `## Phase` section with an open row on an open issue has an open milestone. A section that is not a phase, such as a block the reader placed before one, has no milestone and is not compared. It also reports an open issue that no section offers, and prints the section `next.sh` takes.
+6. The roadmap and the tracker agree on which phases exist: each open milestone with work has a `## Phase` section of its title, and each phase with open rows has an open milestone. It also reports an open issue no section offers.
 7. Each issue, open or closed, has a roadmap row.
 8. Given an issue number, no worktree, branch or plan comment names it.
 
