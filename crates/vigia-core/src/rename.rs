@@ -13,6 +13,9 @@ pub(crate) const RENAME_LIMIT: usize = 1000;
 /// The most candidate bytes one frame scores. A pair past it is left to the
 /// picture worker.
 pub(crate) const FRAME_BUDGET: u64 = 256 * 1024;
+/// What scoring one pair costs that budget beyond its sides' bytes, so a
+/// frame scores at most 256 pairs however small.
+pub(crate) const PAIR_COST: u64 = 1024;
 
 /// One pair of versions: the removal's blob stamp and the addition's stamp.
 pub type PairKey = (u64, u64);

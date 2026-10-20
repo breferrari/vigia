@@ -86,10 +86,14 @@ pub struct Worktree {
     unscored: RefCell<Vec<rename::Candidate>>,
     /// Candidate bytes scored, for the tests that bound a frame.
     pair_bytes: Cell<u64>,
+    /// Pairs scored, for the same.
+    pairs_scored: Cell<u64>,
     /// Whether each side version a walk weighed is binary, by its stamp.
     binaries: RefCell<HashMap<u64, bool>>,
     /// How many times `pair_scores` started again.
     pair_epoch: Cell<u64>,
+    /// Each blob's size, as the rename pass found it.
+    blob_sizes: RefCell<HashMap<gix::ObjectId, u64>>,
 }
 
 impl Worktree {
@@ -129,8 +133,10 @@ impl Worktree {
             pair_budget: Cell::new(rename::FRAME_BUDGET),
             unscored: RefCell::new(Vec::new()),
             pair_bytes: Cell::new(0),
+            pairs_scored: Cell::new(0),
             binaries: RefCell::new(HashMap::new()),
             pair_epoch: Cell::new(0),
+            blob_sizes: RefCell::new(HashMap::new()),
         })
     }
 
@@ -483,7 +489,20 @@ impl Worktree {
             };
             match side {
                 Side::Blob(id) => {
-                    let size = self.repo().find_header(id).ok()?.size();
+                    // A blob's size never changes, so its header is read once.
+                    let known = self.blob_sizes.borrow().get(&id).copied();
+                    let size = match known {
+                        Some(size) => size,
+                        None => {
+                            let size = self.repo().find_header(id).ok()?.size();
+                            let mut sizes = self.blob_sizes.borrow_mut();
+                            if sizes.len() >= PAIRS_KEPT {
+                                sizes.clear();
+                            }
+                            sizes.insert(id, size);
+                            size
+                        }
+                    };
                     Some((at, size, picture::blob_stamp(&id)))
                 }
                 Side::Worktree => {
@@ -594,6 +613,8 @@ impl Worktree {
             .map(|candidate| candidate.key)
             .collect();
         let mut scored = Vec::new();
+        // Where a candidate's blobs are read, asked once a walk.
+        let mut homes: Option<(PathBuf, PathBuf)> = None;
         for pair in weighed {
             let known = self.pair_scores.borrow().get(&pair.key).copied();
             // `gix` scored every pair with no binary side.
@@ -614,9 +635,12 @@ impl Worktree {
             let cost = unread(pair.from, pair.sizes.0) + unread(pair.to, pair.sizes.1);
             let score = match known {
                 Some(score) => score,
-                None if cost <= self.pair_budget.get() => {
+                None if cost + rename::PAIR_COST <= self.pair_budget.get() => {
                     charge(pair.from, pair.sizes.0);
                     charge(pair.to, pair.sizes.1);
+                    self.pair_budget
+                        .set(self.pair_budget.get() - rename::PAIR_COST);
+                    self.pairs_scored.set(self.pairs_scored.get() + 1);
                     let score = match (spans_of(pair.from), spans_of(pair.to)) {
                         (Some(old), Some(new)) => old.score(&new),
                         _ => 0,
@@ -626,9 +650,12 @@ impl Worktree {
                 }
                 None => {
                     if listed.insert(pair.key) {
+                        let homes = homes.get_or_insert_with(|| {
+                            (self.repo().git_dir().to_owned(), self.lfs_store())
+                        });
                         self.unscored.borrow_mut().push(rename::Candidate {
                             key: pair.key,
-                            sides: self.pair_sources(&changes[pair.from], &changes[pair.to]),
+                            sides: self.pair_sources(&changes[pair.from], &changes[pair.to], homes),
                         });
                     }
                     continue;
@@ -665,20 +692,29 @@ impl Worktree {
             .collect()
     }
 
-    /// Where a candidate pair's two sides are read from: a worktree side as
-    /// its own bytes, as the frame reads it. A blob side that is an LFS pointer
-    /// is under 1 KiB and pairs only with a side as small, which the frame
-    /// always scores itself.
-    fn pair_sources(&self, from: &FileChange, to: &FileChange) -> Sources {
-        let combined = FileChange {
-            before: from.before,
-            ..to.clone()
+    /// Where a candidate pair's two sides are read from, raw, as the frame
+    /// reads them, with no file touched to say so. A blob side that is an LFS
+    /// pointer is under 1 KiB and pairs only with a side as small, which the
+    /// frame always scores itself.
+    fn pair_sources(
+        &self,
+        from: &FileChange,
+        to: &FileChange,
+        (git_dir, store): &(PathBuf, PathBuf),
+    ) -> Sources {
+        let blob = |id| Source::Blob {
+            git_dir: git_dir.clone(),
+            id,
+            store: store.clone(),
         };
-        let mut sides = self.image_sources(&combined);
-        if to.after == Some(Side::Worktree) {
-            sides.after = Some(Source::File(self.workdir.join(&to.path)));
+        Sources {
+            before: from.before.map(blob),
+            after: match to.after {
+                Some(Side::Blob(id)) => Some(blob(id)),
+                Some(Side::Worktree) => Some(Source::File(self.workdir.join(&to.path))),
+                None => None,
+            },
         }
-        sides
     }
 
     /// A fresh scoring budget, for the frame about to walk.
@@ -716,6 +752,11 @@ impl Worktree {
     /// Candidate bytes scored so far.
     pub(crate) fn pair_bytes(&self) -> u64 {
         self.pair_bytes.get()
+    }
+
+    /// Pairs scored so far.
+    pub(crate) fn pairs_scored(&self) -> u64 {
+        self.pairs_scored.get()
     }
 
     /// The commit this branch left the one it tracks, and what to call it.

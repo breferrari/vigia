@@ -36,6 +36,8 @@ pub struct FrameStats {
     pub derived: u64,
     /// Bytes read on the frame path to score binaries as renames.
     pub paired_bytes: u64,
+    /// Rename pairs scored on the frame path.
+    pub pairs_scored: u64,
     /// Status walks: each [`Frame::advance`] that ran.
     pub walks: u64,
 }
@@ -469,6 +471,7 @@ impl<'w> Frame<'w> {
         self.worktree.invalidate_filter();
         self.worktree.renew_pair_budget();
         let paired_before = self.worktree.pair_bytes();
+        let pairs_before = self.worktree.pairs_scored();
         let mut walk = self.worktree.changes_at(&self.standing, options)?;
         for change in &mut walk {
             files.push(change?);
@@ -493,6 +496,7 @@ impl<'w> Frame<'w> {
         }
 
         self.stats.paired_bytes += self.worktree.pair_bytes() - paired_before;
+        self.stats.pairs_scored += self.worktree.pairs_scored() - pairs_before;
         self.stats.walks += 1;
 
         // Nothing above this line mutated the frame's picture of the worktree, which
