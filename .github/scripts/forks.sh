@@ -1,7 +1,7 @@
 #!/bin/sh
 # Each fork under `vendor/` with a `patches/` directory must be the crate
 # published on crates.io, at the checksum its PATCHES.md pins, plus those
-# patches and nothing else. `package.rs::forks_replace_crates` checks the graph.
+# patches and nothing else.
 set -eu
 
 root=$(git rev-parse --show-toplevel)
@@ -13,6 +13,7 @@ sha256() {
 }
 
 failed=0
+checked=0
 for dir in "$root"/vendor/*/; do
   dir=${dir%/}
   [ -d "$dir/patches" ] || continue
@@ -38,9 +39,13 @@ FIELDS
   built="$work/$name/$crate-$version"
   rm -f "$built/.cargo_vcs_info.json" "$built/Cargo.lock"
   for patch in "$dir"/patches/*.patch; do
-    git -C "$built" apply "$patch" 2>/dev/null || (cd "$built" && git apply "$patch")
+    (cd "$built" && git apply "$patch")
   done
-  if diff -r -x PATCHES.md -x patches -x target -x Cargo.lock "$built" "$dir" >"$work/$name.diff"; then
+  # Ours without what the fork adds beside the crate, at its top level only.
+  cp -R "$dir" "$work/ours-$name"
+  rm -rf "$work/ours-$name/patches" "$work/ours-$name/PATCHES.md" "$work/ours-$name/target" "$work/ours-$name/Cargo.lock"
+  checked=$((checked + 1))
+  if diff -r "$built" "$work/ours-$name" >"$work/$name.diff"; then
     echo "vendor/$name: $crate $version plus $(find "$dir/patches" -name '*.patch' | wc -l | tr -d ' ') patches"
   else
     echo "::error::vendor/$name is not $crate $version plus its patches"
@@ -49,4 +54,8 @@ FIELDS
   fi
 done
 
+if [ "$checked" -eq 0 ]; then
+  echo "::error::no fork under vendor/ was checked"
+  failed=1
+fi
 exit "$failed"
