@@ -83,6 +83,11 @@ printf '%s\n' "## Phase 6 - measured" "| | Task | Issue |" "|---|---|---|" \
 open_issues 1
 case_is "last-cell issue" ""
 
+printf '%s\n' "## Phase 6 - measured" "| | Task | Issue |" "|---|---|---|" \
+  "| ⬜ | spaced | [#1](https://example.invalid/1) | " > "$FIX/roadmap.md"
+open_issues 1
+case_is "trailing space" "Phase 6 - measured"
+
 # --ranked shows the whole order the answer came from.
 roadmap "## Phase 6 - measured" "⬜ 1" "## Phase 7 - distribution" "✅ 2" "## Phase 8 - look" "⬜ 3" "⬜ 4"; open_issues 1 3 4
 ranked=$(next_on --ranked | paste -sd '|' -)
@@ -284,6 +289,15 @@ line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":1},{"
 [ "$line" = "DRIFT open issue no section offers: #1" ] \
   && ok "issue no section offers" \
   || no "issue no section offers" "DRIFT open issue no section offers: #1" "$line"
+
+# A failing chooser must not read as agreement. A board at next.sh's own limit
+# makes it refuse.
+printf '%s' '[]' > "$FIX/ms.json"
+jq -n '[range(1; 1001) | {number: ., state: "OPEN", milestone: {title: "Phase 8 - look"}, title: "x"}]' > "$FIX/issues.json"
+line=$(PREFLIGHT_SPEC_FILE="$FIX/spec.md" PREFLIGHT_ROADMAP_FILE="$FIX/roadmap6.md" \
+  PREFLIGHT_ISSUES_FILE="$FIX/issues.json" PREFLIGHT_MILESTONES_FILE="$FIX/ms.json" PREFLIGHT_ISSUE_LIMIT=5000 \
+  sh "$PRE" 2>&1 | grep -c 'next.sh failed')
+[ "$line" = 1 ] && ok "chooser failure reported" || no "chooser failure reported" "1" "$line"
 
 echo "drift:"
 
