@@ -4263,6 +4263,9 @@ fn frame_svgs_match() {
             frame.file,
             frame.snapshot
         );
+        if let Some(run) = frames::overflow(&svg) {
+            panic!("{} draws past its window: {run}", frame.file);
+        }
         // XML forbids a double hyphen inside a comment, and a viewer then draws
         // nothing at all.
         for comment in svg.split("<!--").skip(1) {

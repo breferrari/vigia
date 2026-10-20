@@ -113,11 +113,20 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
         "{} needs a header and a status row",
         frame.file
     );
-    let cols = rows.iter().map(|r| r.chars().count()).max().unwrap_or(0);
-    let width = (16.0 + cols as f64 * CELL + 16.0).round() as usize;
+    // The content spans the leftmost to the rightmost column any row uses, with
+    // the same inset on both sides of every frame, whatever margin the pane drew.
+    let drawn = || rows.iter().filter(|r| !r.trim().is_empty() && !is_rule(r));
+    let first = drawn()
+        .map(|r| r.chars().take_while(|c| *c == ' ').count())
+        .min()
+        .unwrap_or(0);
+    let last_col = drawn().map(|r| r.chars().count()).max().unwrap_or(0);
+    let grid = Grid { first };
+    let w = ((last_col - first) as f64 * CELL + 2.0 * INSET).ceil() as usize;
+    let width = w + 16;
     let body = (rows.len() - 2) * PITCH + 16;
     let height = 8 + TITLE + body + 30 + 8;
-    let (w, h) = (width - 16, height - 16);
+    let h = height - 16;
     let status = 8 + TITLE + body;
     let spans = frame
         .rows
@@ -155,20 +164,35 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
     for (k, row) in rows.iter().enumerate() {
         let tones = tones(row, k == 0, k == last);
         let chars: Vec<char> = row.chars().collect();
-        let (x, y, inner) = if k == 0 {
-            (96, 36, header(&chars, &tones))
+        let (y, inner) = if k == 0 {
+            (36, header(&grid, &chars, &tones))
         } else if k == last {
-            (16, status + 20, spans_of(&chars, &tones, 0, chars.len()))
+            (
+                status + 20,
+                runs(&grid, &chars, &tones, 0, chars.len(), 0.0),
+            )
         } else {
             (
-                16,
                 8 + TITLE + 8 + (k - 1) * PITCH + 14,
-                spans_of(&chars, &tones, 0, chars.len()),
+                runs(&grid, &chars, &tones, 0, chars.len(), 0.0),
             )
         };
+        // A rule across the whole pane is drawn over the content's width only,
+        // inside the pane's two-cell margins, the same on both sides.
+        if is_rule(row) {
+            let _ = writeln!(
+                out,
+                "    <line class=\"rule\" x1=\"{:.1}\" y1=\"{}\" x2=\"{:.1}\" y2=\"{}\" stroke=\"#30363d\" stroke-width=\"1\"/>",
+                grid.x(first),
+                y - 5,
+                grid.x(last_col),
+                y - 5
+            );
+            continue;
+        }
         let _ = writeln!(
             out,
-            "    <text class=\"m row\" x=\"{x}\" y=\"{y}\" font-size=\"13.5\" xml:space=\"preserve\">{inner}</text>"
+            "    <text class=\"m row\" y=\"{y}\" font-size=\"13.5\" xml:space=\"preserve\">{inner}</text>"
         );
     }
     let _ = writeln!(
@@ -180,8 +204,32 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
     out
 }
 
+/// The space between the window's edge and the nearest drawn column.
+const INSET: f64 = 2.0 * CELL;
+
+/// Where the frame's columns sit in the window.
+struct Grid {
+    /// The leftmost column any row draws, which lands at the inset.
+    first: usize,
+}
+
+impl Grid {
+    /// Where cell `col` starts.
+    fn x(&self, col: usize) -> f64 {
+        8.0 + INSET + (col as f64 - self.first as f64) * CELL
+    }
+}
+
+/// A row that is nothing but a rule across the pane.
+fn is_rule(row: &str) -> bool {
+    !row.is_empty() && row.chars().all(|c| c == '─')
+}
+
+/// Where the header's words start, beside the window controls, as in preview.svg.
+const HEADER_X: f64 = 102.0;
+
 /// The header beside the window controls, its right half at its real column.
-fn header(chars: &[char], tones: &[&'static str]) -> String {
+fn header(grid: &Grid, chars: &[char], tones: &[&'static str]) -> String {
     let lead = chars.iter().take_while(|c| **c == ' ').count();
     let mut gap = None;
     let mut run = 0;
@@ -196,20 +244,34 @@ fn header(chars: &[char], tones: &[&'static str]) -> String {
             run = 0;
         }
     }
+    let end = gap.map_or(chars.len(), |(end, _)| end);
+    // The left half moves to HEADER_X, so every run in it moves by the same amount.
+    let shift = HEADER_X - grid.x(lead);
+    let left = runs(grid, chars, tones, lead, end, shift);
     match gap {
-        Some((end, start)) => format!(
-            "{} <tspan x=\"{:.1}\" class=\"{}\">{}</tspan>",
-            spans_of(chars, tones, lead, end),
-            16.0 + start as f64 * CELL,
-            tones[start],
-            escape(&chars[start..].iter().collect::<String>())
-        ),
-        None => spans_of(chars, tones, lead, chars.len()),
+        Some((end, start)) => {
+            assert!(
+                HEADER_X + (end - lead) as f64 * CELL < grid.x(start),
+                "the header's halves overlap"
+            );
+            format!(
+                "{left} {}",
+                runs(grid, chars, tones, start, chars.len(), 0.0)
+            )
+        }
+        None => left,
     }
 }
 
-/// `chars[from..to]` as one tspan per run of a tone.
-fn spans_of(chars: &[char], tones: &[&'static str], from: usize, to: usize) -> String {
+/// `chars[from..to]` as one tspan per run of a tone, each at its own column.
+fn runs(
+    grid: &Grid,
+    chars: &[char],
+    tones: &[&'static str],
+    from: usize,
+    to: usize,
+    shift: f64,
+) -> String {
     let mut out = String::new();
     let mut i = from;
     while i < to {
@@ -218,15 +280,50 @@ fn spans_of(chars: &[char], tones: &[&'static str], from: usize, to: usize) -> S
             j += 1;
         }
         let text: String = chars[i..j].iter().collect();
-        let _ = write!(
-            out,
-            "<tspan class=\"{}\">{}</tspan>",
-            tones[i],
-            escape(&text)
-        );
+        if !text.trim().is_empty() {
+            let _ = write!(
+                out,
+                "<tspan x=\"{:.1}\" class=\"{}\">{}</tspan>",
+                grid.x(i) + shift,
+                tones[i],
+                escape(&text)
+            );
+        }
         i = j;
     }
     out
+}
+
+/// The first text run that ends past the window's inner right edge, if any.
+/// A run's end is its x plus a cell per character.
+pub fn overflow(svg: &str) -> Option<String> {
+    let width: f64 = svg
+        .split("<rect x=\"8\" y=\"8\" width=\"")
+        .nth(1)?
+        .split('"')
+        .next()?
+        .parse()
+        .ok()?;
+    let edge = 8.0 + width;
+    for run in svg.split("<tspan x=\"").skip(1) {
+        let (x, rest) = run.split_once('"')?;
+        let x: f64 = x.parse().ok()?;
+        let text = rest.split_once('>')?.1.split("</tspan>").next()?;
+        let count = text
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&amp;", "&")
+            .chars()
+            .count();
+        let end = x + count as f64 * CELL;
+        if end > edge {
+            return Some(format!(
+                "{text:?} ends at {end:.1}, past the edge at {edge:.1}"
+            ));
+        }
+    }
+    None
 }
 
 /// One colour class per character of `row`.
