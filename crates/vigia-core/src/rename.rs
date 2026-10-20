@@ -67,7 +67,7 @@ pub fn candidate_score(candidate: &Candidate) -> u64 {
 }
 
 /// Whether a score pairs.
-pub(crate) fn pairs(score: u64) -> bool {
+pub fn pairs(score: u64) -> bool {
     score >= MINIMUM_SCORE
 }
 

@@ -88,6 +88,8 @@ pub struct Worktree {
     pair_bytes: Cell<u64>,
     /// Whether each side version a walk weighed is binary, by its stamp.
     binaries: RefCell<HashMap<u64, bool>>,
+    /// How many times `pair_scores` started again.
+    pair_epoch: Cell<u64>,
 }
 
 impl Worktree {
@@ -128,6 +130,7 @@ impl Worktree {
             unscored: RefCell::new(Vec::new()),
             pair_bytes: Cell::new(0),
             binaries: RefCell::new(HashMap::new()),
+            pair_epoch: Cell::new(0),
         })
     }
 
@@ -453,6 +456,7 @@ impl Worktree {
             from: usize,
             to: usize,
             key: rename::PairKey,
+            sizes: (u64, u64),
             bytes: u64,
         }
         let of_kind = |kind: ChangeKind| -> Vec<usize> {
@@ -461,10 +465,10 @@ impl Worktree {
                 .collect()
         };
         let (removed, added) = (of_kind(ChangeKind::Removed), of_kind(ChangeKind::Added));
+        // As git counts it: the removals times the additions.
         if removed.is_empty()
             || added.is_empty()
-            || removed.len() > rename::RENAME_LIMIT
-            || added.len() > rename::RENAME_LIMIT
+            || removed.len() * added.len() > rename::RENAME_LIMIT * rename::RENAME_LIMIT
         {
             return changes;
         }
@@ -488,28 +492,53 @@ impl Worktree {
             }
         };
         let removed: Vec<_> = removed.into_iter().filter_map(sized).collect();
-        // Whether a side is binary, from its first bytes, once per version.
-        let binary = |at: usize, stamp: u64| -> bool {
+        // Each side's bytes as git stores them, read once in this walk however
+        // many pairs it is in, through the open repository.
+        let read: RefCell<HashMap<usize, Option<std::rc::Rc<Vec<u8>>>>> = RefCell::default();
+        let bytes_of = |at: usize| {
+            read.borrow_mut()
+                .entry(at)
+                .or_insert_with(|| {
+                    let change = &changes[at];
+                    let side = match change.kind {
+                        ChangeKind::Removed => Side::Blob(change.before?),
+                        _ => change.after?,
+                    };
+                    match side {
+                        Side::Blob(id) => self.blob(id, &change.path).ok(),
+                        Side::Worktree => std::fs::read(self.workdir.join(&change.path)).ok(),
+                    }
+                    .map(std::rc::Rc::new)
+                })
+                .clone()
+        };
+        // Whether a side is binary, from its first bytes, once per version. A
+        // blob is read whole to learn it, which the frame's budget pays for; one
+        // past what is left counts as binary, and its pair goes to the worker.
+        let binary = |at: usize, stamp: u64, size: u64| -> bool {
             if let Some(&known) = self.binaries.borrow().get(&stamp) {
                 return known;
             }
             let change = &changes[at];
-            let head = match (change.kind == ChangeKind::Removed, change.after) {
-                (true, _) => change
-                    .before
-                    .and_then(|id| self.blob(id, &change.path).ok()),
-                (false, Some(Side::Blob(id))) => self.blob(id, &change.path).ok(),
-                (false, _) => {
-                    use std::io::Read;
-                    let mut head = Vec::new();
-                    std::fs::File::open(self.workdir.join(&change.path))
-                        .and_then(|file| {
-                            file.take(hunk::BINARY_SNIFF_LEN as u64)
-                                .read_to_end(&mut head)
-                        })
-                        .ok()
-                        .map(|_| head)
+            let whole =
+                change.kind == ChangeKind::Removed || matches!(change.after, Some(Side::Blob(_)));
+            let head = if whole {
+                if size > self.pair_budget.get() {
+                    return true;
                 }
+                self.pair_budget.set(self.pair_budget.get() - size);
+                self.pair_bytes.set(self.pair_bytes.get() + size);
+                bytes_of(at).map(|bytes| bytes.to_vec())
+            } else {
+                use std::io::Read;
+                let mut head = Vec::new();
+                std::fs::File::open(self.workdir.join(&change.path))
+                    .and_then(|file| {
+                        file.take(hunk::BINARY_SNIFF_LEN as u64)
+                            .read_to_end(&mut head)
+                    })
+                    .ok()
+                    .map(|_| head)
             };
             let found = head.is_some_and(|head| hunk::is_binary(&head));
             let mut binaries = self.binaries.borrow_mut();
@@ -528,6 +557,7 @@ impl Worktree {
                         from,
                         to,
                         key: (from_stamp, to_stamp),
+                        sizes: (from_size, to_size),
                         bytes: from_size + to_size,
                     })
                 })
@@ -536,21 +566,11 @@ impl Worktree {
         // `gix` scored every pair with no binary side.
         weighed.retain(|pair| {
             self.pair_scores.borrow().contains_key(&pair.key)
-                || binary(pair.to, pair.key.1)
-                || binary(pair.from, pair.key.0)
+                || binary(pair.to, pair.key.1, pair.sizes.1)
+                || binary(pair.from, pair.key.0, pair.sizes.0)
         });
         // The cheapest first, so the budget goes furthest.
         weighed.sort_by_key(|pair| pair.bytes);
-        // Each side read once in this walk, however many pairs it is in.
-        let mut read: HashMap<usize, Option<Vec<u8>>> = HashMap::new();
-        let mut bytes_of = |at: usize| {
-            read.entry(at)
-                .or_insert_with(|| {
-                    let sides = self.image_sources(&changes[at]);
-                    sides.after.or(sides.before)?.read()
-                })
-                .clone()
-        };
         let mut listed: std::collections::HashSet<rename::PairKey> = self
             .unscored
             .borrow()
@@ -569,7 +589,7 @@ impl Worktree {
                         (Some(old), Some(new)) => rename::pair_score(&old, &new),
                         _ => 0,
                     };
-                    self.pair_scores.borrow_mut().insert(pair.key, score);
+                    self.keep_score(pair.key, score);
                     score
                 }
                 None => {
@@ -635,12 +655,23 @@ impl Worktree {
 
     /// File a score the picture worker found.
     pub(crate) fn learn_pair(&self, key: rename::PairKey, score: u64) {
+        self.keep_score(key, score);
+    }
+
+    /// Keep a pair's score, bounded: past [`PAIRS_KEPT`] the record starts
+    /// again, and so does the count of them, so a pair sent before is sent again.
+    fn keep_score(&self, key: rename::PairKey, score: u64) {
         let mut scores = self.pair_scores.borrow_mut();
-        // Kept bounded: an old version's pair is never asked for again.
         if scores.len() >= PAIRS_KEPT {
             scores.clear();
+            self.pair_epoch.set(self.pair_epoch.get() + 1);
         }
         scores.insert(key, score);
+    }
+
+    /// How many times the scores were started again.
+    pub(crate) fn pair_epoch(&self) -> u64 {
+        self.pair_epoch.get()
     }
 
     /// Candidate bytes scored so far.

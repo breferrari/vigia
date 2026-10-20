@@ -498,8 +498,11 @@ pub struct Pictures {
     decoded: Arc<AtomicU64>,
     /// Sizes the worker found since [`Pictures::found_sizes`] last took them.
     found: Vec<(u64, u32, u32)>,
-    /// Pairs sent to be scored as renames, each once.
+    /// Pairs sent to be scored as renames, each once while the frame's scores
+    /// last.
     asked: HashSet<vigia_core::PairKey>,
+    /// The frame's [`vigia_core::Frame::pair_epoch`] when `asked` was begun.
+    epoch: u64,
     /// Where they go: a thread beside the picture worker, which needs no picker
     /// and skips nothing scrolled away.
     pairs: mpsc::Sender<vigia_core::Candidate>,
@@ -643,6 +646,7 @@ impl Pictures {
             decoded,
             found: Vec::new(),
             asked: HashSet::new(),
+            epoch: 0,
             pairs,
             scores,
         }
@@ -651,8 +655,10 @@ impl Pictures {
     /// Send the pairs `frame` could not afford to score to be scored, each
     /// once.
     pub fn score_pairs(&mut self, frame: &vigia_core::Frame<'_>) {
-        // Kept bounded: an old version's pair is never asked for again.
-        if self.asked.len() >= ASKED_KEPT {
+        // Begun again with the frame's scores, or a score it dropped is
+        // never asked for again.
+        if self.epoch != frame.pair_epoch() || self.asked.len() >= ASKED_KEPT {
+            self.epoch = frame.pair_epoch();
             self.asked.clear();
         }
         for candidate in frame.unscored_pairs() {
@@ -668,8 +674,8 @@ impl Pictures {
         self.scores.try_iter().collect()
     }
 
-    /// File `found` with `frame` and walk once more, so they pair; whether
-    /// there were any.
+    /// File `found` with `frame`, and walk once more when one of them pairs;
+    /// whether one did.
     ///
     /// # Errors
     ///
@@ -679,14 +685,15 @@ impl Pictures {
         frame: &mut vigia_core::Frame<'_>,
         found: Vec<(vigia_core::PairKey, u64)>,
     ) -> vigia_core::Result<bool> {
-        if found.is_empty() {
-            return Ok(false);
-        }
+        let pairs = found.iter().any(|&(_, score)| vigia_core::pairs(score));
         for (key, score) in found {
             frame.learn_pair(key, score);
         }
-        frame.advance()?;
-        Ok(true)
+        // A score that pairs nothing changes nothing a walk would show.
+        if pairs {
+            frame.advance()?;
+        }
+        Ok(pairs)
     }
 
     /// The sizes the worker found for sides the frame path left unsized, by

@@ -637,6 +637,12 @@ impl<'w> Frame<'w> {
         self.worktree.unscored_pairs()
     }
 
+    /// How many times the rename scores were started again, after which a
+    /// pair sent to the worker before is sent again.
+    pub fn pair_epoch(&self) -> u64 {
+        self.worktree.pair_epoch()
+    }
+
     /// File a rename score the worker found, by its pair. The next advance
     /// pairs by it.
     pub fn learn_pair(&mut self, key: crate::PairKey, score: u64) {

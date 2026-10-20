@@ -65,7 +65,7 @@ pub use notes::{
     names_a_record, resolve, run_of,
 };
 pub use picture::{Format, ImageSide, Picture, Source, Sources};
-pub use rename::{Candidate, PairKey, candidate_score, pair_score};
+pub use rename::{Candidate, PairKey, candidate_score, pair_score, pairs};
 pub use session::{Registration, Registry};
 pub use standing::{Reading, Standing};
 pub use timing::{FrameTiming, Samples};

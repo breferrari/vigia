@@ -238,6 +238,7 @@ fn text_rename_left_to_gix() {
     let line = |n: usize, tail: &str| format!("{}{n:04}{tail}\n", "x".repeat(200));
     let old: String = (0..100).map(|n| line(n, "old")).collect();
     let new: String = (0..100).map(|n| line(n, "new")).collect();
+    let old_len = old.len() as u64;
     let scratch = moved(
         "rename-text",
         &[("a.txt", old.into_bytes())],
@@ -245,8 +246,8 @@ fn text_rename_left_to_gix() {
     );
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    // Not scored at all: neither side is binary.
-    assert_eq!(scored(&mut frame), 0, "a text pair was scored");
+    // Read only to learn the old side is text, and not scored.
+    assert_eq!(scored(&mut frame), old_len, "a text pair was scored");
     assert_eq!(kind_of(frame.files(), "b.txt"), &ChangeKind::Added);
 }
 
@@ -262,4 +263,38 @@ fn binary_rename_old_side_binary() {
     let scratch = moved("rename-old-binary", &[("a.dat", old)], &[("b.dat", new)]);
     let changes = changes_sorted(&scratch.worktree());
     assert_eq!(kind_of(&changes, "b.dat"), &renamed("a.dat"));
+}
+
+#[test]
+fn binary_rename_limit_as_git_counts() {
+    // 2 removals and 1,001 additions: 2,002 pairs, far under 1,000 × 1,000,
+    // so git pairs the moved file, though either list alone passes 1,000.
+    let old = noise(60, 20_000);
+    let mut files = vec![("a.bin", old.clone()), ("gone.txt", b"gone\n".to_vec())];
+    files.sort();
+    let names: Vec<String> = (0..1000).map(|n| format!("new/{n:04}.txt")).collect();
+    let mut written: Vec<(&str, Vec<u8>)> = names
+        .iter()
+        .map(|name| (name.as_str(), format!("{name}\n").into_bytes()))
+        .collect();
+    written.push(("b.bin", tail_changed(&old, 0.1)));
+    let scratch = moved("rename-limit", &files, &written);
+    let changes = changes_sorted(&scratch.worktree());
+    assert_eq!(kind_of(&changes, "b.bin"), &renamed("a.bin"));
+}
+
+#[test]
+fn pair_scores_start_again() {
+    let scratch = moved("rename-epoch", &[("a.txt", b"a\n".to_vec())], &[]);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    assert_eq!(frame.pair_epoch(), 0);
+    for n in 0..4097u64 {
+        frame.learn_pair((n, n), 0);
+    }
+    assert_eq!(
+        frame.pair_epoch(),
+        1,
+        "4,097 scores did not start the record again"
+    );
 }

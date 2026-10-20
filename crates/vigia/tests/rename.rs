@@ -110,3 +110,44 @@ fn quiet_pairs_never_wake() {
         "a pane with no pair to score was woken"
     );
 }
+
+#[test]
+fn pairs_sent_again_after_scores_restart() {
+    let old = noise(3, 2 * 1024 * 1024);
+    let scratch = Scratch::new("rename-resend");
+    scratch.write("a.bin", &old);
+    scratch.commit_all("initial");
+    std::fs::remove_file(scratch.path_of("a.bin")).expect("remove");
+    scratch.write("b.bin", tail_changed(&old, 0.6));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        },
+        Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let answers = |pictures: &mut Pictures| {
+        let began = Instant::now();
+        loop {
+            let found = pictures.found_pairs();
+            if !found.is_empty() {
+                return found.len();
+            }
+            assert!(began.elapsed() < Duration::from_secs(30), "no answer");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    pictures.score_pairs(&frame);
+    assert_eq!(answers(&mut pictures), 1);
+    // The scores start again: the pair, unscored once more, is sent again.
+    for n in 0..4097u64 {
+        frame.learn_pair((n, n), 0);
+    }
+    frame.advance().expect("advance");
+    pictures.score_pairs(&frame);
+    assert_eq!(answers(&mut pictures), 1, "the pair was not sent again");
+}
