@@ -730,13 +730,18 @@ impl Pictures {
 
     /// Keep the pictures in `shown`, and retire the Kitty images of the rest.
     fn keep(&mut self, shown: &HashSet<Arc<Key>>) {
+        self.retire_where(|key, _| !shown.contains(key));
+    }
+
+    /// Drop each picture `drop` names, and owe the deletes of its Kitty images.
+    fn retire_where(&mut self, drop: impl Fn(&Arc<Key>, &Built) -> bool) {
         let retired = &mut self.retired;
         self.built.retain(|key, ready| {
-            let kept = shown.contains(key);
-            if !kept {
+            let dropped = drop(key, &ready.0);
+            if dropped {
                 retired.extend(&ready.0.kitty);
             }
-            kept
+            !dropped
         });
     }
 
@@ -748,11 +753,7 @@ impl Pictures {
     /// Retire every kept Kitty picture, so it is built again and sent under a
     /// new id: a terminal attached since it was sent never received it.
     pub fn refresh(&mut self) {
-        let retired = &mut self.retired;
-        self.built.retain(|_, ready| {
-            retired.extend(&ready.0.kitty);
-            ready.0.kitty.is_empty()
-        });
+        self.retire_where(|_, built| !built.kitty.is_empty());
     }
 
     /// The Kitty deletes owed since the last call, to write before the next
