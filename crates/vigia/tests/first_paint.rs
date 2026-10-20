@@ -482,8 +482,6 @@ fn pdf_first_paint() {
 /// I7 with a changed picture first: `path` committed as `old` and rewritten
 /// as `new`, and the first frame decodes nothing.
 fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
-    use vigia::pictures::{self, Inks, Pictures};
-
     let scratch = Scratch::new("first-paint-picture");
     scratch.write(path, old);
     scratch.write("b.txt", support::numbered_lines(50));
@@ -493,6 +491,26 @@ fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
     let pane = Rect::new(0, 0, 120, 40);
 
     let _timed = exclusively_timed();
+    // Best of three cold starts, the idiom the other first-paint gates use.
+    let first = (0..3)
+        .map(|_| picture_cold_start(&scratch, path, pane))
+        .min()
+        .expect("three runs");
+    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
+        return;
+    }
+    assert!(
+        first < budget(I7_STARTUP),
+        "I7: first paint with a changed {path} took {first:?} at best of three, over {:?}",
+        budget(I7_STARTUP)
+    );
+}
+
+/// One cold start over `scratch` to its first painted frame, which decodes
+/// nothing; how long it took.
+fn picture_cold_start(scratch: &Scratch, path: &str, pane: Rect) -> Duration {
+    use vigia::pictures::{self, Inks, Pictures};
+
     let began = Instant::now();
     let worktree = Worktree::discover(scratch.root()).expect("discover");
     let mut frame = worktree.frame();
@@ -561,12 +579,5 @@ fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
             .any(|row| matches!(row, Row::Picture { ready: None, .. })),
         "the first frame held no rows for the pictures"
     );
-    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
-        return;
-    }
-    assert!(
-        first < budget(I7_STARTUP),
-        "I7: first paint with a changed {path} first took {first:?}, over {:?}",
-        budget(I7_STARTUP)
-    );
+    first
 }

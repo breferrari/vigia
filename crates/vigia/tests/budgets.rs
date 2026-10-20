@@ -3462,6 +3462,10 @@ fn heaviest_pdf(seed: u8) -> Vec<u8> {
 fn pdf_frame_read() {
     use vigia::pictures::{Inks, Pictures};
 
+    // From the start: writing 80 MiB of PDFs is the heaviest fixture here, and
+    // it must not run beside another gate's timed region.
+    let _timed = exclusively_timed();
+
     let scratch = Scratch::new("i9-pdf-read");
     for n in 0..5 {
         scratch.write(&format!("a/doc_{n}.pdf"), heaviest_pdf(n));
@@ -3538,12 +3542,15 @@ fn pdf_frame_read() {
         "I9: the first frame with five changed 16 MiB PDFs on screen took {cold_cpu:?} \
          of thread CPU ({cold_wall:?} on the wall)"
     );
-    let _timed = exclusively_timed();
     let mut cold = || {
-        let (sized, _, wall, cpu) = pdf_cold_paint(&scratch, pane);
+        let (sized, read, wall, cpu) = pdf_cold_paint(&scratch, pane);
         assert_eq!(
             sized, 5,
             "a fresh pane drew {sized} of five PDFs, so it would time less"
+        );
+        assert!(
+            read < 1024 * 1024,
+            "a fresh pane read {read} bytes of five PDFs"
         );
         (wall, cpu)
     };
@@ -3642,8 +3649,17 @@ fn pdf_cold_paint(scratch: &Scratch, pane: Rect) -> (usize, u64, Duration, Durat
         .iter()
         .filter(|row| matches!(row, Row::Sized { .. }))
         .count();
+    // Nothing on screen, so the worker skips what it has queued; its job in
+    // flight finishes here rather than beside the next timed frame.
+    pictures.attach(&mut [], &frame);
+    pictures.settle(support::ceiling(Duration::from_secs(60)));
     let stats = frame.stats();
-    (sized, stats.bytes + stats.measured_bytes, wall, cpu)
+    (
+        sized,
+        stats.bytes + stats.measured_bytes + stats.paired_bytes,
+        wall,
+        cpu,
+    )
 }
 
 fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<u8>) {
