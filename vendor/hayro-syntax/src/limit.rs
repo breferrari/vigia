@@ -4,6 +4,8 @@
 //! stream that decodes to far more memory than the file's size. With a
 //! limit set, a decode that would pass it fails as an invalid stream does.
 
+use alloc::vec::Vec;
+
 #[cfg(feature = "std")]
 std::thread_local! {
     static LEFT: core::cell::Cell<Option<u64>> = const { core::cell::Cell::new(None) };
@@ -12,6 +14,7 @@ std::thread_local! {
 
 /// A decode inside [`with_decode_limit`] would have passed its limit, and
 /// failed as an invalid stream does.
+#[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeLimitExceeded;
 
@@ -100,4 +103,22 @@ pub(crate) fn spend(bytes: u64) -> bool {
         let _ = bytes;
         true
     }
+}
+
+/// Make room in `out` for `more` bytes, or say they would pass the limit.
+/// Capacity grows only to powers of two and never past what is left, so the
+/// largest buffer a growth copies from is under half the limit.
+pub(crate) fn room(out: &mut Vec<u8>, more: usize) -> bool {
+    let need = out.len().saturating_add(more);
+    if !admits(need as u64) {
+        return false;
+    }
+    if need > out.capacity() {
+        let mut capacity = need.checked_next_power_of_two().unwrap_or(need);
+        if let Some(left) = left() {
+            capacity = capacity.min(usize::try_from(left).unwrap_or(usize::MAX));
+        }
+        out.reserve_exact(capacity - out.len());
+    }
+    true
 }

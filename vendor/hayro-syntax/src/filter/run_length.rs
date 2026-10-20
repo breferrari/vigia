@@ -17,15 +17,19 @@ pub(crate) fn decode(data: &[u8]) -> Option<Vec<u8>> {
                     break;
                 };
 
+                if !crate::limit::room(&mut decoded, bytes.len()) {
+                    return None;
+                }
                 decoded.extend(bytes);
             }
             _ => {
                 let length = 257 - length as usize;
-                decoded.extend([reader.read_byte()?].repeat(length));
+                let byte = reader.read_byte()?;
+                if !crate::limit::room(&mut decoded, length) {
+                    return None;
+                }
+                decoded.extend(core::iter::repeat_n(byte, length));
             }
-        }
-        if !crate::limit::admits(decoded.len() as u64) {
-            return None;
         }
     }
 

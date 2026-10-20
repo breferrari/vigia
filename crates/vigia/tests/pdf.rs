@@ -590,10 +590,16 @@ fn image_page(dict: &str, data: &[u8]) -> Vec<u8> {
     )
 }
 
+/// The most a bomb may add to peak memory, in MiB: the 256 MiB limit, half
+/// of it again for the last growth, which copies where the allocator cannot
+/// grow in place (every decoder grows in powers of two, never past the
+/// limit), and 64 for the test's own fixtures.
+const HELD: u64 = 256 + 128 + 64;
+
 /// `bomb` reads "could not be decoded", within the worker's limit and what
 /// holding it costs.
 fn bounded(name: &str, bomb: &[u8]) {
-    bounded_within(name, bomb, 384);
+    bounded_within(name, bomb, HELD);
 }
 
 /// [`bounded`], its peak no more than `mib` above where it started.
@@ -830,7 +836,7 @@ fn pdf_flate_bomb_undecoded() {
     if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         // The worker's limit, 256 MiB, and what holding it costs.
         assert!(
-            after < before + 384,
+            after < before + HELD,
             "memory went from {before} MiB to {after} MiB"
         );
     }
@@ -849,7 +855,7 @@ fn pdf_small_image_bomb() {
     assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
     if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         assert!(
-            after < before + 384,
+            after < before + HELD,
             "memory went from {before} MiB to {after} MiB"
         );
     }
@@ -935,7 +941,7 @@ fn pdf_content_bomb_undecoded() {
     assert_eq!(drawn.verdict, Some(Verdict::Undecoded), "{drawn:?}");
     if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         assert!(
-            after < before + 384,
+            after < before + HELD,
             "memory went from {before} MiB to {after} MiB"
         );
     }

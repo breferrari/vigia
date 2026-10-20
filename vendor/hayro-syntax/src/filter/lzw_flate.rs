@@ -15,15 +15,36 @@ pub(crate) mod flate {
         use flate2::read::{DeflateDecoder, ZlibDecoder};
         use std::io::Read;
 
-        // Read no further than one byte past the decode limit. A result that
-        // long is refused where `Stream` counts it, and is not retried below.
-        fn capped(decoder: impl Read) -> Option<Vec<u8>> {
-            let cap = crate::limit::left().map_or(u64::MAX, |left| left.saturating_add(1));
+        // Read no further than the decode limit: `Err(true)` once it is
+        // passed, which is not retried below, and `Err(false)` for a broken
+        // stream.
+        fn capped(mut decoder: impl Read) -> Result<Vec<u8>, bool> {
             let mut result = Vec::new();
-            decoder.take(cap).read_to_end(&mut result).ok().map(|_| result)
+            let mut chunk = [0; 64 * 1024];
+            loop {
+                match decoder.read(&mut chunk) {
+                    Ok(0) => return Ok(result),
+                    Ok(read) => {
+                        if !crate::limit::room(&mut result, read) {
+                            return Err(true);
+                        }
+                        result.extend_from_slice(&chunk[..read]);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => return Err(false),
+                }
+            }
         }
 
-        let decoded = capped(ZlibDecoder::new(data)).or_else(|| capped(DeflateDecoder::new(data)));
+        let decoded = match capped(ZlibDecoder::new(data)) {
+            Ok(decoded) => Some(decoded),
+            Err(true) => return None,
+            Err(false) => match capped(DeflateDecoder::new(data)) {
+                Ok(decoded) => Some(decoded),
+                Err(true) => return None,
+                Err(false) => None,
+            },
+        };
         let decoded = decoded
             .or_else(|| {
                 warn!("flate stream is broken, decoding with fallback");
@@ -104,14 +125,14 @@ pub(crate) mod flate {
                 Some(core::mem::take(&mut self.output))
             }
 
-            /// Whether the output has passed the decode limit, which ends
-            /// the stream.
-            fn passed(&mut self) -> bool {
-                if !crate::limit::admits(self.output.len() as u64) {
+            /// Make room for `more` bytes of output, or end the stream at the
+            /// decode limit.
+            fn fits(&mut self, more: usize) -> bool {
+                if !crate::limit::room(&mut self.output, more) {
                     self.over = true;
                     self.eof = true;
                 }
-                self.over
+                !self.over
             }
 
             fn get_byte(&mut self) -> Option<u8> {
@@ -265,10 +286,10 @@ pub(crate) mod flate {
                     }
                 } else {
                     let block = self.get_bytes(block_len as usize);
-                    self.output.extend_from_slice(&block);
-                    if self.passed() {
+                    if !self.fits(block.len()) {
                         return;
                     }
+                    self.output.extend_from_slice(&block);
                     if block.len() < block_len as usize {
                         self.eof = true;
                     }
@@ -298,10 +319,10 @@ pub(crate) mod flate {
                     };
 
                     if code1 < 256 {
-                        self.output.push(code1 as u8);
-                        if self.passed() {
+                        if !self.fits(1) {
                             return;
                         }
+                        self.output.push(code1 as u8);
                     } else if code1 == 256 {
                         return;
                     } else {
@@ -350,15 +371,15 @@ pub(crate) mod flate {
                         }
 
                         // Copy from previous output
+                        if !self.fits(length) {
+                            return;
+                        }
                         let start = self.output.len().wrapping_sub(distance);
                         for _ in 0..length {
                             if start < self.output.len() {
                                 let byte = self.output[self.output.len() - distance];
                                 self.output.push(byte);
                             }
-                        }
-                        if self.passed() {
-                            return;
                         }
                     }
                 }
@@ -636,6 +657,9 @@ pub(crate) mod lzw {
                     if new < table.size() {
                         let entry = table.get(new)?;
                         let first_byte = entry[0];
+                        if !crate::limit::room(&mut decoded, entry.len()) {
+                            return None;
+                        }
                         decoded.extend_from_slice(entry);
 
                         if let Some(prev_code) = prev {
@@ -647,15 +671,15 @@ pub(crate) mod lzw {
                         let first_byte = prev_entry[0];
 
                         let new_entry = table.register(prev_code, first_byte)?;
+                        if !crate::limit::room(&mut decoded, new_entry.len()) {
+                            return None;
+                        }
                         decoded.extend_from_slice(new_entry);
                     } else {
                         warn!("LZW decode error: code {new} not found and prev is None");
                         return None;
                     }
 
-                    if !crate::limit::admits(decoded.len() as u64) {
-                        return None;
-                    }
                     bit_size = table.code_length();
                     prev = Some(new);
                 }

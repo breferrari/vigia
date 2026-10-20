@@ -9,8 +9,7 @@ This directory is `hayro-syntax` 0.8.0 as published on crates.io (MIT OR Apache-
 The budget is checked where each decode produces its output:
 
 - `src/object/stream.rs`: `Stream::decoded_image` spends the output of each filter in the chain, and fails with `StreamDecode` past the budget. Every stream decode goes through it.
-- `src/filter/lzw_flate.rs`: Flate reads at most one byte past what is left, for zlib and raw deflate, so a bomb stops early rather than after it is whole; a result that long is refused by the spend above. The pdf.js fallback inflater stops once its output passes the budget. LZW checks its output as it grows.
-- `src/filter/run_length.rs` and `src/filter/ascii_85.rs`: check their output as it grows.
+- `src/filter/lzw_flate.rs`, `run_length.rs`, `ascii_85.rs`: Flate (zlib, raw deflate and the pdf.js fallback), LZW, RunLength and ASCII85 grow their output through `limit::room`, which admits the bytes before the buffer grows, grows capacity in powers of two and never past what is left. A bomb stops at the limit, and the largest buffer a growth copies from is under half of it. ASCII85 no longer sizes its output from its input up front.
 - `src/filter/dct.rs`, `jpx.rs`, `jbig2.rs`, `ccitt.rs`: check the image's dimensions and component count, at the most bytes a sample can take while it decodes, before any pixel is decoded.
 - `src/lib.rs`: exports `with_decode_limit` and `DecodeLimitExceeded` under `std`.
 

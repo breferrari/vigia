@@ -50,12 +50,16 @@ pub(crate) fn decode(data: &[u8]) -> Option<Vec<u8>> {
             .checked_add(digits[3].checked_mul(POW_85[3])?)?
             .checked_add(digits[4])?;
 
+        if !crate::limit::room(decoded, output_len) {
+            return None;
+        }
         decoded.extend_from_slice(&value.to_be_bytes()[..output_len]);
         group.clear();
         Some(())
     };
 
-    let mut decoded = Vec::with_capacity(data.len() * 4 / 5);
+    // Grown within the decode limit rather than sized up front.
+    let mut decoded = Vec::new();
     let mut group = Vec::with_capacity(5);
 
     loop {
@@ -76,11 +80,11 @@ pub(crate) fn decode(data: &[u8]) -> Option<Vec<u8>> {
             }
             b'z' => {
                 flush_group(&mut group, &mut decoded)?;
-                decoded.extend_from_slice(&[0, 0, 0, 0]);
                 // Four bytes from one, within the decode limit.
-                if !crate::limit::admits(decoded.len() as u64) {
+                if !crate::limit::room(&mut decoded, 4) {
                     return None;
                 }
+                decoded.extend_from_slice(&[0, 0, 0, 0]);
             }
             b'~' => {
                 // Technically requires a '>', but there is a PDF where it isn't
