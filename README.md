@@ -86,7 +86,7 @@ You see a line you want changed. Click its line number, type one sentence, press
 
 `vigia` calls no model, summarises nothing and judges nothing. It carries your words, and the agent answers.
 
-**How it reaches the agent.** `vigia mcp` is an MCP server with three tools, `notes`, `reply` and `resolve`. Two hooks do the rest: `vigia mcp register` records a running Claude Code session so `Enter` can post the note straight into it, and `vigia mcp pending` puts one line in front of your next prompt when a note is waiting.
+**How it reaches the agent.** `vigia mcp` is an MCP server with three tools, `notes`, `reply` and `resolve`. Hooks do the rest: `vigia mcp register` records a running Claude Code session so `Enter` can post the note straight into it, and `vigia mcp pending` puts one line in front of your next prompt when a note is waiting.
 
 | | MCP server | Posted into a running session | Line before your next prompt |
 |---|---|---|---|
@@ -127,7 +127,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/breferrari/vigia/releas
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/breferrari/vigia/releases/latest/download/vigia-installer.ps1 | iex"
 ```
 
-From source, with a Rust toolchain: `cargo install vigia`. A source build leaves PDF pictures off.
+From source, with a Rust toolchain: `cargo install vigia`. A source build leaves PDF pictures off (from 1.2.0, unreleased).
 
 [**Installing**](https://github.com/breferrari/vigia/blob/main/docs/INSTALL.md) covers the release archives, checking a download, and upgrading on Windows while an agent session is open.
 
@@ -211,14 +211,14 @@ Budgets, not hopes. Each one has a test that fails when it is missed. Every regr
 ```ini
 base            = dark
 added           = #3fb950
-picture_changed = on #d29922
+removed         = #f85149
 ```
 
 It is read every time the pane starts. [**Theme**](https://github.com/breferrari/vigia/blob/main/docs/THEME.md) lists every colour you can set.
 
 **Settings** (staged changes, wrapping, the note rows, what the pane opens as) live in `~/.config/vigia/config`. Press `m` in the pane to switch them, and with `persist` on your choices are written back to that file.
 
-For a single run, `VIGIA_THEME` and `NO_COLOR` still work, and so do `VIGIA_PICTURES` for how pictures are drawn and `VIGIA_UPDATE=off` for the update check. [**Configuration**](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) covers them.
+For a single run, `VIGIA_THEME` and `NO_COLOR` still work, and so do `VIGIA_PICTURES` for how pictures are drawn (from 1.2.0, unreleased) and `VIGIA_UPDATE=off` for the update check. [**Configuration**](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) covers them.
 
 ---
 
@@ -247,17 +247,15 @@ These pages track `main`. For a released version, browse its tag.
 
 **Does it go online?** Once per start, to ask crates.io whether a newer release exists. `VIGIA_UPDATE=off` turns that off. Nothing else leaves the machine.
 
-**Does it need git-lfs?** No. An LFS image is read from the local LFS store, and the pane never starts `git-lfs`.
+**Does it need git-lfs?** No. The pane never starts `git-lfs`, and from 1.2.0 (unreleased) it reads an LFS image from the local LFS store.
 
-**Does it work on Windows?** Yes. Use the PowerShell installer above. Windows Terminal 1.22 and later draws pictures sharp.
+**Does it work on Windows?** Yes. Use the PowerShell installer above. From 1.2.0 (unreleased), Windows Terminal 1.22 and later draws pictures sharp.
 
-**Which terminals draw sharp pictures?**
+**Which terminals draw sharp pictures?** (from 1.2.0, unreleased)
 
-| Draws | Terminals |
+| Pictures | Terminals |
 |---|---|
-| Kitty graphics | kitty, Ghostty, iTerm2, Rio |
-| Sixel | Windows Terminal 1.22 and later, foot, xterm with Sixel on |
-| iTerm2 images | WezTerm |
+| Sharp | kitty, Ghostty, iTerm2, WezTerm, Rio, foot, Windows Terminal 1.22 and later, xterm with Sixel on |
 | Half-blocks | everything else, given 24-bit colour |
 
 Inside tmux the picture passes through to the terminal outside it.

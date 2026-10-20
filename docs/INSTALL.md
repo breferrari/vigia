@@ -22,7 +22,7 @@ From source, with a Rust toolchain:
 cargo install vigia
 ```
 
-A source build leaves PDF pictures off: PDFs need a release binary or Homebrew.
+From 1.2.0 (unreleased), a source build leaves PDF pictures off: PDFs need a release binary or Homebrew.
 
 ```sh
 vigia ~/code/some-repo                       # or any path

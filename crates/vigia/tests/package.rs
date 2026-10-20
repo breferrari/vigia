@@ -3221,7 +3221,7 @@ fn the_windows_upgrade_note_moves_the_binary_rather_than_stopping_it() {
 fn the_readme_names_what_the_pane_is_before_installation() {
     let readme = repo_file("README.md");
     let (above, _) = readme
-        .split_once("cargo install vigia")
+        .split_once("brew install")
         .expect("README.md no longer tells a reader how to install");
 
     for wanted in ["`?`", vigia::CONFIG_FILE] {

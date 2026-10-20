@@ -73,7 +73,7 @@ fn readme_theme_parses() {
         .expect("the README shows a theme file");
     let (example, _) = rest.split_once("```").expect("the block closes");
     assert!(
-        example.contains("picture_changed"),
+        example.contains("base"),
         "the first ini block in the README is not the theme example:\n{example}"
     );
     vigia::theme::parse(example)

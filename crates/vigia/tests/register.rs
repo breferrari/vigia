@@ -841,20 +841,23 @@ fn public_prose_denylist() {
     let mut files = vec![
         ("README.md".to_owned(), read("README.md")),
         ("CONTRIBUTING.md".to_owned(), read("CONTRIBUTING.md")),
-        ("docs/READING.md".to_owned(), read("docs/READING.md")),
-        ("docs/KEYS.md".to_owned(), read("docs/KEYS.md")),
-        ("docs/NOTES.md".to_owned(), read("docs/NOTES.md")),
-        ("docs/INSTALL.md".to_owned(), read("docs/INSTALL.md")),
-        (
-            "docs/ARCHITECTURE.md".to_owned(),
-            read("docs/ARCHITECTURE.md"),
-        ),
         ("CHANGELOG.md".to_owned(), changelog[..older].to_owned()),
         (
             ".github/PULL_REQUEST_TEMPLATE.md".to_owned(),
             read(".github/PULL_REQUEST_TEMPLATE.md"),
         ),
     ];
+    // Every page under docs/, so a new one is covered without an edit here.
+    for entry in std::fs::read_dir(root.join("docs"))
+        .expect("read docs/")
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".md") {
+            let name = format!("docs/{name}");
+            files.push((name.clone(), read(&name)));
+        }
+    }
     let templates = root.join(".github/ISSUE_TEMPLATE");
     for entry in std::fs::read_dir(&templates)
         .unwrap_or_else(|e| panic!("read {}: {e}", templates.display()))

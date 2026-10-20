@@ -18,7 +18,7 @@
 | [hayro-syntax](https://github.com/LaurenzV/hayro) | Reads a PDF's page size for its size line (from 1.2.0, unreleased) |
 | [skrifa](https://github.com/googlefonts/fontations) | Finds an installed font that can draw an SVG's text (from 1.2.0, unreleased) |
 
-The last rows draw changed images, which arrives in 1.2.0.
+The last rows draw changed images (from 1.2.0, unreleased).
 
 Three of those earn their place by what they *do not* add. `fancy-regex` is already in the graph under `syntect`, so the `hide` pattern costs the binary nothing. `tachyonfx` schedules nothing, which is what keeps *no polling timer* this program's own rule to keep rather than a dependency's. `two-face` builds the grammar dump at compile time and is absent from every shipped graph.
 
