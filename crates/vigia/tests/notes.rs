@@ -7715,8 +7715,7 @@ fn note_states_frame() {
     put("n4", 11, "line 11", "check the end", Status::Open, None);
     rig.reload();
     let painted = rig.paint(&mut frame, TALL, Pointing::default());
-    let rows: Vec<String> = (0..TALL.height).map(|y| painted.text(y)).collect();
-    insta::assert_snapshot!(rows.join("\n"));
+    insta::assert_snapshot!(painted.rows().join("\n"));
 }
 
 /// The note box open under a line with a sentence half typed, for
