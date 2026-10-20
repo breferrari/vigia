@@ -249,3 +249,17 @@ fn text_rename_left_to_gix() {
     assert_eq!(scored(&mut frame), 0, "a text pair was scored");
     assert_eq!(kind_of(frame.files(), "b.txt"), &ChangeKind::Added);
 }
+
+#[test]
+fn binary_rename_old_side_binary() {
+    // Binary only before: one NUL at its start, which the new side drops.
+    let mut old: Vec<u8> = noise(50, 20_000)
+        .into_iter()
+        .map(|byte| byte.max(1))
+        .collect();
+    old[0] = 0;
+    let new = old[1..].to_vec();
+    let scratch = moved("rename-old-binary", &[("a.dat", old)], &[("b.dat", new)]);
+    let changes = changes_sorted(&scratch.worktree());
+    assert_eq!(kind_of(&changes, "b.dat"), &renamed("a.dat"));
+}
