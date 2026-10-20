@@ -866,6 +866,11 @@ fn apply_predictor(data: Vec<u8>, params: &PredictorParams) -> Option<Vec<u8>> {
                 );
             }
 
+            // Unlike the eight-bit path, which undoes the rows in place, this
+            // one writes a second buffer, so both are held at once.
+            if !crate::limit::admits((data.len() + num_rows * row_len) as u64) {
+                return None;
+            }
             let zero_row = vec![0; row_len];
             let mut prev_row = BitChunks::new(&zero_row, bit_size, chunk_len)?;
             let zero_col = BitChunk::new(0, chunk_len);

@@ -681,6 +681,46 @@ fn pdf_ascii85_bomb() {
 }
 
 #[test]
+fn pdf_predictor_in_place() {
+    // 250 MiB of eight-bit rows, within the limit: the predictor undoes them
+    // in place, so the picture draws without a second buffer.
+    let before = support::peak_resident();
+    let drawn = drawn(
+        "pdf-predictor-in-place",
+        Some(&icon_pdf(1)),
+        &image_page(
+            &format!(
+                "{GREY} /Filter /FlateDecode /DecodeParms << /Predictor 12 /Colors 1 /BitsPerComponent 8 /Columns 1024 >>"
+            ),
+            &zlib_zeros(250 << 20),
+        ),
+    );
+    assert!(
+        matches!(drawn.verdict, Some(Verdict::Changed { .. })),
+        "{drawn:?}"
+    );
+    if let (Some(before), Some(after)) = (before, support::peak_resident()) {
+        assert!(
+            after < before + HELD,
+            "memory went from {before} MiB to {after} MiB"
+        );
+    }
+}
+
+#[test]
+fn pdf_predictor_two_buffers() {
+    // The same as sixteen-bit TIFF rows, which the predictor writes to a
+    // second buffer: the two together pass the limit.
+    bounded(
+        "pdf-predictor-two",
+        &image_page(
+            "/Width 8 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 16 /Filter /FlateDecode /DecodeParms << /Predictor 2 /Colors 1 /BitsPerComponent 16 /Columns 1024 >>",
+            &zlib_zeros(250 << 20),
+        ),
+    );
+}
+
+#[test]
 fn pdf_predictor_row() {
     // A row 128 TiB long, over 64 bytes of data: the pane draws on.
     let drawn = drawn(
