@@ -40,10 +40,10 @@ sh .claude/skills/take-next/preflight.sh       # does the spec still agree with 
 
 `next.sh` selects the earliest eligible section of `ROADMAP.md` on `origin/main`:
 
-- **Order is the roadmap's section order.** It is versioned and reviewed, so a change to it shows in a diff. A section need not be a phase: the reader can put a block before one. Milestones play no part in the order, so renaming one changes nothing.
+- **Order is the roadmap's section order.** It is versioned and reviewed, so a change to it shows in a diff. A section need not be a phase: the reader can put a block among the phases. The walk starts at the first `## Phase` heading, so a block above it is not read. Milestones play no part in the order, so renaming one changes nothing.
 - **A section is eligible when a row not marked done names an open issue.** A finished section is never selected. The walk stops at `## Shelf`. An empty answer means everything above it is done: find out whether that is true.
 
-After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/take-next/selftest.sh`. When you finish the last issue in a phase, close its milestone.
+After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/take-next/selftest.sh`. Close a milestone when it has no open issues: a section and a milestone can hold different issues.
 
 `ROADMAP.md` declares the next task and links every issue, open or closed. The tracker holds the state of each issue. If the two disagree, fix the roadmap in the same pass.
 
@@ -51,7 +51,7 @@ After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/
 
 `preflight.sh` reads `SPEC.md` and `ROADMAP.md` from `origin/main`, not from the working tree. It fetches the whole board and exits non-zero on any hit in checks 1 to 4 and 6 to 8. Fix each of those hits in this pass. Checks 0 and 5 are advisory: read them and act as they say.
 
-First, the script makes sure that the whole board arrived. A truncated fetch causes false drift in check 1 and hides real drift from 2, 4 and 7. Then it runs these checks:
+First, the script makes sure that the whole board arrived. A truncated fetch causes false drift in check 1 and hides real drift from 2, 4, 6 and 7. Then it runs these checks:
 
 0. No soak test runs on this machine (advisory).
 1. An issue title names each invariant in the spec.
@@ -59,13 +59,13 @@ First, the script makes sure that the whole board arrived. A truncated fetch cau
 3. The mark on each roadmap row agrees with the state of its issue, and the issue exists.
 4. Each open issue has a milestone.
 5. The open bullets in `SPEC.md` §10 are printed for you to read. A bullet with ordering words (*before*, *first*, *until*, *blocked*) and no issue is a blocker. File an issue for it. Then decide whether it is in scope or goes first. Do this before you plan.
-6. The roadmap and the tracker agree on which phases exist. Each open milestone with work has a `## Phase <n>` section of the same title, and each `## Phase` section with an open row on an open issue has an open milestone. A section that is not a phase, such as a block the reader placed before one, has no milestone and is not compared. The check also prints the section `next.sh` takes.
+6. The roadmap and the tracker agree on which phases exist. Each open milestone with work has a `## Phase <n>` section of the same title, and each `## Phase` section with an open row on an open issue has an open milestone. A section that is not a phase, such as a block the reader placed before one, has no milestone and is not compared. It also reports an open issue that no section offers, and prints the section `next.sh` takes.
 7. Each issue, open or closed, has a roadmap row.
 8. Given an issue number, no worktree, branch or plan comment names it.
 
 A false positive means that the check is wrong: fix it, never skip it. A command in this file can stop doing what the file says. Fix it in the pass that finds it. That is a correction, not instrument work, so the filing rule in step 4 does not apply.
 
-Take the **topmost unstarted row** in the `ROADMAP.md` section of that phase. If a later task blocks it, say so and take the blocker. Then run `preflight.sh <n>`: another session can hold a ⬜ row.
+Take the **topmost unstarted row** in the `ROADMAP.md` section `next.sh` named. If a later task blocks it, say so and take the blocker. Then run `preflight.sh <n>`: another session can hold a ⬜ row.
 
 ### Declines
 

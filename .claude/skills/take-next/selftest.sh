@@ -250,9 +250,11 @@ out=$(pre 2>&1 | grep -c '^8\.')
 [ "$out" = 0 ] && ok "no issue, no comparison 8" || no "no issue, no comparison 8" "0" "$out"
 
 # Comparison 6 in both directions.
-milestones() { # json -> the comparison-6 DRIFT lines
+milestones() { # json, open issue numbers -> the comparison-6 lines
   printf '%s' "$1" > "$FIX/ms.json"
-  board 3 | jq '.[1].state = "OPEN"' > "$FIX/issues.json"
+  shift
+  board 3 | jq --arg open "$*" '($open | split(" ") | map(tonumber)) as $o
+    | map(if (.number | IN($o[])) then .state = "OPEN" else . end)' > "$FIX/issues.json"
   PREFLIGHT_SPEC_FILE="$FIX/spec.md" \
   PREFLIGHT_ROADMAP_FILE="$FIX/roadmap6.md" \
   PREFLIGHT_ISSUES_FILE="$FIX/issues.json" \
@@ -263,7 +265,7 @@ milestones() { # json -> the comparison-6 DRIFT lines
 printf '%s\n' "## Phase 8 - look" "| | Task | Issue |" "|---|---|---|" "| ✅ | one | [#1](https://example.invalid/1) |" > "$FIX/roadmap6.md"
 
 line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":0}]')
-[ "$line" = "ok every open milestone with work has a phase, and every open phase a milestone" ] \
+[ "$line" = "ok milestones and phases agree, and every open issue has a section that offers it" ] \
   && ok "records agree" \
   || no "records agree" "ok" "$line"
 
@@ -273,10 +275,15 @@ line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":0},{"
   || no "milestone without heading" "DRIFT milestone with work and no roadmap section: Phase 9 - pictures" "$line"
 
 printf '%s\n' "| ⬜ | three | [#3](https://example.invalid/3) |" "## Phase 12 - edges" "| | Task | Issue |" "|---|---|---|" "| ⬜ | two | [#2](https://example.invalid/2) |" >> "$FIX/roadmap6.md"
-line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":1}]')
+line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":1}]' 2)
 [ "$line" = "DRIFT roadmap phase with open rows and no open milestone: Phase 12 - edges" ] \
   && ok "heading without milestone" \
   || no "heading without milestone" "DRIFT roadmap phase with open rows and no open milestone: Phase 12 - edges" "$line"
+
+line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":1},{"title":"Phase 12 - edges","state":"open","open_issues":1}]' 1)
+[ "$line" = "DRIFT open issue no section offers: #1" ] \
+  && ok "issue no section offers" \
+  || no "issue no section offers" "DRIFT open issue no section offers: #1" "$line"
 
 echo "drift:"
 

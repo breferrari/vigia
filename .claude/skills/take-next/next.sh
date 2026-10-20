@@ -22,8 +22,13 @@ LIMIT=1000
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-if [ -n "${NEXT_ROADMAP_FILE:-}" ]; then tr -d '\r' < "$NEXT_ROADMAP_FILE" > "$tmp/roadmap.md"
-else git show "$REF:ROADMAP.md" | tr -d '\r' > "$tmp/roadmap.md"; fi
+if [ -n "${NEXT_ROADMAP_FILE:-}" ]; then cp "$NEXT_ROADMAP_FILE" "$tmp/raw.md"
+else
+  # A stale ref answers from an order the reader has since changed.
+  git fetch -q origin main || exit 2
+  git show "$REF:ROADMAP.md" > "$tmp/raw.md" || exit 2
+fi
+tr -d '\r' < "$tmp/raw.md" > "$tmp/roadmap.md"
 
 if [ -n "${NEXT_ISSUES_FILE:-}" ]; then cp "$NEXT_ISSUES_FILE" "$tmp/open.json"
 else gh issue list --state open --limit "$LIMIT" --json number,title > "$tmp/open.json"; fi
@@ -41,7 +46,7 @@ awk -F'\t' '
   /^## Phase / { walking = 1 }
   /^## / { section = substr($0, 4); next }
   !walking { next }
-  /^\| *(⬜|🔨) *\|.*\[#[0-9]+\]\([^)]*\) *\|$/ {
+  /^\| *(⬜|🔨) *\|.*\[#[0-9]+\]\([^)]*\) *\| *$/ {
     line = $0
     n = ""
     while (match(line, /\[#[0-9]+\]/)) { n = substr(line, RSTART + 2, RLENGTH - 3); line = substr(line, RSTART + RLENGTH) }

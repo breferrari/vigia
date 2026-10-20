@@ -91,7 +91,7 @@ fi
 
 # The board every comparison below reads, and whether all of it arrived. A short
 # fetch is invisible from inside a comparison: 1 reports drift that is not there,
-# and 2, 4 and 7 under-report in silence. This is a precondition rather than an
+# and 2, 4, 6 and 7 under-report in silence. This is a precondition rather than an
 # eighth comparison, which is why it carries no number: the seven compare two
 # records against each other, and this one asks whether one of the records is
 # all here. Counted from the JSON rather than from the TSV's line count, because
@@ -148,7 +148,7 @@ awk -F'\t' '
   }' "$tmp/issues.tsv" - > "$tmp/state.out"
 if [ -s "$tmp/state.out" ]; then cat "$tmp/state.out"; findings=$((findings + $(wc -l < "$tmp/state.out"))); else ok "every roadmap mark agrees with its issue"; fi
 
-say "4. unfiled — open issues with no milestone (invisible to step 1 forever):"
+say "4. unfiled — open issues with no milestone:"
 awk -F'\t' '$2 == "OPEN" && $3 == "NONE" { printf "  DRIFT #%s has no milestone: %s\n", $1, $4 }' "$tmp/issues.tsv" > "$tmp/unfiled.out"
 if [ -s "$tmp/unfiled.out" ]; then cat "$tmp/unfiled.out"; findings=$((findings + $(wc -l < "$tmp/unfiled.out"))); else ok "every open issue has a milestone"; fi
 
@@ -163,7 +163,10 @@ fi
 if [ -f "$tmp/ms.json" ]; then
   jq '[.[] | select(.state == "OPEN") | {number, title}]' "$tmp/issues.json" > "$tmp/open.json"
   # The phases with open rows, by the rule step 1 itself reads.
-  NEXT_ROADMAP_FILE="$tmp/roadmap.md" NEXT_ISSUES_FILE="$tmp/open.json" sh "$(dirname "$0")/next.sh" --rows | tr -d '\r' > "$tmp/rows.tsv"
+  if ! NEXT_ROADMAP_FILE="$tmp/roadmap.md" NEXT_ISSUES_FILE="$tmp/open.json" sh "$(dirname "$0")/next.sh" --rows > "$tmp/rows.raw"; then
+    hit "next.sh failed, so this comparison read nothing"
+  fi
+  tr -d '\r' < "$tmp/rows.raw" > "$tmp/rows.tsv"
   say "  step 1 takes from: $(cut -f1 "$tmp/rows.tsv" | head -n 1 | sed 's/^$/<no eligible section>/')"
   cut -f1 "$tmp/rows.tsv" | grep '^Phase [0-9]' | LC_ALL=C sort -u > "$tmp/phases-open.s"
   awk '/^## Shelf/ { exit } /^## Phase [0-9]/ { print substr($0, 4) }' "$tmp/roadmap.md" | tr -d '\r' | LC_ALL=C sort > "$tmp/phases.s"
@@ -171,10 +174,14 @@ if [ -f "$tmp/ms.json" ]; then
   jq -r '.[] | select(.open_issues > 0) | .title' "$tmp/ms.json" | tr -d '\r' | LC_ALL=C sort > "$tmp/ww.s"
   LC_ALL=C comm -23 "$tmp/ww.s" "$tmp/phases.s" | sed 's/^/  DRIFT milestone with work and no roadmap section: /' > "$tmp/ms-drift.out"
   LC_ALL=C comm -23 "$tmp/phases-open.s" "$tmp/ms-all.s" | sed 's/^/  DRIFT roadmap phase with open rows and no open milestone: /' >> "$tmp/ms-drift.out"
+  # An open issue no eligible row names is one step 1 can never offer.
+  cut -f2 "$tmp/rows.tsv" | LC_ALL=C sort -u > "$tmp/offered.s"
+  jq -r '.[].number' "$tmp/open.json" | tr -d '\r' | LC_ALL=C sort -u > "$tmp/open-n.s"
+  LC_ALL=C comm -23 "$tmp/open-n.s" "$tmp/offered.s" | sed 's/^/  DRIFT open issue no section offers: #/' >> "$tmp/ms-drift.out"
   if [ -s "$tmp/ms-drift.out" ]; then
     cat "$tmp/ms-drift.out"
     findings=$((findings + $(wc -l < "$tmp/ms-drift.out")))
-  else ok "every open milestone with work has a phase, and every open phase a milestone"; fi
+  else ok "milestones and phases agree, and every open issue has a section that offers it"; fi
 else
   say "  (skipped under test seams without PREFLIGHT_MILESTONES_FILE)"
 fi
