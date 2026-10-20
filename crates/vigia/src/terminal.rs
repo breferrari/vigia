@@ -324,7 +324,7 @@ pub fn colours_of(reply: &[u8]) -> Option<Colours> {
 #[cfg(any(unix, test))]
 fn attributes_in(reply: &[u8]) -> bool {
     reply
-        .windows(3)
+        .array_windows()
         .position(|w| w == b"\x1b[?")
         .is_some_and(|at| reply[at..].contains(&b'c'))
 }
@@ -352,7 +352,7 @@ fn answered(reply: &[u8], palette: bool) -> bool {
         // that ignored the colour queries costs one round trip, not the timeout.
         attributes_in(reply)
     } else {
-        reply.contains(&0x07) || reply.windows(2).any(|w| w == b"\x1b\\")
+        reply.contains(&0x07) || reply.array_windows().any(|w| w == b"\x1b\\")
     }
 }
 

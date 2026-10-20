@@ -1149,7 +1149,7 @@ mod tests {
     /// Only a guard against a hang: a passing wait returns when the arm does.
     /// `VIGIA_TEST_CEILING` (seconds) shortens it for a mutation run.
     fn arming() -> Duration {
-        let guard = Duration::from_secs(60);
+        let guard = Duration::from_mins(1);
         std::env::var("VIGIA_TEST_CEILING")
             .ok()
             .and_then(|secs| secs.parse().ok())

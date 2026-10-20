@@ -139,7 +139,7 @@ pub(crate) const PDF_HEAD: usize = 1024;
 /// Whether `head`, a file's first bytes, starts a PDF.
 pub(crate) fn pdf_headed(head: &[u8]) -> bool {
     head[..head.len().min(PDF_HEAD)]
-        .windows(5)
+        .array_windows()
         .any(|w| w == b"%PDF-")
 }
 

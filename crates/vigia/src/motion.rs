@@ -41,7 +41,7 @@ pub const NOTICE_LINGER: Duration = Duration::from_millis(4500);
 /// the reader just made and finds them looking; an announcement arrives while
 /// they are looking at the other pane, and [`NOTICE_LINGER`] was gone before it
 /// was read.
-pub const ARRIVED_LINGER: Duration = Duration::from_secs(60);
+pub const ARRIVED_LINGER: Duration = Duration::from_mins(1);
 
 /// How long the box takes to arrive and to leave on Esc: a receipt's, since any
 /// shorter is too few frames to read its resolve as anything but a pop.

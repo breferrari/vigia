@@ -6,86 +6,89 @@ pub fn resident() -> Option<u64> {
     read()
 }
 
-#[cfg(target_os = "linux")]
-fn read() -> Option<u64> {
-    // `VmRSS` rather than `/proc/self/statm`: the cheaper read reports pages and
-    // would need `sysconf(_SC_PAGESIZE)`, so `unsafe` and `libc` on the one
-    // platform that needs neither.
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
-    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
-    Some(kib * 1024)
-}
-
-#[cfg(target_os = "macos")]
-fn read() -> Option<u64> {
-    // `proc_pidinfo` rather than `task_info(mach_task_self(), ...)`: the mach
-    // route needs a task port and gets `mach_task_self`'s type wrong in a way
-    // that compiles.
-    let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::uninit();
-    let size = size_of::<libc::proc_taskinfo>() as libc::c_int;
-
-    // SAFETY: `proc_pidinfo` writes at most `size` bytes into `buffer` and
-    // reports how many it wrote. `size` is derived from the very type the
-    // pointer refers to, so the buffer cannot be short, and the pointer is to a
-    // live local that outlives the call. The pid is this process's own, which
-    // always exists. Nothing here is retained past the call.
-    let written = unsafe {
-        libc::proc_pidinfo(
-            std::process::id() as libc::c_int,
-            libc::PROC_PIDTASKINFO,
-            0,
-            info.as_mut_ptr().cast(),
-            size,
-        )
-    };
-
-    // A partial write is not signalled by a negative return: checking `> 0`
-    // reads an uninitialised struct on a short one.
-    if written != size {
-        return None;
+std::cfg_select! {
+    target_os = "linux" => {
+        fn read() -> Option<u64> {
+            // `VmRSS` rather than `/proc/self/statm`: the cheaper read reports pages and
+            // would need `sysconf(_SC_PAGESIZE)`, so `unsafe` and `libc` on the one
+            // platform that needs neither.
+            let status = std::fs::read_to_string("/proc/self/status").ok()?;
+            let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
+            let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+            Some(kib * 1024)
+        }
     }
+    target_os = "macos" => {
+        fn read() -> Option<u64> {
+            // `proc_pidinfo` rather than `task_info(mach_task_self(), ...)`: the mach
+            // route needs a task port and gets `mach_task_self`'s type wrong in a way
+            // that compiles.
+            let mut info = std::mem::MaybeUninit::<libc::proc_taskinfo>::uninit();
+            let size = size_of::<libc::proc_taskinfo>() as libc::c_int;
 
-    // SAFETY: the call reported that it filled exactly `size` bytes, which is the
-    // whole struct.
-    Some(unsafe { info.assume_init() }.pti_resident_size)
-}
+            // SAFETY: `proc_pidinfo` writes at most `size` bytes into `buffer` and
+            // reports how many it wrote. `size` is derived from the very type the
+            // pointer refers to, so the buffer cannot be short, and the pointer is to a
+            // live local that outlives the call. The pid is this process's own, which
+            // always exists. Nothing here is retained past the call.
+            let written = unsafe {
+                libc::proc_pidinfo(
+                    std::process::id() as libc::c_int,
+                    libc::PROC_PIDTASKINFO,
+                    0,
+                    info.as_mut_ptr().cast(),
+                    size,
+                )
+            };
 
-#[cfg(windows)]
-fn read() -> Option<u64> {
-    use windows_sys::Win32::System::ProcessStatus::{
-        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
-    };
-    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+            // A partial write is not signalled by a negative return: checking `> 0`
+            // reads an uninitialised struct on a short one.
+            if written != size {
+                return None;
+            }
 
-    let mut counters = PROCESS_MEMORY_COUNTERS {
-        // The struct is versioned by its own size, which is how the ABI stays
-        // compatible across Windows releases.
-        cb: size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
-        ..Default::default()
-    };
+            // SAFETY: the call reported that it filled exactly `size` bytes, which is the
+            // whole struct.
+            Some(unsafe { info.assume_init() }.pti_resident_size)
+        }
+    }
+    windows => {
+        fn read() -> Option<u64> {
+            use windows_sys::Win32::System::ProcessStatus::{
+                GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+            };
+            use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
-    // SAFETY: `GetCurrentProcess` returns a pseudo-handle that needs no closing
-    // and is always valid for the calling process. `counters` is a live local of
-    // exactly the type the third argument declares, and `cb` tells the call how
-    // large it is, so it cannot write past the end. The call retains nothing.
-    let ok = unsafe {
-        GetProcessMemoryInfo(
-            GetCurrentProcess(),
-            &raw mut counters,
-            size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
-        )
-    };
+            let mut counters = PROCESS_MEMORY_COUNTERS {
+                // The struct is versioned by its own size, which is how the ABI stays
+                // compatible across Windows releases.
+                cb: size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+                ..Default::default()
+            };
 
-    // `WorkingSetSize` rather than `PagefileUsage`, because the working set is what
-    // `tasklist` reports and what I3's budget is written against. The two differ by
-    // several MiB on the same process, so mixing them would read as drift.
-    (ok != 0).then_some(counters.WorkingSetSize as u64)
-}
+            // SAFETY: `GetCurrentProcess` returns a pseudo-handle that needs no closing
+            // and is always valid for the calling process. `counters` is a live local of
+            // exactly the type the third argument declares, and `cb` tells the call how
+            // large it is, so it cannot write past the end. The call retains nothing.
+            let ok = unsafe {
+                GetProcessMemoryInfo(
+                    GetCurrentProcess(),
+                    &raw mut counters,
+                    size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+                )
+            };
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn read() -> Option<u64> {
-    None
+            // `WorkingSetSize` rather than `PagefileUsage`, because the working set is what
+            // `tasklist` reports and what I3's budget is written against. The two differ by
+            // several MiB on the same process, so mixing them would read as drift.
+            (ok != 0).then_some(counters.WorkingSetSize as u64)
+        }
+    }
+    _ => {
+        fn read() -> Option<u64> {
+            None
+        }
+    }
 }
 
 #[cfg(test)]

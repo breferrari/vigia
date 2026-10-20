@@ -3767,7 +3767,7 @@ mod tests {
                     };
                     assert!(
                         !at.is_empty()
-                            && at.windows(2).all(|pair| pair[1] == pair[0] + 1)
+                            && at.array_windows().all(|[a, b]| *b == a + 1)
                             && at.iter().all(|&s| inside(s)),
                         "lines {first}..={last} of {lines} drew slices {at:?}"
                     );

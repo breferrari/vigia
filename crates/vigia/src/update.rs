@@ -107,57 +107,60 @@ pub fn check(current: &str) -> Option<String> {
     newer(&published, current).then_some(published)
 }
 
-/// Ask the registry, or answer nothing.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn fetch() -> Option<String> {
-    const ENDPOINT: &str = concat!("https://crates.io/api/v1/crates/", env!("CARGO_PKG_NAME"));
-    // Long enough for a cold handshake on a slow link, short enough that the
-    // answer is still about a pane somebody is looking at.
-    const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-    // An order above the 71KB the endpoint sends at forty-four published
-    // versions, and far below a size a monitor would feel. Counted after
-    // decoding: `ureq`'s own limit sits under the decompressor, so with `gzip`
-    // on it bounds the wire and not the allocation.
-    const BODY_LIMIT: u64 = 1024 * 1024;
+std::cfg_select! {
+    any(target_arch = "x86_64", target_arch = "aarch64") => {
+        /// Ask the registry, or answer nothing.
+        fn fetch() -> Option<String> {
+            const ENDPOINT: &str = concat!("https://crates.io/api/v1/crates/", env!("CARGO_PKG_NAME"));
+            // Long enough for a cold handshake on a slow link, short enough that the
+            // answer is still about a pane somebody is looking at.
+            const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+            // An order above the 71KB the endpoint sends at forty-four published
+            // versions, and far below a size a monitor would feel. Counted after
+            // decoding: `ureq`'s own limit sits under the decompressor, so with `gzip`
+            // on it bounds the wire and not the allocation.
+            const BODY_LIMIT: u64 = 1024 * 1024;
 
-    if !provider_runs_here() {
-        return None;
+            if !provider_runs_here() {
+                return None;
+            }
+            // Process-wide, and an already-installed one is as good as this one.
+            let _ = rustls_graviola::default_provider().install_default();
+
+            let agent: ureq::Agent = ureq::Agent::config_builder()
+                // The registry asks a client to name itself and say where to complain.
+                .user_agent(concat!(
+                    "vigia/",
+                    env!("CARGO_PKG_VERSION"),
+                    " (",
+                    env!("CARGO_PKG_REPOSITORY"),
+                    ")"
+                ))
+                .timeout_global(Some(FETCH_TIMEOUT))
+                // Off by default, and this endpoint is fixed and always TLS: without it
+                // a redirect can carry the request to cleartext, which is the guarantee
+                // the whole provider argument was about.
+                .https_only(true)
+                .build()
+                .into();
+
+            let mut response = agent.get(ENDPOINT).call().ok()?;
+            let mut body = String::new();
+            response
+                .body_mut()
+                .as_reader()
+                .take(BODY_LIMIT)
+                .read_to_string(&mut body)
+                .ok()?;
+            Some(body)
+        }
     }
-    // Process-wide, and an already-installed one is as good as this one.
-    let _ = rustls_graviola::default_provider().install_default();
-
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        // The registry asks a client to name itself and say where to complain.
-        .user_agent(concat!(
-            "vigia/",
-            env!("CARGO_PKG_VERSION"),
-            " (",
-            env!("CARGO_PKG_REPOSITORY"),
-            ")"
-        ))
-        .timeout_global(Some(FETCH_TIMEOUT))
-        // Off by default, and this endpoint is fixed and always TLS: without it
-        // a redirect can carry the request to cleartext, which is the guarantee
-        // the whole provider argument was about.
-        .https_only(true)
-        .build()
-        .into();
-
-    let mut response = agent.get(ENDPOINT).call().ok()?;
-    let mut body = String::new();
-    response
-        .body_mut()
-        .as_reader()
-        .take(BODY_LIMIT)
-        .read_to_string(&mut body)
-        .ok()?;
-    Some(body)
-}
-
-/// Nothing to ask on an architecture the provider will not compile on.
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-fn fetch() -> Option<String> {
-    None
+    _ => {
+        /// Nothing to ask on an architecture the provider will not compile on.
+        fn fetch() -> Option<String> {
+            None
+        }
+    }
 }
 
 /// Whether this CPU has everything the TLS provider asserts on.

@@ -1360,7 +1360,7 @@ fn svg_tree(bytes: &[u8]) -> Option<resvg::usvg::Tree> {
     };
     // `<text>`, or `<svg:text>` under a prefix.
     if bytes
-        .windows(5)
+        .array_windows()
         .any(|window| window == b"<text" || window == b":text")
     {
         options.fontdb = fonts();

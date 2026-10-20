@@ -1255,7 +1255,7 @@ mod tests {
         );
         assert!(settled(
             stamped,
-            stamped + SETTLE_MARGIN + Duration::from_secs(60)
+            stamped + SETTLE_MARGIN + Duration::from_mins(1)
         ));
     }
 

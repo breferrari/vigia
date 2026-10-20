@@ -43,7 +43,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
+  CARGO_BUILD_WARNINGS: deny
 
 # Never share a group with `ci`. A probe that cancels a real run, or is
 # cancelled by one, produces a partial sample and reports it as a whole one.

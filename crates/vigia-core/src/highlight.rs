@@ -798,18 +798,7 @@ impl Highlighter {
             ..
         } = self;
 
-        // An index walk rather than `Vec::extract_if`, which would say this in one
-        // line: that is stable since 1.87 and the workspace declares 1.85, and
-        // correcting the manifest is a toolchain decision rather than something to slip
-        // into a rendering fix.
-        let mut at = 0;
-        while at < entries.len() {
-            if entries[at].live {
-                at += 1;
-            } else {
-                retired.push_back(entries.remove(at));
-            }
-        }
+        retired.extend(entries.extract_if(.., |entry| !entry.live));
         while retired.len() > RETAINED_HUNKS {
             retired.pop_front();
             stats.evicted += 1;
