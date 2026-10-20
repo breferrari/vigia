@@ -3551,3 +3551,31 @@ fn pdf_feature_shipped() {
         "no step tests a build without PDFs"
     );
 }
+
+/// A vendored crate built on its own leaves its build output beside it, and
+/// that output holds local paths. None of it is tracked, and git ignores it.
+#[test]
+fn vendored_output_untracked() {
+    let out = Command::new("git")
+        .args(["ls-files", "vendor"])
+        .current_dir(repo_root())
+        .output()
+        .expect("git runs");
+    assert!(out.status.success(), "git ls-files failed");
+    let built: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|path| {
+            let mut parts = path.split('/').skip(2);
+            matches!(parts.next(), Some("target" | "Cargo.lock"))
+        })
+        .map(str::to_owned)
+        .collect();
+    assert!(built.is_empty(), "build output is tracked: {built:?}");
+    let ignore = repo_file(".gitignore");
+    for pattern in ["/vendor/*/target", "/vendor/*/Cargo.lock"] {
+        assert!(
+            ignore.lines().any(|line| line == pattern),
+            ".gitignore does not ignore {pattern}"
+        );
+    }
+}

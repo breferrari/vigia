@@ -36,3 +36,21 @@ fn pdf_feature_off_draws_binary() {
         assert!(diff.binary, "a PDF in a build without PDFs is not binary");
     }
 }
+
+#[test]
+fn pdf_feature_off_driver_binary() {
+    // Git for Windows names a driver for every PDF. No textconv runs here, so
+    // the text diff would be the file's bytes.
+    let scratch = Scratch::new("pdf-off-driver");
+    scratch.write(".gitattributes", "*.pdf diff=astextplain\n");
+    scratch.write("icon.pdf", binary_pdf(1, 3));
+    scratch.commit_all("initial");
+    scratch.write("icon.pdf", binary_pdf(2, 3));
+    let worktree = scratch.worktree();
+    let change = changes_sorted(&worktree)
+        .into_iter()
+        .find(|c| c.path == "icon.pdf")
+        .expect("icon.pdf is listed");
+    let diff = worktree.diff(&change).expect("diff");
+    assert!(diff.binary, "a PDF under a driver diffed as text: {diff:?}");
+}

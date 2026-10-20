@@ -145,7 +145,12 @@ pub(crate) fn pdf_headed(head: &[u8]) -> bool {
 
 /// Whether `path` is named as a PDF, in a build that draws PDFs.
 pub(crate) fn pdf_named(path: &str) -> bool {
-    cfg!(feature = "pdf") && named(path, "pdf")
+    cfg!(feature = "pdf") && pdf_path(path)
+}
+
+/// Whether `path` is named as a PDF, whether or not this build draws one.
+pub(crate) fn pdf_path(path: &str) -> bool {
+    named(path, "pdf")
 }
 
 /// Whether `path` ends in `.extension`, in any case.

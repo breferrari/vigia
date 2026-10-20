@@ -1141,7 +1141,7 @@ impl Worktree {
             Some(Diff::Unset) => Some(false),
             Some(Diff::Set) => Some(true),
             // No textconv runs here, so a PDF's driver would diff its bytes.
-            Some(Diff::Driver) if picture::pdf_named(&change.path) => None,
+            Some(Diff::Driver) if picture::pdf_path(&change.path) => None,
             Some(Diff::Driver) => Some(true),
         })
     }
