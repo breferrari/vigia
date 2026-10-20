@@ -384,6 +384,21 @@ jobs:
           done
           exit $status
 
+  # Advisories, licences, banned crates and sources, from `deny.toml`. A new
+  # advisory fails a pull request as a broken test does.
+  deny:
+    name: dependencies
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - run: cargo deny check advisories licenses bans sources
+
   musl:
     name: static musl binary
     needs: [changes]
@@ -544,7 +559,7 @@ jobs:
   ci-complete:
     name: ci complete
     if: always()
-    needs: [changes, lint, test, budgets, benches, pure-rust, musl, docs]
+    needs: [changes, lint, test, budgets, benches, pure-rust, deny, musl, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -561,5 +576,6 @@ jobs:
             'budgets=${{ needs.budgets.result }}' \
             'benches=${{ needs.benches.result }}' \
             'pure-rust=${{ needs.pure-rust.result }}' \
+            'deny=${{ needs.deny.result }}' \
             'musl=${{ needs.musl.result }}' \
             'docs=${{ needs.docs.result }}'

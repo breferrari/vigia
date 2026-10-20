@@ -3689,3 +3689,59 @@ fn nextest_time_bound() {
         "a nextest profile never kills a hung test"
     );
 }
+
+/// The crates `deny.toml` bans, by name.
+fn denied_crates(config: &str) -> Vec<String> {
+    let config = format!("\n{}", without_comments(config));
+    let Some((_, bans)) = config.split_once("\n[bans]") else {
+        return Vec::new();
+    };
+    let bans = bans.split("\n[").next().unwrap_or_default();
+    bans.split("crate = \"")
+        .skip(1)
+        .filter_map(|rest| rest.split_once('"').map(|(name, _)| name.to_owned()))
+        .collect()
+}
+
+/// `deny.toml` reads the graph the release ships: the dist targets, and bans
+/// every crate that brings a C toolchain.
+#[test]
+fn deny_policy() {
+    let fixture = "[bans]\ndeny = [\n    { crate = \"cc\", reason = \"x\" },\n]\n[sources]\n";
+    assert_eq!(denied_crates(fixture), ["cc"], "the scan missed a ban");
+    let deny = repo_file("deny.toml");
+    let denied = denied_crates(&deny);
+    for name in [
+        "cc",
+        "cmake",
+        "bindgen",
+        "onig_sys",
+        "aws-lc-sys",
+        "ring",
+        "openssl-sys",
+    ] {
+        assert!(
+            denied.iter().any(|ban| ban == name),
+            "deny.toml does not ban {name}"
+        );
+    }
+    let manifest = repo_file("Cargo.toml");
+    let dist = manifest
+        .split_once("[workspace.metadata.dist]")
+        .map(|(_, rest)| rest)
+        .expect("a dist table");
+    assert_eq!(
+        toml_array(&deny, "targets"),
+        toml_array(&format!("\n{dist}"), "targets"),
+        "deny.toml checks other targets than the release builds"
+    );
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    assert!(
+        ci.contains("cargo deny check advisories licenses bans sources"),
+        "ci.yml does not run the full dependency check"
+    );
+    assert!(
+        ci.contains("'deny=${{ needs.deny.result }}'"),
+        "ci complete does not judge the dependency check"
+    );
+}

@@ -1,0 +1,24 @@
+# Weekly, one grouped pull request per ecosystem, so updates arrive as two
+# reviews a week rather than one per crate. Each goes through `ci complete`.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+    labels: [internal]
+    commit-message:
+      prefix: chore
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [internal]
+    commit-message:
+      prefix: chore
