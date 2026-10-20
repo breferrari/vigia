@@ -367,6 +367,10 @@ targets = [
 # splitting one costs the reader the case it sets up. Under `-D warnings` a
 # `warn` here is a `deny` in CI, so gating on it would forbid a shape that is
 # not a defect. The count belongs in a commit, not in the build.
+# `cfg(fuzzing)` is set by cargo-fuzz for the fuzz targets' entry points.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
 [workspace.lints.clippy]
 missing_errors_doc = "warn"
 missing_panics_doc = "warn"

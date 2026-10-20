@@ -123,6 +123,9 @@ windows-sys.workspace = true
 # `# Errors` sections in `view.rs` saying the same sentence, which is the register
 # this repository just spent a week removing. `vigia-core` is published with a
 # real public API and keeps them.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"
 doc_markdown = "warn"

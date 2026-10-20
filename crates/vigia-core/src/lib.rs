@@ -65,6 +65,9 @@ pub use notes::{
     names_a_record, resolve, run_of,
 };
 pub use picture::{Format, ImageSide, Picture, Source, Sources};
+#[cfg(fuzzing)]
+#[doc(hidden)]
+pub use picture::fuzzing;
 pub use rename::{Candidate, PairKey, candidate_score, pair_score, pairs};
 pub use session::{Registration, Registry};
 pub use standing::{Reading, Standing};

@@ -619,3 +619,18 @@ mod tests {
         }
     }
 }
+
+/// Entry points for the fuzz targets, past the panic catch.
+#[cfg(fuzzing)]
+#[doc(hidden)]
+pub mod fuzzing {
+    /// An SVG side's size from the start of its document.
+    pub fn svg(data: &[u8]) {
+        let _ = super::svg_size(&data[..data.len().min(super::SVG_HEAD as usize)]);
+    }
+
+    /// A PDF side's first page size.
+    pub fn pdf(data: &[u8]) {
+        let _ = super::pdf_size(data.to_vec());
+    }
+}

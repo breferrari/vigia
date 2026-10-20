@@ -1432,8 +1432,12 @@ fn read_counted(source: &Source) -> Option<Vec<u8>> {
 
 /// One side decoded, with its colour profile. The first frame only.
 fn decode(source: &Source, raster: ImageFormat) -> Option<Decoded> {
+    decode_bytes(read_counted(source)?, raster)
+}
+
+/// [`decode`] of bytes in hand.
+fn decode_bytes(bytes: Vec<u8>, raster: ImageFormat) -> Option<Decoded> {
     use image::ImageDecoder;
-    let bytes = read_counted(source)?;
     let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes));
     reader.set_format(raster);
     let mut limits = image::Limits::default();
@@ -2469,5 +2473,45 @@ mod tests {
             Some("colour profile changed")
         );
         assert_eq!(built(Verdict::Uncompared, false).suffix(), None);
+    }
+}
+
+/// Entry points for the fuzz targets, which call past the worker's panic catch
+/// so a panic is found rather than caught.
+#[cfg(fuzzing)]
+#[doc(hidden)]
+pub mod fuzzing {
+    use image::ImageFormat;
+
+    /// One raster side through the decode limits: the first byte picks the
+    /// format.
+    pub fn picture_decode(data: &[u8]) {
+        let formats = [
+            ImageFormat::Png,
+            ImageFormat::Jpeg,
+            ImageFormat::Gif,
+            ImageFormat::WebP,
+            ImageFormat::Bmp,
+            ImageFormat::Ico,
+            ImageFormat::Tiff,
+            ImageFormat::Qoi,
+            ImageFormat::Tga,
+        ];
+        let Some((&pick, bytes)) = data.split_first() else {
+            return;
+        };
+        let _ = super::decode_bytes(bytes.to_vec(), formats[usize::from(pick) % formats.len()]);
+    }
+
+    /// Two PDF sides, split where the first two bytes say, through page
+    /// choice, fingerprinting and rendering.
+    #[cfg(feature = "pdf")]
+    pub fn pdf(data: &[u8]) {
+        let [high, low, rest @ ..] = data else {
+            return;
+        };
+        let at = usize::from(u16::from_be_bytes([*high, *low])).min(rest.len());
+        let (old, new) = rest.split_at(at);
+        super::pdf::drawn_from_bytes(old.to_vec(), new.to_vec());
     }
 }

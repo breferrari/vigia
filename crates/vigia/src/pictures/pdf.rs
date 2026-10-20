@@ -313,10 +313,17 @@ fn sized_within(job: &Job) -> Built {
 /// its first page's shape, both at one long side; with what the line says
 /// about the page.
 fn drawn_within(job: &Job) -> Option<PdfDrawn> {
-    let (old, new) = (
+    drawn_from(
         open_pdf(&job.sources.before)?,
         open_pdf(&job.sources.after)?,
-    );
+    )
+}
+
+/// Two opened sides drawn as [`drawn_within`] draws them.
+fn drawn_from(
+    old: Option<hayro::hayro_syntax::Pdf>,
+    new: Option<hayro::hayro_syntax::Pdf>,
+) -> Option<PdfDrawn> {
     let (chosen, note) = chosen_page(old.as_ref(), new.as_ref())?;
     let index = match chosen {
         Chosen::Both(page) | Chosen::Added(page) | Chosen::Removed(page) => page,
@@ -407,4 +414,12 @@ fn render_page(
         i64::from(canvas.1.saturating_sub(drawn_height) / 2),
     );
     Some(fitted)
+}
+
+/// [`drawn_from`] of two sides' bytes, each opened, or absent when it does not
+/// parse.
+#[cfg(fuzzing)]
+pub(super) fn drawn_from_bytes(old: Vec<u8>, new: Vec<u8>) {
+    let open = |bytes: Vec<u8>| hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(bytes)).ok();
+    let _ = drawn_from(open(old), open(new));
 }
