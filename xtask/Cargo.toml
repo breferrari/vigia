@@ -20,13 +20,17 @@ two-face = { version = "0.5.2", default-features = false, features = [
     "syntect-fancy",
 ] }
 # The build-time half of syntect: yaml-load reads the locally vendored
-# .sublime-syntax files, dump-create serialises the merged set. **The
-# workspace dependency, not a second declaration**: the whole point of the
-# force-compile in `main.rs` is that it exercises the exact engine vigia
-# ships, and an independent version requirement here is the one way the two
-# could quietly diverge. The workspace features (parsing, dump-load,
-# regex-fancy) ride along.
-syntect = { workspace = true, features = ["yaml-load", "dump-create"] }
+# .sublime-syntax files, dump-create serialises the merged set. Upstream
+# syntect at the version the fork is cut from, not the fork: `two-face` hands
+# over upstream's types, and the fork's patches change no compile or dump
+# behaviour, so the force-compile in `main.rs` still exercises vigia's engine.
+syntect = { version = "=5.3.0", default-features = false, features = [
+    "parsing",
+    "dump-load",
+    "regex-fancy",
+    "yaml-load",
+    "dump-create",
+] }
 
 # The scene bed's images, from the generators the tests share. Already in the
 # workspace graph, and nothing here ships.

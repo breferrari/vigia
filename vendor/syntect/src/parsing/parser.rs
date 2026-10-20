@@ -10,14 +10,15 @@
 // See https://github.com/rust-lang/rust/blob/1.54.0/library/core/src/hash/mod.rs#L717-L725
 #![allow(clippy::mutable_key_type)]
 
-use super::regex::Region;
+use super::regex::{Regex, Region};
 use super::scope::*;
 use super::syntax_definition::*;
 use crate::parsing::syntax_definition::ContextId;
 use crate::parsing::syntax_set::{SyntaxReference, SyntaxSet};
 use fnv::FnvHasher;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::hash::BuildHasherDefault;
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 
 /// Errors that can occur while parsing.
 #[derive(Debug, thiserror::Error)]
@@ -80,7 +81,33 @@ struct RegexMatch<'a> {
 }
 
 /// Maps the pattern to the start index, which is -1 if not found.
-type SearchCache = HashMap<*const MatchPattern, Option<Region>, BuildHasherDefault<FnvHasher>>;
+///
+/// Also keeps the regexes compiled for patterns with backreferences, keyed by
+/// a hash of the pattern after substitution and checked against it on a hit.
+/// Those are built from the captures of an earlier match, so without this a
+/// fresh `Regex` was compiled for every search, at every position, for as long
+/// as the context stayed on the stack.
+struct SearchCache {
+    matches: HashMap<*const MatchPattern, Option<Region>, BuildHasherDefault<FnvHasher>>,
+    with_refs: HashMap<u64, Regex, BuildHasherDefault<FnvHasher>>,
+}
+
+impl SearchCache {
+    fn new() -> SearchCache {
+        SearchCache {
+            matches: HashMap::with_capacity_and_hasher(128, BuildHasherDefault::default()),
+            with_refs: HashMap::default(),
+        }
+    }
+
+    fn get(&self, pat: &*const MatchPattern) -> Option<&Option<Region>> {
+        self.matches.get(pat)
+    }
+
+    fn insert(&mut self, pat: *const MatchPattern, region: Option<Region>) {
+        self.matches.insert(pat, region);
+    }
+}
 
 // To understand the implementation of this, here's an introduction to how
 // Sublime Text syntax definitions work.
@@ -230,8 +257,7 @@ impl ParseState {
         }
 
         let mut regions = Region::new();
-        let fnv = BuildHasherDefault::<FnvHasher>::default();
-        let mut search_cache: SearchCache = HashMap::with_capacity_and_hasher(128, fnv);
+        let mut search_cache = SearchCache::new();
         // Used for detecting loops with push/pop, see long comment above.
         let mut non_consuming_push_at = (0, 0);
 
@@ -463,7 +489,21 @@ impl ParseState {
         let (regex, can_cache) = match (match_pat.has_captures, captures) {
             (true, Some(captures)) => {
                 let (region, s) = captures;
-                (&match_pat.regex_with_refs(region, s), false)
+                let pattern = match_pat.regex_str_with_refs(region, s);
+                // Keyed by the pattern's hash so a miss moves the string
+                // into the regex rather than copying it into a key.
+                let mut hasher = FnvHasher::default();
+                pattern.hash(&mut hasher);
+                let regex = match search_cache.with_refs.entry(hasher.finish()) {
+                    Entry::Occupied(mut found) => {
+                        if found.get().regex_str() != pattern {
+                            found.insert(Regex::new(pattern));
+                        }
+                        found.into_mut()
+                    }
+                    Entry::Vacant(slot) => slot.insert(Regex::new(pattern)),
+                };
+                (&*regex, false)
             }
             _ => (match_pat.regex(), true),
         };
@@ -1862,6 +1902,35 @@ contexts:
         expect_scope_stacks("\u{0800}x", &["<source.test>, <test.good>"], syntax);
         // U+1F600 GRINNING FACE, 4 bytes in UTF-8
         expect_scope_stacks("\u{1F600}x", &["<source.test>, <test.good>"], syntax);
+    }
+
+    #[test]
+    fn backrefs_with_different_captures_on_one_line() {
+        // The regex compiled for `\1` is reused within a line, so the second
+        // fence, opened by a shorter run, must still close on its own run.
+        let ops = parse(
+            "xx--xx x--x",
+            r#"
+                name: Backref Memo Test
+                scope: source.backrefmemo
+                contexts:
+                  main:
+                    - match: (x+)
+                      scope: open
+                      push: fence
+                  fence:
+                    - match: \1
+                      scope: close
+                      pop: true
+                "#,
+        );
+        let close = Scope::new("close").unwrap();
+        let closed_at: Vec<usize> = ops
+            .iter()
+            .filter(|(_, op)| *op == Push(close))
+            .map(|(at, _)| *at)
+            .collect();
+        assert_eq!(closed_at, vec![4, 10]);
     }
 
     #[test]
