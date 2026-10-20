@@ -960,10 +960,7 @@ impl Worktree {
         let path = match self.lfs_path(oid) {
             Ok(path) => path,
             Err(missing) => {
-                let mut awaiting = self.lfs_missing.borrow_mut();
-                if !awaiting.contains(&missing) {
-                    awaiting.push(missing);
-                }
+                self.lfs_missing.borrow_mut().push(missing);
                 return None;
             }
         };

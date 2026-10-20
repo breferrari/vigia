@@ -66,15 +66,11 @@ fn lfs_store_watch_cost() {
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
     // The store arms on a thread of its own; the arm ends when it holds one.
     while watcher.store_watched().is_empty() {
-        assert_eq!(
-            watcher.take_store_notice(),
-            None,
-            "the store's watch failed to arm"
-        );
-        assert!(
-            started.elapsed() < Duration::from_secs(60),
-            "the store never armed"
-        );
+        if started.elapsed() > Duration::from_secs(60) {
+            // A failed arm ticks, and only the tick sets the notice.
+            let _ = watcher.next_tick();
+            panic!("the store never armed: {:?}", watcher.take_store_notice());
+        }
         std::thread::sleep(Duration::from_millis(1));
     }
     let time = started.elapsed();

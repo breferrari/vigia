@@ -1201,10 +1201,11 @@ const LFS_LINE: &str = "*.png filter=lfs diff=lfs merge=lfs -text\n";
 const ARMING: Duration = Duration::from_secs(180);
 
 /// Drive `watcher` until its store's own watch covers exactly `paths`, since a
-/// finished arm is only taken while it waits for a tick.
-fn store_covers(watcher: &mut Watcher<'_>, paths: &[&std::path::Path], within: Duration) {
+/// finished arm is only taken while it waits for a tick. Says whether it ticked.
+fn store_covers(watcher: &mut Watcher<'_>, paths: &[&std::path::Path], within: Duration) -> bool {
     let canonical = |path: &std::path::Path| path.canonicalize().ok();
     let deadline = Instant::now() + within;
+    let mut ticked = false;
     loop {
         let watched = watcher.store_watched();
         if watched.len() == paths.len()
@@ -1214,13 +1215,13 @@ fn store_covers(watcher: &mut Watcher<'_>, paths: &[&std::path::Path], within: D
                     .any(|held| canonical(held) == canonical(path))
             })
         {
-            return;
+            return ticked;
         }
         assert!(
             Instant::now() < deadline,
             "the store watched {watched:?}, not {paths:?}"
         );
-        let _ = tick_within(watcher, Duration::from_millis(50));
+        ticked |= tick_within(watcher, Duration::from_millis(50)).is_some();
     }
 }
 
@@ -1235,8 +1236,14 @@ fn lfs_storage_write_ticks() {
     store_covers(&mut watcher, &[holder.path()], ARMING);
 
     land_object(&store);
-    store_covers(&mut watcher, &[&store.join("objects")], ARMING);
-    while tick_within(&mut watcher, IDLE).is_some() {}
+    let mut ticked = store_covers(&mut watcher, &[&store.join("objects")], ARMING);
+    while tick_within(&mut watcher, IDLE).is_some() {
+        ticked = true;
+    }
+    assert!(
+        ticked,
+        "the first object, landing as its store armed, produced no tick"
+    );
     std::fs::write(store.join(OBJECT).with_extension("next"), "more\n").expect("second");
     assert!(
         tick_within(&mut watcher, SETTLE).is_some(),
@@ -1378,5 +1385,49 @@ fn lfs_adopted_mid_session_arms() {
     assert!(
         tick_within(&mut watcher, SETTLE).is_some(),
         "adopting LFS mid-session left the store unwatched"
+    );
+}
+
+#[test]
+fn ignored_attributes_do_not_arm() {
+    let holder = support::TempDir::new("watch-lfs-ignored");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = committed_scratch("watch-lfs-ignored-repo");
+    scratch.write(".gitignore", "vendor/\n");
+    scratch.commit_all("ignore vendor");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.write("vendor/pkg/.gitattributes", LFS_LINE);
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    assert!(
+        !watcher.store_wanted(),
+        "an ignored .gitattributes armed the store"
+    );
+}
+
+#[test]
+fn user_attributes_arm() {
+    let holder = support::TempDir::new("watch-lfs-user");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let attributes = holder.path().join("attributes");
+    std::fs::write(&attributes, LFS_LINE).expect("user attributes");
+    let scratch = committed_scratch("watch-lfs-user-repo");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    scratch.git(&[
+        "config",
+        "core.attributesFile",
+        &attributes.to_string_lossy(),
+    ]);
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    assert!(
+        watcher.store_wanted(),
+        "LFS named in core.attributesFile left the store unwatched"
     );
 }

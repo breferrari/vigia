@@ -128,18 +128,17 @@ enum Message {
     Event(Box<notify::Event>),
     /// Sent by a [`Stop`] handle to unblock `next_tick` from another thread.
     Stop,
-    /// A store watch the arming thread finished, and whether its success ticks.
+    /// A store watch the arming thread finished.
     Armed {
         path: PathBuf,
         mode: RecursiveMode,
-        ticks: bool,
         result: notify::Result<()>,
     },
 }
 
 /// What the arming thread is asked to do with the store's OS watch.
 enum StoreRequest {
-    Arm(PathBuf, RecursiveMode, bool),
+    Arm(PathBuf, RecursiveMode),
     Unwatch(PathBuf),
 }
 
@@ -151,13 +150,13 @@ fn spawn_armer(
     counter: Arc<AtomicU64>,
     arm: Arm,
     held: Arc<Mutex<Vec<PathBuf>>>,
-) -> Sender<StoreRequest> {
+) -> std::io::Result<Sender<StoreRequest>> {
     let (requests, received) = mpsc::channel();
-    std::thread::spawn(move || {
+    std::thread::Builder::new().spawn(move || {
         let mut backend = None;
         for request in received {
             match request {
-                StoreRequest::Arm(path, mode, ticks) => {
+                StoreRequest::Arm(path, mode) => {
                     let result = match &mut backend {
                         Some(backend) => Ok(backend),
                         None => event_backend(tx.clone(), Arc::clone(&counter))
@@ -175,12 +174,7 @@ fn spawn_armer(
                     {
                         held.push(path.clone());
                     }
-                    let armed = Message::Armed {
-                        path,
-                        mode,
-                        ticks,
-                        result,
-                    };
+                    let armed = Message::Armed { path, mode, result };
                     if tx.send(armed).is_err() {
                         return;
                     }
@@ -195,8 +189,8 @@ fn spawn_armer(
                 }
             }
         }
-    });
-    requests
+    })?;
+    Ok(requests)
 }
 
 /// Unblocks a [`Watcher`] that is waiting.
@@ -401,7 +395,7 @@ impl<'repo> Watcher<'repo> {
         // Inside the worktree, the recursive watch above already covers it.
         if outside {
             if lfs_attributes(repo, workdir, None) {
-                watcher.arm_store(false);
+                watcher.arm_store();
             } else {
                 watcher.store_deferred = true;
             }
@@ -410,9 +404,8 @@ impl<'repo> Watcher<'repo> {
     }
 
     /// Ask for a watch on `objects`, or on its deepest existing ancestor until it
-    /// appears. `ticks` makes a watch on `objects` tick once armed, since an
-    /// object may have landed while it armed.
-    fn arm_store(&mut self, ticks: bool) {
+    /// appears.
+    fn arm_store(&mut self) {
         if self.store_arming {
             return;
         }
@@ -429,27 +422,31 @@ impl<'repo> Watcher<'repo> {
             }
             (ancestor.to_path_buf(), RecursiveMode::NonRecursive)
         };
-        let requests = self.store_requests.get_or_insert_with(|| {
-            spawn_armer(
+        if self.store_requests.is_none() {
+            match spawn_armer(
                 self.tx.clone(),
                 Arc::clone(&self.delivered),
                 self.arm,
                 Arc::clone(&self.store_held),
-            )
-        });
-        self.store_arming = requests.send(StoreRequest::Arm(path, mode, ticks)).is_ok();
+            ) {
+                Ok(requests) => self.store_requests = Some(requests),
+                Err(error) => {
+                    self.store_notice = Some(store_notice(&notify::Error::io(error)));
+                    return;
+                }
+            }
+        }
+        self.store_arming = self
+            .store_requests
+            .as_ref()
+            .is_some_and(|requests| requests.send(StoreRequest::Arm(path, mode)).is_ok());
     }
 
     /// Take a finished store watch, and say whether it ticks. A failure keeps
     /// every other watch, stops waiting for the store, and ticks so the notice
-    /// is read.
-    fn armed(
-        &mut self,
-        path: PathBuf,
-        mode: RecursiveMode,
-        ticks: bool,
-        result: notify::Result<()>,
-    ) -> bool {
+    /// is read. A watch on `objects` ticks, since an object may have landed
+    /// while it armed.
+    fn armed(&mut self, path: PathBuf, mode: RecursiveMode, result: notify::Result<()>) -> bool {
         self.store_arming = false;
         self.drop_ancestor();
         if let Err(error) = result {
@@ -457,12 +454,11 @@ impl<'repo> Watcher<'repo> {
             return true;
         }
         if mode == RecursiveMode::Recursive {
-            return ticks;
+            return true;
         }
-        // The child may have appeared while its parent armed, and anything that
-        // follows this happened after the pane opened, so it ticks.
+        // The child may have appeared while its parent armed.
         self.store_ancestor = Some(path);
-        self.arm_store(true);
+        self.arm_store();
         false
     }
 
@@ -475,11 +471,13 @@ impl<'repo> Watcher<'repo> {
     }
 
     /// Whether a store watch has been asked for.
+    #[doc(hidden)]
     pub fn store_wanted(&self) -> bool {
         self.store_requests.is_some()
     }
 
     /// The paths the store's own watch covers now, for a test to wait on.
+    #[doc(hidden)]
     pub fn store_watched(&self) -> Vec<PathBuf> {
         self.store_held
             .lock()
@@ -581,13 +579,8 @@ impl<'repo> Watcher<'repo> {
         let event = match message {
             Message::Stop => return None,
             Message::Event(event) => event,
-            Message::Armed {
-                path,
-                mode,
-                ticks,
-                result,
-            } => {
-                let relevant = self.armed(path, mode, ticks, result);
+            Message::Armed { path, mode, result } => {
+                let relevant = self.armed(path, mode, result);
                 if !relevant {
                     self.stats.filtered += 1;
                 }
@@ -606,16 +599,6 @@ impl<'repo> Watcher<'repo> {
         {
             self.stack_stale = true;
         }
-        if self.store_deferred
-            && let Some(named) = event.paths.iter().find(|path| {
-                path.file_name() == Some(OsStr::new(".gitattributes"))
-                    || path.ends_with(Path::new("info").join("attributes"))
-            })
-            && lfs_attributes(&self.repo, &self.roots[0], Some(named))
-        {
-            self.store_deferred = false;
-            self.arm_store(true);
-        }
 
         // Reads are not changes. Most backends never report them, but inotify
         // can be configured to, and a monitor that redraws because something
@@ -623,6 +606,20 @@ impl<'repo> Watcher<'repo> {
         if matches!(event.kind, EventKind::Access(_)) {
             self.stats.filtered += 1;
             return Some(Accepted::default());
+        }
+
+        // An ignored or hidden `.gitattributes` is not one git reads here.
+        if self.store_deferred
+            && let Some(named) = event.paths.iter().find(|path| {
+                let info = within(&self.git_dir, path).or_else(|| within(&self.common_dir, path));
+                info == Some(Path::new("info/attributes"))
+                    || path.file_name() == Some(OsStr::new(".gitattributes"))
+                        && self.relative(path).is_some()
+            })
+            && lfs_attributes(&self.repo, &self.roots[0], Some(named))
+        {
+            self.store_deferred = false;
+            self.arm_store();
         }
 
         let accepted = accept_paths(&event.paths, |path| self.relative(path));
@@ -639,7 +636,7 @@ impl<'repo> Watcher<'repo> {
         if self.store_ancestor.is_some()
             && self.store.iter().any(|spelling| spelling.starts_with(path))
         {
-            self.arm_store(true);
+            self.arm_store();
         }
         if within(&self.store, path).is_some() {
             return Some((Path::new(".git"), false));
@@ -911,8 +908,9 @@ fn event_backend(
     })
 }
 
-/// Whether an attributes file names the LFS filter: every tracked
-/// `.gitattributes`, `info/attributes`, and `named` when an event names one.
+/// Whether an attributes file git reads names the LFS filter: every tracked
+/// `.gitattributes`, `info/attributes`, the user's, system and installation
+/// files, and `named` when an event names one.
 fn lfs_attributes(repo: &gix::Repository, workdir: &Path, named: Option<&Path>) -> bool {
     let names_lfs = |path: &Path| {
         std::fs::read_to_string(path).is_ok_and(|text| {
@@ -921,7 +919,23 @@ fn lfs_attributes(repo: &gix::Repository, workdir: &Path, named: Option<&Path>) 
                 .any(|line| line.split_whitespace().any(|word| word == "filter=lfs"))
         })
     };
-    if named.is_some_and(names_lfs) || names_lfs(&repo.common_dir().join("info").join("attributes"))
+    let mut env = |name: &str| std::env::var_os(name);
+    let user = repo
+        .config_snapshot()
+        .trusted_path("core.attributesFile")
+        .ok()
+        .flatten()
+        .or_else(|| gix::attrs::Source::Git.storage_location(&mut env));
+    let globals = [
+        gix::attrs::Source::GitInstallation,
+        gix::attrs::Source::System,
+    ]
+    .into_iter()
+    .filter_map(|source| source.storage_location(&mut env))
+    .chain(user);
+    if named.is_some_and(names_lfs)
+        || names_lfs(&repo.common_dir().join("info").join("attributes"))
+        || globals.into_iter().any(|path| names_lfs(&path))
     {
         return true;
     }
@@ -1190,6 +1204,23 @@ mod tests {
         assert!(
             watcher.store_watched().is_empty(),
             "the store armed before the tree ticked"
+        );
+    }
+
+    /// An object that lands while the store's watch arms still ticks.
+    #[test]
+    fn object_during_arm_ticks() {
+        const SLOW: Duration = Duration::from_secs(1);
+        let (_base, tree, store) = outside_store("store-landing");
+        let repo = gix::open(&tree).expect("open");
+        let mut watcher = watch_with(&tree, &repo, |backend, path, mode| {
+            std::thread::sleep(SLOW);
+            backend.watch(path, mode)
+        });
+        std::fs::write(store.join("objects").join("object"), "x\n").expect("write");
+        assert!(
+            ticks_within(&mut watcher, ARMING),
+            "an object landing during the arm produced no tick"
         );
     }
 

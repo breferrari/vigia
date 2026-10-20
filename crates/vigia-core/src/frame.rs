@@ -807,10 +807,9 @@ impl<'w> Frame<'w> {
             && let Some(taken) = measured.taken.as_ref()
         {
             let mut awaited = 0;
-            let what = if taken.arrived(&mut awaited) {
-                Verdict::Remeasure
-            } else {
-                verdict(taken, change, now, &mut fresh)
+            let what = match verdict(taken, change, now, &mut fresh) {
+                Verdict::Keep if taken.arrived(&mut awaited) => Verdict::Remeasure,
+                what => what,
             };
             self.stats.probes += awaited;
             if what != Verdict::Remeasure {
@@ -922,11 +921,10 @@ impl<'w> Frame<'w> {
         let reuse = match self.cached.get(change) {
             None => false,
             Some(cached) => {
-                !cached.taken.arrived(&mut awaited)
-                    && reusable(&cached.taken, change, || {
-                        probed = true;
-                        fingerprint(&path)
-                    })
+                reusable(&cached.taken, change, || {
+                    probed = true;
+                    fingerprint(&path)
+                }) && !cached.taken.arrived(&mut awaited)
             }
         };
         self.stats.probes += u64::from(probed) + awaited;
