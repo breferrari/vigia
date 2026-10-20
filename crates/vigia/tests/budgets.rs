@@ -3367,37 +3367,62 @@ fn pdf_stream_bound() {
     let pane = Rect::new(0, 0, 120, 40);
     let mut app = App::new();
     app.draw_pictures(true);
-    let mut pictures = Pictures::new(
-        Inks {
-            canvas: (0x0d, 0x11, 0x17),
-            changed: (0xf8, 0x51, 0x49),
-        },
-        ratatui_image::picker::Picker::halfblocks(),
-        Box::new(|| {}),
-    );
     let layout = layout_of(&app, pane, frame.files().len());
     let history = History::new();
     let mut highlighter = Highlighter::eager();
-    let mut view = app
+    let view = app
         .view(&mut frame, &mut highlighter, &history, layout)
         .expect("view");
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
-    let began = Instant::now();
-    pictures.attach(&mut view.rows, &frame);
-    assert!(
-        pictures.settle(support::ceiling(Duration::from_secs(60))),
-        "the picture was not built"
+    // Each in a cache of its own, so each builds the page from nothing.
+    let build = || {
+        let mut pictures = Pictures::new(
+            Inks {
+                canvas: (0x0d, 0x11, 0x17),
+                changed: (0xf8, 0x51, 0x49),
+            },
+            ratatui_image::picker::Picker::halfblocks(),
+            Box::new(|| {}),
+        );
+        let mut rows = view.rows.clone();
+        let began = Instant::now();
+        pictures.attach(&mut rows, &frame);
+        assert!(
+            pictures.settle(support::ceiling(Duration::from_secs(60))),
+            "the picture was not built"
+        );
+        began.elapsed()
+    };
+    let round = || {
+        let mut builds = Samples::new(PDF_STREAM_BUILDS);
+        for _ in 0..PDF_STREAM_BUILDS {
+            builds.push(build());
+        }
+        builds
+    };
+    let first = round();
+    eprintln!(
+        "note: a page of 20 MB of content built in p50 {:?}, max {:?}, off the paint",
+        first.percentile(0.5),
+        first.percentile(1.0)
     );
-    let took = began.elapsed();
-    eprintln!("note: a page of 20 MB of content built in {took:?}, off the paint");
-    assert!(
-        took < budget(Duration::from_millis(600)),
-        "the worker took {took:?} for a page of 20 MB of content"
+    // The build runs on the worker, which this thread's CPU clock cannot see,
+    // so a breach is retried once and never attributed.
+    holds_p99_rounds(
+        "the worker builds a page of 20 MB of content within its bound",
+        budget(Duration::from_millis(600)),
+        &first,
+        String::new,
+        || (round(), None),
     );
 }
+
+/// Builds of the 20 MB page timed per round.
+#[cfg(feature = "pdf")]
+const PDF_STREAM_BUILDS: usize = 3;
 
 /// A PDF of about 16 MiB, the most the frame path reads: an image's worth of
 /// bytes it skips, and a content stream that inflates to 15 MiB, which it
