@@ -671,6 +671,27 @@ impl Pictures {
         self.scores.try_iter().collect()
     }
 
+    /// File `found` with `frame` and walk once more, so they pair; whether
+    /// there were any.
+    ///
+    /// # Errors
+    ///
+    /// The walk fails.
+    pub fn pair(
+        &mut self,
+        frame: &mut vigia_core::Frame<'_>,
+        found: Vec<(vigia_core::PairKey, u64)>,
+    ) -> vigia_core::Result<bool> {
+        if found.is_empty() {
+            return Ok(false);
+        }
+        for (key, score) in found {
+            frame.learn_pair(key, score);
+        }
+        frame.advance()?;
+        Ok(true)
+    }
+
     /// The sizes the worker found for sides the frame path left unsized, by
     /// stamp, since the last call. The frame takes them with
     /// [`vigia_core::Frame::learn_size`].

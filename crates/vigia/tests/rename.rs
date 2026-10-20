@@ -77,10 +77,10 @@ fn binary_rename_paired_by_worker() {
         );
         std::thread::sleep(Duration::from_millis(5));
     };
-    for (key, score) in found {
-        frame.learn_pair(key, score);
-    }
-    frame.advance().expect("advance");
+    assert!(
+        pictures.pair(&mut frame, found).expect("advance"),
+        "nothing was paired"
+    );
     assert_eq!(
         kind(&frame, "b.bin"),
         Some(ChangeKind::Renamed {

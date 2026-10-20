@@ -1322,13 +1322,7 @@ impl Shell {
     /// once, with their scores filed.
     fn settle_pairs(&mut self, frame: &mut vigia_core::Frame) {
         let found = self.pictures.found_pairs();
-        if found.is_empty() {
-            return;
-        }
-        for (key, score) in found {
-            frame.learn_pair(key, score);
-        }
-        if let Err(e) = frame.advance() {
+        if let Err(e) = self.pictures.pair(frame, found) {
             self.walk_failed(frame, &e);
         }
     }
@@ -3504,6 +3498,18 @@ mod tests {
         let paint = code.find("fn paint<").expect("`Shell::paint` is gone");
         let paint = &code[paint..];
         let paint = &paint[..paint.find("\n    }\n").expect("`paint` never closes")];
+        // What the walks could not afford to pair goes to the worker after the
+        // view is attached, on every paint.
+        let attached = paint
+            .rfind("self.pictures.attach(")
+            .expect("`paint` no longer attaches pictures");
+        let sent = paint
+            .find("self.pictures.score_pairs(frame)")
+            .expect("`paint` no longer sends the unscored pairs to be scored");
+        assert!(
+            attached < sent,
+            "`paint` sends pairs before the view is attached"
+        );
         let asked = paint
             .find("effect_interval(\n            self.effects_ran,")
             .expect("`paint` no longer asks `effect_interval` with the previous paint's answer");
