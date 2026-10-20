@@ -36,7 +36,7 @@ pub const FRAMES: &[Frame] = &[
         size: "80x16",
         rows: &[(0, 16)],
         file: "frame-glance.svg",
-        label: "The vigia pane, labelled down its left side: the header naming the worktree and how many files changed; the list of changed files with their status letters, paths, sparklines and line counts, the newest marked by a pulse and the recently changed ones by heat strips; a rule; the diff of the file being read, with its heading, hunk and lines; another rule; and the status bar with key hints, frame time, memory and position.",
+        label: "The vigia pane, labelled down its left side: the header naming the worktree and how many files changed; the list of changed files with their status letters, paths, sparklines and line counts, the newest marked by a pulse, and heat strips showing where in each file the changes sit; a rule; the diff of the file being read, with its heading, hunk and lines; another rule; and the status bar with key hints, frame time, memory and position.",
         labels: &[
             Label {
                 row: 0,

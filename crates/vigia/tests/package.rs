@@ -4317,15 +4317,18 @@ fn frame_svgs_match() {
         "https://raw.githubusercontent.com/breferrari/vigia/main/assets/",
     ));
     let readme = std::fs::read_to_string(repo_root().join("README.md")).expect("read README.md");
-    assert!(
-        !readme.contains("(assets/frame-") && !readme.contains("(../assets/frame-"),
+    assert_eq!(
+        readme.matches("assets/frame-").count(),
+        readme
+            .matches("https://raw.githubusercontent.com/breferrari/vigia/main/assets/frame-")
+            .count(),
         "README.md links a frame by a relative path, which crates.io cannot load"
     );
     for (path, prefix) in pages {
         let page = std::fs::read_to_string(&path).unwrap_or_default();
         for frame in frames::FRAMES {
             let image = format!("({prefix}{})", frame.file);
-            if let Some(at) = page.find(&image) {
+            for (at, _) in page.match_indices(&image) {
                 let alt = page[..at].rsplit("![").next().unwrap_or_default();
                 assert_eq!(
                     alt.trim_end_matches(']'),

@@ -7550,7 +7550,7 @@ fn rename_frame() {
 fn glance_frame() {
     let glance = glancing();
     let scale = glance.scale;
-    let entries: Vec<FileEntry> = glance
+    let mut entries: Vec<FileEntry> = glance
         .rows
         .into_iter()
         .filter_map(|row| match row {
@@ -7558,9 +7558,9 @@ fn glance_frame() {
             _ => None,
         })
         .collect();
-    // The newest file's counts are the hunk drawn below it.
-    let mut entries = entries;
+    // The newest file's counts and heat are the hunk drawn below it.
     entries[0].churn = Some((3, 1));
+    entries[0].heat = heat(&[(9, 3, 1)]);
     let mut view = one_file();
     view.list_span = entries.len();
     view.list = entries.iter().cloned().map(Into::into).collect();
