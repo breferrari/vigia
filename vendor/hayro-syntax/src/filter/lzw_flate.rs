@@ -62,6 +62,8 @@ pub(crate) mod flate {
         apply_predictor(decoded, &params)
     }
 
+    pub(crate) use fallback::capacity;
+
     /// Ported from <https://github.com/mozilla/pdf.js/blob/master/src/core/flate_stream.js>
     /// TODO: Rewrite this in idiomatic Rust.
     mod fallback {
@@ -70,6 +72,16 @@ pub(crate) mod flate {
 
         pub(crate) fn decode(data: &[u8]) -> Option<Vec<u8>> {
             flate_decode(data)
+        }
+
+        /// Whether inflating `data` stopped at the decode limit, and the most
+        /// capacity its output reached.
+        pub(crate) fn capacity(data: &[u8]) -> (bool, usize) {
+            let mut stream = FlateStream::new(data);
+            while !stream.eof {
+                stream.read_block();
+            }
+            (stream.over, stream.output.capacity())
         }
 
         fn flate_decode(data: &[u8]) -> Option<Vec<u8>> {

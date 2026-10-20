@@ -470,6 +470,42 @@ pub fn zlib_filled(byte: u8, length: u64) -> Vec<u8> {
     bits.out
 }
 
+/// `count` zeros as raw deflate, each its own literal: one fixed-Huffman
+/// block that grows its output a byte at a time.
+pub fn deflate_literals(count: usize) -> Vec<u8> {
+    let (mut out, mut held, mut bits) = (Vec::new(), 0u64, 0u32);
+    let mut push = |value: u64, width: u32| {
+        held |= value << bits;
+        bits += width;
+        while bits >= 8 {
+            out.push(held as u8);
+            held >>= 8;
+            bits -= 8;
+        }
+    };
+    // The last block, with the fixed codes.
+    push(1, 1);
+    push(1, 2);
+    // A literal 0 is code 0x30 in eight bits, which deflate packs from its
+    // top bit; 0x30 reversed is 0x0c.
+    for _ in 0..count {
+        push(0x0c, 8);
+    }
+    // End of block, and the last byte's padding.
+    push(0, 7);
+    push(0, 7);
+    out
+}
+
+/// `count` zeros, under 65,536, as one stored raw deflate block.
+pub fn deflate_stored(count: u16) -> Vec<u8> {
+    let mut out = vec![0x01];
+    out.extend_from_slice(&count.to_le_bytes());
+    out.extend_from_slice(&(!count).to_le_bytes());
+    out.extend(std::iter::repeat_n(0, usize::from(count)));
+    out
+}
+
 /// `length` zeros as zlib that flate2 refuses and a lenient inflater reads: a
 /// stored block whose length check is wrong comes before the data.
 pub fn zlib_zeros_lenient(length: u64) -> Vec<u8> {

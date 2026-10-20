@@ -317,3 +317,17 @@ fn pdf_nested_limits() {
         "the parses fail on their own"
     );
 }
+
+#[test]
+fn pdf_fallback_capacity() {
+    // One byte past a limit of 4096, a literal at a time and in one stored
+    // block: the output's capacity never passes the limit.
+    for (kind, data) in [
+        ("literals", support::deflate_literals(4097)),
+        ("stored", support::deflate_stored(4097)),
+    ] {
+        let (over, capacity) = hayro_syntax::fallback_capacity(4096, &data);
+        assert!(over, "{kind}: 4097 bytes did not pass a limit of 4096");
+        assert!(capacity <= 4096, "{kind}: the output grew to {capacity}");
+    }
+}

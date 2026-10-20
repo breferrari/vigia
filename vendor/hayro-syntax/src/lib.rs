@@ -110,7 +110,7 @@ pub mod reader;
 
 mod limit;
 #[cfg(feature = "std")]
-pub use limit::{DecodeLimitExceeded, with_decode_limit};
+pub use limit::{DecodeLimitExceeded, fallback_capacity, with_decode_limit};
 pub use data::PdfData;
 pub use filter::*;
 pub use pdf::*;

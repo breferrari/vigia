@@ -60,6 +60,17 @@ pub fn with_decode_limit<T>(
     }
 }
 
+/// Inflate raw deflate `data` with the fallback inflater under a limit of `bytes`: whether
+/// it stopped at the limit, and the most capacity its output reached. For
+/// tests of the limit.
+#[doc(hidden)]
+#[cfg(feature = "std")]
+pub fn fallback_capacity(bytes: u64, data: &[u8]) -> (bool, usize) {
+    let mut seen = (false, 0);
+    let _ = with_decode_limit(bytes, || seen = crate::filter::lzw_flate::flate::capacity(data));
+    seen
+}
+
 /// Note that a decode would have passed the limit.
 fn passed() {
     #[cfg(feature = "std")]

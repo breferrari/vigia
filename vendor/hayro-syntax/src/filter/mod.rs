@@ -10,7 +10,7 @@ mod dct;
 mod jbig2;
 #[cfg(feature = "images")]
 mod jpx;
-mod lzw_flate;
+pub(crate) mod lzw_flate;
 mod png;
 mod run_length;
 
