@@ -266,9 +266,9 @@ fn binary_rename_old_side_binary() {
 }
 
 #[test]
-fn binary_rename_limit_as_git_counts() {
-    // 2 removals and 1,001 additions: 2,002 pairs, far under 1,000 × 1,000,
-    // so git pairs the moved file, though either list alone passes 1,000.
+fn binary_rename_limit() {
+    // 1,001 additions: past what a frame sizes, so nothing is weighed, though
+    // the 2,002 pairs are inside git's own limit.
     let old = noise(60, 20_000);
     let mut files = vec![("a.bin", old.clone()), ("gone.txt", b"gone\n".to_vec())];
     files.sort();
@@ -279,8 +279,14 @@ fn binary_rename_limit_as_git_counts() {
         .collect();
     written.push(("b.bin", tail_changed(&old, 0.1)));
     let scratch = moved("rename-limit", &files, &written);
-    let changes = changes_sorted(&scratch.worktree());
-    assert_eq!(kind_of(&changes, "b.bin"), &renamed("a.bin"));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    assert_eq!(
+        scored(&mut frame),
+        0,
+        "a walk past the limit weighed a pair"
+    );
+    assert_eq!(kind_of(frame.files(), "b.bin"), &ChangeKind::Added);
 }
 
 #[test]
@@ -297,4 +303,47 @@ fn pair_scores_start_again() {
         1,
         "4,097 scores did not start the record again"
     );
+}
+
+#[test]
+fn binary_rename_charged_once() {
+    // The old side is read whole to learn it is binary, and that read serves
+    // the score too: the frame pays for each side once.
+    let old = noise(70, 300_000);
+    let new = tail_changed(&old, 0.1);
+    let total = (old.len() + new.len()) as u64;
+    let scratch = moved("rename-once", &[("a.bin", old)], &[("b.bin", new)]);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    assert_eq!(scored(&mut frame), total);
+    assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
+}
+
+#[test]
+fn binary_rename_small_before_text() {
+    // Two large text pairs come first in the walk, and the small binary pair
+    // is still paid for first.
+    let text = |n: u8| -> Vec<u8> {
+        (0..500_000u32)
+            .map(|at| b'a' + ((at + u32::from(n)) % 26) as u8)
+            .collect()
+    };
+    let small = noise(80, 30_000);
+    let scratch = moved(
+        "rename-small-first",
+        &[
+            ("a1.txt", text(1)),
+            ("a2.txt", text(2)),
+            ("z.bin", small.clone()),
+        ],
+        &[
+            ("b1.txt", text(3)),
+            ("b2.txt", text(4)),
+            ("y.bin", tail_changed(&small, 0.1)),
+        ],
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "y.bin"), &renamed("z.bin"));
 }

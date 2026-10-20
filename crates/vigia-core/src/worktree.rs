@@ -465,10 +465,12 @@ impl Worktree {
                 .collect()
         };
         let (removed, added) = (of_kind(ChangeKind::Removed), of_kind(ChangeKind::Added));
-        // As git counts it: the removals times the additions.
+        // Within git's limit of removals times additions, and neither side
+        // past it alone, so a frame never sizes more than 1,000 of either.
         if removed.is_empty()
             || added.is_empty()
-            || removed.len() * added.len() > rename::RENAME_LIMIT * rename::RENAME_LIMIT
+            || removed.len() > rename::RENAME_LIMIT
+            || added.len() > rename::RENAME_LIMIT
         {
             return changes;
         }
@@ -512,9 +514,23 @@ impl Worktree {
                 })
                 .clone()
         };
+        // Each side the budget paid for in this walk, which is read at most once.
+        let charged: RefCell<std::collections::HashSet<usize>> = RefCell::default();
+        let charge = |at: usize, size: u64| -> bool {
+            if charged.borrow().contains(&at) {
+                return true;
+            }
+            if size > self.pair_budget.get() {
+                return false;
+            }
+            self.pair_budget.set(self.pair_budget.get() - size);
+            self.pair_bytes.set(self.pair_bytes.get() + size);
+            charged.borrow_mut().insert(at);
+            true
+        };
         // Whether a side is binary, from its first bytes, once per version. A
-        // blob is read whole to learn it, which the frame's budget pays for; one
-        // past what is left counts as binary, and its pair goes to the worker.
+        // blob is read whole to learn it, which the budget pays for; one past
+        // what is left counts as binary, and its pair goes to the worker.
         let binary = |at: usize, stamp: u64, size: u64| -> bool {
             if let Some(&known) = self.binaries.borrow().get(&stamp) {
                 return known;
@@ -522,13 +538,11 @@ impl Worktree {
             let change = &changes[at];
             let whole =
                 change.kind == ChangeKind::Removed || matches!(change.after, Some(Side::Blob(_)));
-            let head = if whole {
-                if size > self.pair_budget.get() {
+            let found = if whole {
+                if !charge(at, size) {
                     return true;
                 }
-                self.pair_budget.set(self.pair_budget.get() - size);
-                self.pair_bytes.set(self.pair_bytes.get() + size);
-                bytes_of(at).map(|bytes| bytes.to_vec())
+                bytes_of(at).is_some_and(|bytes| hunk::is_binary(&bytes))
             } else {
                 use std::io::Read;
                 let mut head = Vec::new();
@@ -537,10 +551,8 @@ impl Worktree {
                         file.take(hunk::BINARY_SNIFF_LEN as u64)
                             .read_to_end(&mut head)
                     })
-                    .ok()
-                    .map(|_| head)
+                    .is_ok_and(|_| hunk::is_binary(&head))
             };
-            let found = head.is_some_and(|head| hunk::is_binary(&head));
             let mut binaries = self.binaries.borrow_mut();
             if binaries.len() >= PAIRS_KEPT {
                 binaries.clear();
@@ -563,12 +575,6 @@ impl Worktree {
                 })
             })
             .collect();
-        // `gix` scored every pair with no binary side.
-        weighed.retain(|pair| {
-            self.pair_scores.borrow().contains_key(&pair.key)
-                || binary(pair.to, pair.key.1, pair.sizes.1)
-                || binary(pair.from, pair.key.0, pair.sizes.0)
-        });
         // The cheapest first, so the budget goes furthest.
         weighed.sort_by_key(|pair| pair.bytes);
         let mut listed: std::collections::HashSet<rename::PairKey> = self
@@ -580,11 +586,27 @@ impl Worktree {
         let mut scored = Vec::new();
         for pair in weighed {
             let known = self.pair_scores.borrow().get(&pair.key).copied();
+            // `gix` scored every pair with no binary side.
+            if known.is_none()
+                && !binary(pair.to, pair.key.1, pair.sizes.1)
+                && !binary(pair.from, pair.key.0, pair.sizes.0)
+            {
+                continue;
+            }
+            // What is left to read of the two sides.
+            let unread = |at: usize, size: u64| {
+                if charged.borrow().contains(&at) {
+                    0
+                } else {
+                    size
+                }
+            };
+            let cost = unread(pair.from, pair.sizes.0) + unread(pair.to, pair.sizes.1);
             let score = match known {
                 Some(score) => score,
-                None if pair.bytes <= self.pair_budget.get() => {
-                    self.pair_budget.set(self.pair_budget.get() - pair.bytes);
-                    self.pair_bytes.set(self.pair_bytes.get() + pair.bytes);
+                None if cost <= self.pair_budget.get() => {
+                    charge(pair.from, pair.sizes.0);
+                    charge(pair.to, pair.sizes.1);
                     let score = match (bytes_of(pair.from), bytes_of(pair.to)) {
                         (Some(old), Some(new)) => rename::pair_score(&old, &new),
                         _ => 0,
@@ -633,13 +655,20 @@ impl Worktree {
             .collect()
     }
 
-    /// Where a candidate pair's two sides are read from.
+    /// Where a candidate pair's two sides are read from: a worktree side as
+    /// its own bytes, as the frame reads it. A blob side that is an LFS pointer
+    /// is under 1 KiB and pairs only with a side as small, which the frame
+    /// always scores itself.
     fn pair_sources(&self, from: &FileChange, to: &FileChange) -> Sources {
         let combined = FileChange {
             before: from.before,
             ..to.clone()
         };
-        self.image_sources(&combined)
+        let mut sides = self.image_sources(&combined);
+        if to.after == Some(Side::Worktree) {
+            sides.after = Some(Source::File(self.workdir.join(&to.path)));
+        }
+        sides
     }
 
     /// A fresh scoring budget, for the frame about to walk.

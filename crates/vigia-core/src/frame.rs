@@ -468,7 +468,6 @@ impl<'w> Frame<'w> {
         // the life of the process, so a walk and the draw after it share one.
         self.worktree.invalidate_filter();
         self.worktree.renew_pair_budget();
-        self.stats.walks += 1;
         let paired_before = self.worktree.pair_bytes();
         let mut walk = self.worktree.changes_at(&self.standing, options)?;
         for change in &mut walk {
@@ -494,6 +493,7 @@ impl<'w> Frame<'w> {
         }
 
         self.stats.paired_bytes += self.worktree.pair_bytes() - paired_before;
+        self.stats.walks += 1;
 
         // Nothing above this line mutated the frame's picture of the worktree, which
         // is what makes a failed walk leave the previous frame intact.
