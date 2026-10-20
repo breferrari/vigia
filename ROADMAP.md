@@ -41,7 +41,7 @@ Each release ships one or more phases. A phase marked internal changes no binary
 
 - 1.2.0 finishes the work in flight and takes nothing new: #706 and #707, #701, #705, #699, the README rework, and the release rehearsal.
 - Right after 1.2.0 comes the foundation below, before Phase 11. Phase 11 starts once #683 is done, and measures first.
-- Waiting on the reader: #237, #264, #74 (which gates #700, gix 0.89), and the crates.io registration #141 needs.
+- Waiting on the reader: #74 (which gates #700, gix 0.89), and the crates.io registration #141 needs.
 
 ---
 
@@ -410,7 +410,7 @@ Milestone: [Phase 11](https://github.com/breferrari/vigia/milestone/12). Ships i
 | ⬜ | Prefetch pictures just past the view | [#663](https://github.com/breferrari/vigia/issues/663) |
 | ⬜ | Take change fingerprints from the status walk, not a stat per file | [#19](https://github.com/breferrari/vigia/issues/19) |
 | ⬜ | Budget the re-diff of drawn files inside the settle margin | [#73](https://github.com/breferrari/vigia/issues/73) |
-| ⬜ | Stop syntect recompiling a fence's closing regex on every search **Decision: the reader rules this, and nothing is taken from it until he does** | [#264](https://github.com/breferrari/vigia/issues/264) |
+| ⬜ | Stop syntect recompiling a fence's closing regex on every search **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: vendored patch plus upstream; the build is Phase 11\'s** | [#264](https://github.com/breferrari/vigia/issues/264) |
 | ⬜ | Measure an @ guard on Markdown's email auto-link pattern | [#265](https://github.com/breferrari/vigia/issues/265) |
 
 ## Phase 12 — correct at the edges
@@ -423,7 +423,7 @@ Milestone: [Phase 12](https://github.com/breferrari/vigia/milestone/13). Ships i
 |---|---|---|
 | ✅ | Choose the default view: unstaged only, or staged beside it **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: unstaged only** | [#50](https://github.com/breferrari/vigia/issues/50) |
 | ⬜ | Choose how the header draws a worktree name with invisible characters **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: content; the build is still to do** | [#89](https://github.com/breferrari/vigia/issues/89) |
-| ⬜ | Rule on a CP437 fallback for the caret, pulse and elision marks **Decision: the reader rules this, and nothing is taken from it until he does** | [#237](https://github.com/breferrari/vigia/issues/237) |
+| ✅ | Rule on a CP437 fallback for the caret, pulse and elision marks **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: substitutes accepted, no second ladder** | [#237](https://github.com/breferrari/vigia/issues/237) |
 | ⬜ | Catch a write that restores the modification time | [#16](https://github.com/breferrari/vigia/issues/16) |
 | ⬜ | Key the frame cache on raw path bytes, not a lossy string | [#17](https://github.com/breferrari/vigia/issues/17) |
 | ⬜ | Check whether a default tmux sends mouse events to a non-active pane | [#188](https://github.com/breferrari/vigia/issues/188) |
