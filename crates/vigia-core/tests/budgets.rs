@@ -1286,3 +1286,75 @@ fn lfs_compare_frame() {
         || cold(&compared, 1),
     );
 }
+
+/// A repository whose `a.bin` of 512 KiB is moved and edited, unstaged, so a
+/// cold frame scores one pair of 1 MiB, the most a frame scores. Without
+/// `moved`, the same addition beside the file left in place.
+fn rename_repo(name: &str, moved: bool) -> Scratch {
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    let old: Vec<u8> = (0..512 * 1024)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect();
+    let mut new = old.clone();
+    let tail = new.len() - new.len() / 10;
+    for byte in &mut new[tail..] {
+        *byte ^= 0x5a;
+    }
+    let scratch = Scratch::new(name);
+    scratch.write("a.bin", [&[0u8][..], &old[1..]].concat());
+    scratch.commit_all("initial");
+    if moved {
+        std::fs::remove_file(scratch.path_of("a.bin")).expect("remove");
+    }
+    scratch.write("b.bin", [&[0u8][..], &new[1..]].concat());
+    scratch
+}
+
+/// I9 over a cold frame that scores a binary rename of 1 MiB, the frame's
+/// whole budget, interleaved with the same frame where nothing is scored.
+#[test]
+fn rename_frame_score() {
+    let moved = rename_repo("budget-rename", true);
+    let plain = rename_repo("budget-rename-plain", false);
+    let cold = |scratch: &Scratch, scored: bool| {
+        let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
+        let mut frame = worktree.frame();
+        let took = time_cpu(|| frame.advance().expect("advance"));
+        assert_eq!(
+            frame.stats().paired_bytes > 0,
+            scored,
+            "the frame did not score as the fixture intends"
+        );
+        took
+    };
+    cold(&moved, true);
+    cold(&plain, false);
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
+    for _ in 0..LFS_FRAMES {
+        with.push(cold(&moved, true).0);
+        without.push(cold(&plain, false).0);
+    }
+    let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
+    eprintln!(
+        "rename score: cold frame p50 {:?} p99 {:?}, without one p50 {:?} p99 {:?}",
+        at(&with, 0.5),
+        at(&with, 0.99),
+        at(&without, 0.5),
+        at(&without, 0.99)
+    );
+    holds_p99(
+        "I9: a cold frame scoring a binary rename of 1 MiB",
+        budget(I9_FRAME),
+        &with,
+        String::new,
+        || cold(&moved, true),
+    );
+}
