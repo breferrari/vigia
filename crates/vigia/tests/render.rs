@@ -7527,3 +7527,19 @@ fn caret_weight_themed() {
         "the caret's row did not take the theme's colour"
     );
 }
+
+/// A file renamed and edited, as the list and the diff draw it, for
+/// `docs/READING.md`.
+#[test]
+fn rename_frame() {
+    let renamed = FileEntry {
+        from: Some("crates/vigia/src/main.rs".to_owned()),
+        kind: 'R',
+        ..entry("crates/vigia/src/shell.rs", 3, 1)
+    };
+    let mut view = one_file();
+    view.list_span = 1;
+    view.list = vec![renamed.clone().into()];
+    view.rows[0] = Row::file(renamed);
+    insta::assert_snapshot!(screen(100, 14, &view, &chrome()));
+}
