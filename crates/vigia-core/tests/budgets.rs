@@ -973,10 +973,10 @@ fn a_breach_with_no_cpu_clock_is_treated_as_ours() {
     );
 }
 
-/// Windows' cycle clock reads a busy spin as at least nine tenths of its wall
-/// time, and never more than twice it. Converted at the highest calibrated
-/// rate it may read high, when every slice was preempted, and must not read
-/// low; both bounds fail if the timestamp rate is not invariant.
+/// Windows' cycle clock reads a busy spin as at least nine tenths of the time
+/// `GetThreadTimes` charges the same spin, and never more than twice its wall
+/// time. A rate calibrated too high reads low against the thread's own clock,
+/// and a spin that lost the CPU to the rest of the suite does not.
 #[cfg(windows)]
 #[test]
 fn cycle_clock_direction() {
@@ -984,20 +984,26 @@ fn cycle_clock_direction() {
         support::cycle_rate().is_some(),
         "the cycle rate was not measured"
     );
-    let busy = Duration::from_millis(100);
+    // Long enough that `GetThreadTimes`' step is under 2% of it.
+    let busy = Duration::from_secs(1);
     let mut read = Vec::new();
     for _ in 0..5 {
+        let before = support::thread_times().expect("GetThreadTimes failed");
         let (wall, cpu) = time_cpu(|| support::spin_for(busy));
+        let charged = support::thread_times().expect("GetThreadTimes failed") - before;
+        eprintln!("cycle clock: wall {wall:?}, cycles {cpu:?}, GetThreadTimes {charged:?}");
         assert!(
             cpu <= wall * 2,
             "a busy spin of {wall:?} read as {cpu:?} of CPU, past twice its wall time"
         );
-        read.push((wall, cpu));
-        if cpu.as_secs_f64() >= wall.as_secs_f64() * 0.9 {
+        read.push((wall, cpu, charged));
+        if cpu.as_secs_f64() >= charged.as_secs_f64() * 0.9 {
             return;
         }
     }
-    panic!("no busy spin read as nine tenths of its wall time: {read:?}");
+    panic!(
+        "no busy spin's cycles read as nine tenths of its GetThreadTimes time (wall, cycles, GetThreadTimes): {read:?}"
+    );
 }
 
 #[test]
