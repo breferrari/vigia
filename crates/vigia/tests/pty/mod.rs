@@ -28,6 +28,8 @@ pub struct Script<'a> {
     pub detached: bool,
     /// The child's stderr goes nowhere, so the terminal shows stdout alone.
     pub quiet: bool,
+    /// The terminal's columns, rows, and width and height in pixels, or none.
+    pub size: Option<(u16, u16, u16, u16)>,
 }
 
 /// Run `command` in a fresh terminal under `script`, wait for its `asked`
@@ -58,6 +60,16 @@ pub fn run(command: Command, script: Script<'_>) -> String {
 /// child exiting on a terminal waits for its output to drain.
 pub fn start(mut command: Command, script: &Script<'_>) -> (Reaped, File) {
     let (terminal, slave) = open();
+    if let Some((columns, rows, width, height)) = script.size {
+        let size = libc::winsize {
+            ws_row: rows,
+            ws_col: columns,
+            ws_xpixel: width,
+            ws_ypixel: height,
+        };
+        // SAFETY: a valid descriptor and a valid winsize.
+        unsafe { libc::ioctl(terminal.as_raw_fd(), libc::TIOCSWINSZ, &size) };
+    }
     command
         .stdout(Stdio::from(slave.try_clone().expect("dup")))
         .stderr(if script.quiet {
@@ -132,6 +144,24 @@ fn open() -> (File, OwnedFd) {
 pub struct Reaped(Child);
 
 impl Reaped {
+    /// The child's process id.
+    pub fn pid(&self) -> u32 {
+        self.0.id()
+    }
+
+    /// How the child ended, waiting up to `limit` without reading the
+    /// terminal, so a child that waits on its terminal is caught doing so.
+    pub fn exited_unread(&mut self, limit: Duration) -> Option<std::process::ExitStatus> {
+        let until = Instant::now() + ceiling(limit);
+        while Instant::now() < until {
+            if let Ok(Some(status)) = self.0.try_wait() {
+                return Some(status);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        None
+    }
+
     /// How the child ended, waiting up to `limit` and reading `master` into
     /// `seen` meanwhile: a child exiting on a terminal waits for its output to
     /// be read.

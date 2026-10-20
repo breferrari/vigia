@@ -46,6 +46,7 @@ pub mod theme;
 /// Public for [`theme`]'s reason, and it is where `VIGIA_UPDATE` is read.
 pub mod update;
 mod view;
+mod writer;
 
 pub use app::{App, Asked, Sending, Stood, Voice};
 pub use clipboard::{Carrier, Route, plan, put, remote, system_tools, tmux_command};
@@ -81,9 +82,11 @@ pub use render::{
     diff_height, menu_cell, note_cells, notice_area, positions_gap, regions, render, voice_style,
 };
 pub use state::state_root;
+#[cfg(unix)]
+pub use terminal::output_flags;
 pub use terminal::{
     ANSWERING, BACKGROUND_WAIT, Background, Colours, PICTURES_WAIT, Screen, Session, ask,
-    background_of, colours_of, install_abort_hook, install_panic_hook, picker,
+    background_of, colours_of, install_abort_hook, install_panic_hook, panic_mid_frame, picker,
 };
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
@@ -138,6 +141,33 @@ enum Wake {
     Notes,
     /// Enter's post to the registered agent sessions came back.
     Posted(Posted),
+    /// The terminal took enough of what was waiting that a skipped frame can draw.
+    Cells,
+    /// A write to the terminal failed, so nothing drawn reaches it any more.
+    OutputLost,
+}
+
+/// The backlog below which a frame is always drawn, so a small frame never
+/// waits on the one before it.
+const SKIP_FLOOR: usize = 4096;
+
+/// The backlog above which a frame is held back whatever the last one weighed.
+const SKIP_CEILING: usize = 256 * 1024;
+
+/// How long a frame may be held back before one is drawn anyway.
+const STALE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// What the terminal writer tells this shell, wired to its wake channel.
+fn writer_wakes(tx: &Sender<Wake>) -> writer::Wakes {
+    let (cells, lost) = (tx.clone(), tx.clone());
+    writer::Wakes {
+        cells: Box::new(move || {
+            let _ = cells.send(Wake::Cells);
+        }),
+        lost: Box::new(move || {
+            let _ = lost.send(Wake::OutputLost);
+        }),
+    }
 }
 
 /// The staged count an empty pane shows. Counted again only after a tick, or after a
@@ -407,7 +437,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     );
     let mut shell = Shell {
         pictures,
-        session: Session::enter()?,
+        session: Session::enter(writer_wakes(&tx))?,
         app: App::configured(&config),
         hide: config.hide.clone(),
         config_path,
@@ -417,6 +447,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // that draws something.
         notice_effects: EffectManager::default(),
         painted: Instant::now(),
+        held_since: None,
         highlighter: Highlighter::new(),
         // Empty at startup, so every file in an already-dirty worktree draws cold until
         // something writes to it.
@@ -505,6 +536,14 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // which sends no other, always asks. Forced half-blocks need no answer.
     let ask = forced != Some(ratatui_image::picker::ProtocolType::Halfblocks)
         && (cfg!(windows) || !reply.is_empty());
+    // The query writes the terminal directly, so the first frame has to be out
+    // before it starts, or its bytes would land inside the frame's.
+    if ask {
+        let _ = shell
+            .session
+            .writer()
+            .drain(std::time::Duration::from_millis(500));
+    }
     let (mut picker, answer) = terminal::picker(ask);
     picker.set_protocol_type(pictures::protocol_of(forced, answer, &|key: &str| {
         std::env::var(key).ok()
@@ -867,7 +906,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.app.warn(message);
                 }
                 // Deliberately nothing.
-                Wake::Warmed | Wake::Pictured => {}
+                Wake::Warmed | Wake::Pictured | Wake::Cells => {}
+                Wake::OutputLost => {
+                    return Err(
+                        "the terminal stopped taking output, so nothing could be drawn".into(),
+                    );
+                }
                 Wake::Update(version) => {
                     shell.say(
                         format!("vigia {version} is available"),
@@ -1076,6 +1120,8 @@ struct Shell {
     /// When the previous frame painted. The time since it is what an effect is
     /// told, through `effect_interval`, which may answer none of it.
     painted: Instant,
+    /// Since when a frame has been held back for a terminal that is behind.
+    held_since: Option<Instant>,
     /// The syntax classes of whatever is on screen, kept between frames.
     highlighter: Highlighter,
     /// What changed recently: the source for the sparkline, the recency gradient
@@ -2281,19 +2327,30 @@ impl Shell {
         let note_effects = &mut self.note_effects;
         let box_effect = &mut self.box_effect;
         let menu_effect = &mut self.menu_effect;
-        let mut painted = Regions::default();
         let was = self.regions;
+        // Laid out whether or not the frame is drawn, so a press lands on the
+        // layout the input made even while the terminal is behind.
+        let painted = render::regions(area, &chrome, screen);
+        // A screen-anchored mark does not outlive a relayout, and both have to be
+        // retired here, between the layout and the paint that uses them.
+        chrome.hovered = repainted(chrome.hovered, was, painted);
+        chrome.selected = repainted(chrome.selected, was, painted);
+        chrome.noting = repainted(chrome.noting, was, painted);
+        let writer = self.session.writer();
+        let threshold = writer.last_frame().clamp(SKIP_FLOOR, SKIP_CEILING);
+        let stale = self
+            .held_since
+            .is_some_and(|since| now.saturating_duration_since(since) >= STALE);
+        if writer.backlogged(threshold) && !stale {
+            self.held_since.get_or_insert(now);
+            self.regions = painted;
+            self.hovered = chrome.hovered;
+            self.laid = self.overlays();
+            return Ok(());
+        }
+        self.held_since = None;
         self.session.screen().draw(|f| {
             let area = f.area();
-            // Captured from inside the draw, because `Frame::area` is the size the
-            // paint actually used: `Shell::area` reads it again and a resize between
-            // the two would leave a pointer told about a screen nobody saw.
-            painted = render::regions(area, &chrome, screen);
-            // A screen-anchored mark does not outlive a relayout, and both have to be
-            // retired here, between the layout and the paint that uses them.
-            chrome.hovered = repainted(chrome.hovered, was, painted);
-            chrome.selected = repainted(chrome.selected, was, painted);
-            chrome.noting = repainted(chrome.noting, was, painted);
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
             // After the widgets, because an effect works on the cells they drew.
             // The notes' own, each over the cells its note drew this frame. A note
@@ -3091,7 +3148,7 @@ mod tests {
             .find("signal::forward(")
             .expect("`run` no longer arms the signal handler at all");
         let takeover = code
-            .find("Session::enter()")
+            .find("Session::enter(")
             .expect("`run` no longer takes the terminal");
         assert!(
             arming < takeover,

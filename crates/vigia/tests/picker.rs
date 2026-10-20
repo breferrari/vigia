@@ -160,6 +160,7 @@ fn piped_picker_silent() {
             piped: true,
             detached: false,
             quiet: false,
+            size: None,
         },
     );
     assert!(
@@ -196,6 +197,7 @@ fn asked_after(answer: Option<&[u8]>, delay: Duration) -> String {
             piped: false,
             detached: false,
             quiet: false,
+            size: None,
         },
     )
 }

@@ -1,6 +1,6 @@
 //! Taking the terminal, and giving it back.
 
-use std::io::{self, IsTerminal, Stdout, Write, stdout};
+use std::io::{self, IsTerminal, Write, stdout};
 use std::sync::Once;
 
 use ratatui::Terminal;
@@ -14,8 +14,8 @@ use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-/// The terminal the shell draws on.
-pub type Screen = Terminal<CrosstermBackend<Stdout>>;
+/// The terminal the shell draws on, through the terminal writer.
+pub type Screen = Terminal<CrosstermBackend<crate::writer::Sink>>;
 
 static HOOK: Once = Once::new();
 
@@ -51,21 +51,50 @@ trait Console {
 
     /// Give one step back.
     fn give_back(&mut self, step: Step);
+
+    /// Before the steps are given back: end whatever a frame left half written.
+    fn ready(&mut self) {}
 }
 
 /// The real console, over `crossterm`.
-struct Crossterm<W: Write> {
+struct Crossterm<W: Rearm> {
     out: W,
 }
 
-impl Crossterm<Stdout> {
-    /// The console the shell actually runs on.
-    fn on_stdout() -> Self {
-        Self { out: stdout() }
+impl Crossterm<crate::writer::Restore> {
+    /// The console the shell actually runs on: the terminal opened again for
+    /// this process, every write given up after a deadline.
+    fn on_terminal() -> Self {
+        Self {
+            out: crate::writer::Restore::open(RESTORE_WAIT),
+        }
     }
 }
 
-impl<W: Write> Console for Crossterm<W> {
+/// How long a restore waits for a terminal that is not reading.
+const RESTORE_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// A console's output that can be given a fresh deadline before a restore.
+trait Rearm: Write {
+    fn rearm(&mut self) {}
+}
+
+impl Rearm for crate::writer::Restore {
+    fn rearm(&mut self) {
+        self.arm(RESTORE_WAIT);
+    }
+}
+
+impl Rearm for Vec<u8> {}
+
+impl Rearm for std::fs::File {}
+
+impl<W: Rearm> Console for Crossterm<W> {
+    fn ready(&mut self) {
+        self.out.rearm();
+        let _ = self.out.write_all(crate::writer::STRING_END);
+    }
+
     fn take(&mut self, step: Step) -> io::Result<()> {
         match step {
             Step::RawMode => enable_raw_mode(),
@@ -116,6 +145,7 @@ impl<C: Console> Drop for Takeover<C> {
 
 /// Give the first `taken` steps of [`TAKEOVER`] back, in reverse.
 fn give_back_all<C: Console>(console: &mut C, taken: usize) {
+    console.ready();
     for step in TAKEOVER[..taken].iter().rev() {
         console.give_back(*step);
     }
@@ -126,9 +156,12 @@ pub struct Session {
     /// Declared first, so it drops first and no live `Terminal` outlives the
     /// screen it draws on, even for the length of a drop.
     screen: Screen,
+    /// Second: stopped, within its limit, before the terminal is given back,
+    /// so the restore is never written in the middle of a frame.
+    writer: crate::writer::Writer,
     /// Second, so the terminal goes back after the screen is gone. Never read;
     /// its whole job is its `Drop`.
-    _takeover: Takeover<Crossterm<Stdout>>,
+    _takeover: Takeover<Crossterm<crate::writer::Restore>>,
 }
 
 impl Session {
@@ -138,21 +171,23 @@ impl Session {
     ///
     /// A step of the takeover fails. Any step that already succeeded is undone first, so the
     /// terminal is never left half taken.
-    pub fn enter() -> io::Result<Self> {
+    pub fn enter(wakes: crate::writer::Wakes) -> io::Result<Self> {
         check_drawable(stdout().is_terminal())?;
 
         // Before anything is changed, so a panic between here and the first
         // frame still restores.
         install_hook();
 
-        let takeover = Takeover::take(Crossterm::on_stdout())?;
+        let takeover = Takeover::take(Crossterm::on_terminal())?;
         // On the `?`, `takeover` drops and gives the terminal back. That is the
         // whole reason the guard is built before the screen rather than beside
         // it.
-        let screen = Terminal::new(CrosstermBackend::new(stdout()))?;
+        let writer = crate::writer::Writer::start(crate::writer::Tty::open()?, wakes);
+        let screen = Terminal::new(CrosstermBackend::new(writer.sink()))?;
 
         Ok(Self {
             screen,
+            writer,
             _takeover: takeover,
         })
     }
@@ -160,6 +195,11 @@ impl Session {
     /// The terminal to draw through.
     pub fn screen(&mut self) -> &mut Screen {
         &mut self.screen
+    }
+
+    /// The writer the screen's bytes go through.
+    pub fn writer(&self) -> &crate::writer::Writer {
+        &self.writer
     }
 
     /// Put `sequence` on the wire, outside the buffer.
@@ -191,11 +231,58 @@ fn check_drawable(is_terminal: bool) -> io::Result<()> {
     }
 }
 
+/// The writer's wakes, for a session nobody waits on.
+fn unheard() -> crate::writer::Wakes {
+    crate::writer::Wakes {
+        cells: Box::new(|| {}),
+        lost: Box::new(|| {}),
+    }
+}
+
+/// For a test in a child process: take the terminal, hand the writer a frame
+/// that opens a Kitty image and never ends it, and panic while it is written.
+#[doc(hidden)]
+pub fn panic_mid_frame() {
+    install_panic_hook();
+    let mut session = Session::enter(unheard()).expect("take the terminal");
+    let mut frame = b"\x1b_Ga=t,f=32,s=400,v=400,i=77,q=2,m=1;".to_vec();
+    frame.extend(std::iter::repeat_n(b'A', 300_000));
+    let out = session.screen().backend_mut();
+    out.write_all(&frame).expect("hand over the frame");
+    out.flush().expect("hand over the frame");
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    panic!("mid-frame on purpose");
+}
+
+/// For a test: whether standard output is nonblocking before the writer opens
+/// its own descriptor, and while it holds it.
+///
+/// # Panics
+///
+/// Standard output is not a terminal.
+#[doc(hidden)]
+#[cfg(unix)]
+pub fn output_flags() -> (bool, bool) {
+    let blocking = || {
+        rustix::fs::fcntl_getfl(std::io::stdout())
+            .expect("read stdout's flags")
+            .contains(rustix::fs::OFlags::NONBLOCK)
+    };
+    let before = blocking();
+    let session = Session::enter(unheard()).expect("take the terminal");
+    let during = blocking();
+    drop(session);
+    (before, during)
+}
+
 /// Chain a restore onto the panic hook, once per process.
 fn install_hook() {
     // Under the pane's own, so the pane ends the process whoever started it.
     install_abort_hook();
-    install_hook_in(&HOOK, || restore_everything(&mut Crossterm::on_stdout()));
+    install_hook_in(&HOOK, || {
+        crate::writer::POISONED.store(true, std::sync::atomic::Ordering::Release);
+        restore_everything(&mut Crossterm::on_terminal());
+    });
 }
 
 /// Give back the whole of [`TAKEOVER`], whatever was actually taken.
@@ -1125,10 +1212,84 @@ mod tests {
     }
 
     #[test]
+    fn no_stray_writes() {
+        // Every byte after the takeover goes through the writer. These may touch
+        // standard output themselves: `main.rs` before any takeover, `mcp.rs`,
+        // which speaks JSON there and draws nothing, this file's takeover and
+        // queries, and the writer.
+        const ALLOWED: [&str; 4] = ["main.rs", "mcp.rs", "terminal.rs", "writer.rs"];
+        const SOURCES: [(&str, &str); 22] = [
+            ("lib.rs", include_str!("lib.rs")),
+            ("app.rs", include_str!("app.rs")),
+            ("clipboard.rs", include_str!("clipboard.rs")),
+            ("colour.rs", include_str!("colour.rs")),
+            ("config.rs", include_str!("config.rs")),
+            ("glyphs.rs", include_str!("glyphs.rs")),
+            ("icons.rs", include_str!("icons.rs")),
+            ("input.rs", include_str!("input.rs")),
+            ("memory.rs", include_str!("memory.rs")),
+            ("menu.rs", include_str!("menu.rs")),
+            ("motion.rs", include_str!("motion.rs")),
+            ("notes.rs", include_str!("notes.rs")),
+            ("pictures.rs", include_str!("pictures.rs")),
+            ("positions.rs", include_str!("positions.rs")),
+            ("post.rs", include_str!("post.rs")),
+            ("quote.rs", include_str!("quote.rs")),
+            ("render.rs", include_str!("render.rs")),
+            ("signal.rs", include_str!("signal.rs")),
+            ("state.rs", include_str!("state.rs")),
+            ("theme.rs", include_str!("theme.rs")),
+            ("update.rs", include_str!("update.rs")),
+            ("view.rs", include_str!("view.rs")),
+        ];
+        let lib = include_str!("lib.rs");
+        for module in lib.lines().filter_map(|line| {
+            let line = line.trim();
+            line.strip_prefix("mod ")
+                .or_else(|| line.strip_prefix("pub mod "))
+                .and_then(|rest| rest.strip_suffix(';'))
+        }) {
+            let file = format!("{module}.rs");
+            assert!(
+                ALLOWED.contains(&file.as_str()) || SOURCES.iter().any(|(name, _)| *name == file),
+                "`mod {module};` is neither scanned nor allowed to write; add it to SOURCES"
+            );
+        }
+        let mut found = Vec::new();
+        for (name, source) in SOURCES {
+            // Tests may print: their output is the test runner's, not the pane's.
+            let shipped = source
+                .split("#[cfg(test)]\nmod tests")
+                .next()
+                .unwrap_or(source);
+            for (n, line) in shipped.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or_default();
+                for banned in [
+                    "stdout()",
+                    "execute!(",
+                    "print!(",
+                    "println!(",
+                    "eprint!(",
+                    "eprintln!(",
+                ] {
+                    if code.contains(banned) {
+                        found.push(format!("{name}:{}: {banned}", n + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "these write the terminal outside the writer, which can land inside a frame:\n{}",
+            found.join("\n")
+        );
+    }
+
+    #[test]
     fn no_exit_path_in_the_shell_skips_the_destructors() {
         // The structural half of "the terminal is restored on every exit". What makes
         // that true is that every exit drops `Shell`, which owns the `Session`.
-        const SOURCES: [(&str, &str); 25] = [
+        const SOURCES: [(&str, &str); 26] = [
             ("lib.rs", include_str!("lib.rs")),
             ("main.rs", include_str!("main.rs")),
             ("app.rs", include_str!("app.rs")),
@@ -1154,6 +1315,7 @@ mod tests {
             ("theme.rs", include_str!("theme.rs")),
             ("update.rs", include_str!("update.rs")),
             ("view.rs", include_str!("view.rs")),
+            ("writer.rs", include_str!("writer.rs")),
         ];
 
         // The list above is checked against `lib.rs` rather than trusted, so a

@@ -1,0 +1,529 @@
+//! The terminal's one writer. Every byte the pane writes after the takeover
+//! goes through it, on its own thread, so a terminal that reads slowly holds
+//! this thread and never the event loop. `SPEC.md` §6, the terminal writer.
+
+use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
+
+/// Set by a panic's or a signal's restore: the writer writes nothing more, so
+/// the restore is the last thing the terminal reads.
+pub static POISONED: AtomicBool = AtomicBool::new(false);
+
+/// The longest one wait for room to write lasts, so a stop is noticed this soon.
+const POLL: Duration = Duration::from_millis(50);
+
+/// The most one write hands the terminal, so a stop or a poison is noticed
+/// between pieces of a large frame.
+const PIECE: usize = 4096;
+
+/// What the writer tells the loop.
+pub struct Wakes {
+    /// The bytes not yet written fell back to the threshold the loop asked about.
+    pub cells: Box<dyn Fn() + Send>,
+    /// A write failed, so nothing the pane draws reaches the terminal any more.
+    pub lost: Box<dyn Fn() + Send>,
+}
+
+/// State the loop and the writer share.
+#[derive(Default)]
+struct Shared {
+    /// Bytes handed over and not yet written.
+    unwritten: AtomicUsize,
+    /// The backlog the loop last asked about.
+    threshold: AtomicUsize,
+    /// Whether the loop is waiting to hear the backlog fell to `threshold`.
+    armed: AtomicBool,
+    /// Whether to stop writing what is queued.
+    abandon: AtomicBool,
+    /// The size of the last frame handed over.
+    last: AtomicUsize,
+}
+
+impl Shared {
+    /// Count `written` bytes as gone, and wake the loop if it was waiting for
+    /// the backlog to fall this far.
+    fn wrote(&self, written: usize, wakes: &Wakes) {
+        let left = self.unwritten.fetch_sub(written, Ordering::AcqRel) - written;
+        if left <= self.threshold.load(Ordering::Acquire)
+            && self.armed.swap(false, Ordering::AcqRel)
+        {
+            (wakes.cells)();
+        }
+    }
+
+    fn stopping(&self) -> bool {
+        self.abandon.load(Ordering::Acquire) || POISONED.load(Ordering::Acquire)
+    }
+}
+
+/// The thread that writes the terminal, and the handle the loop draws through.
+pub struct Writer {
+    queue: Option<mpsc::Sender<Vec<u8>>>,
+    shared: Arc<Shared>,
+    finished: mpsc::Receiver<()>,
+}
+
+impl Writer {
+    /// Start writing to `out` on a thread of its own.
+    pub fn start(out: impl Out + Send + 'static, wakes: Wakes) -> Self {
+        let shared = Arc::new(Shared::default());
+        let (queue, frames) = mpsc::channel::<Vec<u8>>();
+        let (done, finished) = mpsc::channel();
+        let theirs = Arc::clone(&shared);
+        let _ = std::thread::Builder::new()
+            .name("vigia-writer".to_owned())
+            .spawn(move || {
+                let mut out = out;
+                for bytes in frames {
+                    if theirs.stopping() {
+                        break;
+                    }
+                    if write_out(&mut out, &bytes, &theirs, &wakes).is_err() {
+                        (wakes.lost)();
+                        break;
+                    }
+                }
+                let _ = done.send(());
+            });
+        Self {
+            queue: Some(queue),
+            shared,
+            finished,
+        }
+    }
+
+    /// What ratatui's backend writes into. Its bytes go to the writer on flush.
+    pub fn sink(&self) -> Sink {
+        Sink {
+            queue: self.queue.clone(),
+            shared: Arc::clone(&self.shared),
+            pending: Vec::new(),
+        }
+    }
+
+    /// The size of the last frame handed over.
+    pub fn last_frame(&self) -> usize {
+        self.shared.last.load(Ordering::Acquire)
+    }
+
+    /// Bytes handed over and not yet written.
+    pub fn unwritten(&self) -> usize {
+        self.shared.unwritten.load(Ordering::Acquire)
+    }
+
+    /// Whether more than `threshold` bytes wait. When so, the loop is woken
+    /// once they fall to it. Re-read after arming, so a drain between the
+    /// check and the arming is not lost.
+    pub fn backlogged(&self, threshold: usize) -> bool {
+        self.shared.threshold.store(threshold, Ordering::Release);
+        if self.unwritten() <= threshold {
+            return false;
+        }
+        self.shared.armed.store(true, Ordering::Release);
+        if self.unwritten() <= threshold {
+            self.shared.armed.store(false, Ordering::Release);
+            return false;
+        }
+        true
+    }
+
+    /// Wait up to `limit` for everything handed over to be written.
+    pub fn drain(&self, limit: Duration) -> bool {
+        let until = Instant::now() + limit;
+        while self.unwritten() > 0 {
+            if Instant::now() >= until || self.shared.stopping() {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        true
+    }
+
+    /// Write what is queued for up to `limit`, then drop the rest and stop.
+    /// Returns once the thread has stopped, or after `limit` and one more
+    /// wait if a write it cannot leave is in flight.
+    pub fn stop(&mut self, limit: Duration) {
+        drop(self.queue.take());
+        if self.finished.recv_timeout(limit).is_ok() {
+            return;
+        }
+        self.shared.abandon.store(true, Ordering::Release);
+        let _ = self.finished.recv_timeout(POLL * 2);
+    }
+}
+
+impl Drop for Writer {
+    fn drop(&mut self) {
+        self.stop(Duration::from_millis(200));
+    }
+}
+
+/// The writer's end of ratatui's backend: bytes gather until a flush, which
+/// hands them to the writer whole.
+pub struct Sink {
+    queue: Option<mpsc::Sender<Vec<u8>>>,
+    shared: Arc<Shared>,
+    pending: Vec<u8>,
+}
+
+impl Write for Sink {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.pending.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if self.pending.is_empty() {
+            return Ok(());
+        }
+        let bytes = std::mem::take(&mut self.pending);
+        let Some(queue) = self.queue.as_ref() else {
+            return Err(io::Error::from(io::ErrorKind::BrokenPipe));
+        };
+        self.shared
+            .unwritten
+            .fetch_add(bytes.len(), Ordering::AcqRel);
+        self.shared.last.store(bytes.len(), Ordering::Release);
+        let len = bytes.len();
+        queue.send(bytes).map_err(|_| {
+            self.shared.unwritten.fetch_sub(len, Ordering::AcqRel);
+            io::Error::from(io::ErrorKind::BrokenPipe)
+        })
+    }
+}
+
+/// Something the writer can write the terminal through.
+pub trait Out {
+    /// Write some of `bytes`, waiting at most `wait` for room. `Ok(0)` means
+    /// there was no room in that time.
+    ///
+    /// # Errors
+    ///
+    /// The terminal refused the write.
+    fn write_some(&mut self, bytes: &[u8], wait: Duration) -> io::Result<usize>;
+}
+
+/// Write all of `bytes` in pieces, counting each as it goes, unless told to stop.
+fn write_out(out: &mut impl Out, bytes: &[u8], shared: &Shared, wakes: &Wakes) -> io::Result<()> {
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        if shared.stopping() {
+            shared.wrote(rest.len(), wakes);
+            return Ok(());
+        }
+        let piece = &rest[..rest.len().min(PIECE)];
+        let written = out.write_some(piece, POLL)?;
+        if written > 0 {
+            shared.wrote(written, wakes);
+            rest = &rest[written..];
+        }
+    }
+    Ok(())
+}
+
+/// The terminal standard output names, opened again for this process alone.
+#[cfg(unix)]
+pub struct Tty {
+    file: std::fs::File,
+}
+
+#[cfg(unix)]
+impl Tty {
+    /// Open the device standard output is, nonblocking. Not `/dev/tty`, which
+    /// macOS polls as `POLLNVAL`, and not a `dup`, which would share the flag
+    /// with the shell's own output.
+    ///
+    /// # Errors
+    ///
+    /// Standard output is not a terminal, or its device cannot be opened.
+    pub fn open() -> io::Result<Self> {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::OpenOptionsExt;
+        let name = rustix::termios::ttyname(std::io::stdout(), Vec::new())?;
+        let path = std::ffi::OsStr::from_bytes(name.as_bytes());
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(
+                rustix::fs::OFlags::NONBLOCK.bits() as i32
+                    | rustix::fs::OFlags::NOCTTY.bits() as i32,
+            )
+            .open(path)?;
+        Ok(Self { file })
+    }
+}
+
+#[cfg(unix)]
+impl Out for Tty {
+    fn write_some(&mut self, bytes: &[u8], wait: Duration) -> io::Result<usize> {
+        use rustix::event::{PollFd, PollFlags, Timespec, poll};
+        let mut fds = [PollFd::new(&self.file, PollFlags::OUT)];
+        let timeout = Timespec::try_from(wait).unwrap_or(Timespec {
+            tv_sec: 0,
+            tv_nsec: 50_000_000,
+        });
+        match poll(&mut fds, Some(&timeout)) {
+            Ok(0) => return Ok(0),
+            Ok(_) => {}
+            Err(rustix::io::Errno::INTR) => return Ok(0),
+            Err(e) => return Err(e.into()),
+        }
+        // A descriptor `poll` cannot watch is an error, not a wait: retried, it
+        // would spin, and written blocking, it would hold the thread again.
+        let events = fds[0].revents();
+        if events.intersects(PollFlags::NVAL | PollFlags::ERR | PollFlags::HUP) {
+            return Err(io::Error::other(format!(
+                "the terminal cannot be written: {events:?}"
+            )));
+        }
+        match self.file.write(bytes) {
+            Ok(written) => Ok(written),
+            Err(e)
+                if e.kind() == io::ErrorKind::WouldBlock
+                    || e.kind() == io::ErrorKind::Interrupted =>
+            {
+                Ok(0)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// Standard output, written blocking on the writer's thread. Windows has no
+/// `ttyname` and no `poll` on a console, so a write in flight cannot be left.
+#[cfg(windows)]
+pub struct Tty {
+    out: std::io::Stdout,
+}
+
+#[cfg(windows)]
+impl Tty {
+    /// The standard output handle.
+    ///
+    /// # Errors
+    ///
+    /// Never; the signature matches Unix.
+    pub fn open() -> io::Result<Self> {
+        Ok(Self {
+            out: std::io::stdout(),
+        })
+    }
+}
+
+#[cfg(windows)]
+impl Out for Tty {
+    fn write_some(&mut self, bytes: &[u8], _wait: Duration) -> io::Result<usize> {
+        let written = self.out.write(bytes)?;
+        self.out.flush()?;
+        Ok(written)
+    }
+}
+
+/// A descriptor the restore writes through: the terminal opened again, every
+/// write given up after its deadline, so a terminal that stopped reading
+/// cannot hold the exit.
+pub struct Restore {
+    #[cfg(unix)]
+    tty: Option<Tty>,
+    #[cfg(windows)]
+    console: Option<std::fs::File>,
+    until: Instant,
+}
+
+impl Restore {
+    /// Open it, with everything written through it due within `limit`.
+    pub fn open(limit: Duration) -> Self {
+        Self {
+            #[cfg(unix)]
+            tty: Tty::open().ok(),
+            #[cfg(windows)]
+            console: std::fs::OpenOptions::new().write(true).open("CONOUT$").ok(),
+            until: Instant::now() + limit,
+        }
+    }
+
+    /// Give what is written from now on `limit` to arrive.
+    pub fn arm(&mut self, limit: Duration) {
+        self.until = Instant::now() + limit;
+    }
+}
+
+/// Ends an escape string a frame left half written, so the bytes after it
+/// are read as themselves. kitty ends an APC only on this, not on CAN.
+pub const STRING_END: &[u8] = b"\x1b\\";
+
+impl Write for Restore {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        #[cfg(unix)]
+        {
+            let Some(tty) = self.tty.as_mut() else {
+                return std::io::stdout().write(buf);
+            };
+            loop {
+                let left = self.until.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    // Dropped rather than failed, so the steps after this one are
+                    // still tried: raw mode goes back whatever the screen does.
+                    return Ok(buf.len());
+                }
+                let written = tty.write_some(buf, left.min(Duration::from_millis(20)))?;
+                if written > 0 {
+                    return Ok(written);
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            match self.console.as_mut() {
+                Some(console) => console.write(buf),
+                None => std::io::stdout().write(buf),
+            }
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// An `Out` that takes what it is told to, and records it.
+    #[derive(Clone, Default)]
+    struct Taken {
+        bytes: Arc<Mutex<Vec<u8>>>,
+        room: Arc<AtomicUsize>,
+    }
+
+    impl Out for Taken {
+        fn write_some(&mut self, bytes: &[u8], wait: Duration) -> io::Result<usize> {
+            let room = self.room.load(Ordering::Acquire);
+            if room == 0 {
+                std::thread::sleep(wait.min(Duration::from_millis(2)));
+                return Ok(0);
+            }
+            let n = bytes.len().min(room);
+            self.room.fetch_sub(n, Ordering::AcqRel);
+            self.bytes
+                .lock()
+                .expect("bytes")
+                .extend_from_slice(&bytes[..n]);
+            Ok(n)
+        }
+    }
+
+    fn quiet() -> Wakes {
+        Wakes {
+            cells: Box::new(|| {}),
+            lost: Box::new(|| {}),
+        }
+    }
+
+    #[test]
+    fn writer_order() {
+        let out = Taken::default();
+        out.room.store(usize::MAX, Ordering::Release);
+        let writer = Writer::start(out.clone(), quiet());
+        let mut sink = writer.sink();
+        let mut sent = Vec::new();
+        for n in 0..200u32 {
+            let frame = format!("frame {n} ").repeat(n as usize % 50 + 1);
+            sink.write_all(frame.as_bytes()).expect("write");
+            sink.flush().expect("flush");
+            sent.extend_from_slice(frame.as_bytes());
+        }
+        assert!(
+            writer.drain(Duration::from_secs(5)),
+            "the frames were not written"
+        );
+        assert_eq!(
+            *out.bytes.lock().expect("bytes"),
+            sent,
+            "frames came out of order or torn"
+        );
+    }
+
+    #[test]
+    fn backlog_wakes_once() {
+        let out = Taken::default();
+        let woken = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&woken);
+        let writer = Writer::start(
+            out.clone(),
+            Wakes {
+                cells: Box::new(move || {
+                    count.fetch_add(1, Ordering::AcqRel);
+                }),
+                lost: Box::new(|| {}),
+            },
+        );
+        let mut sink = writer.sink();
+        sink.write_all(&[b'x'; 10_000]).expect("write");
+        sink.flush().expect("flush");
+        assert!(
+            writer.backlogged(4096),
+            "a held terminal's backlog was not seen"
+        );
+        // The terminal takes everything: one wake, no more.
+        out.room.store(usize::MAX, Ordering::Release);
+        assert!(writer.drain(Duration::from_secs(5)), "never drained");
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(
+            woken.load(Ordering::Acquire),
+            1,
+            "the loop was not woken exactly once"
+        );
+        assert!(
+            !writer.backlogged(4096),
+            "a drained writer still reads as backlogged"
+        );
+    }
+
+    #[test]
+    fn stop_bounded() {
+        // A terminal that never reads: the stop gives up within its limit.
+        let out = Taken::default();
+        let mut writer = Writer::start(out, quiet());
+        let mut sink = writer.sink();
+        sink.write_all(&[b'x'; 100_000]).expect("write");
+        sink.flush().expect("flush");
+        let began = Instant::now();
+        writer.stop(Duration::from_millis(100));
+        assert!(
+            began.elapsed() < Duration::from_millis(400),
+            "a stop against a terminal that never reads took {:?}",
+            began.elapsed()
+        );
+    }
+
+    #[test]
+    fn lost_on_error() {
+        struct Broken;
+        impl Out for Broken {
+            fn write_some(&mut self, _: &[u8], _: Duration) -> io::Result<usize> {
+                Err(io::Error::from(io::ErrorKind::BrokenPipe))
+            }
+        }
+        let (tx, rx) = mpsc::channel();
+        let writer = Writer::start(
+            Broken,
+            Wakes {
+                cells: Box::new(|| {}),
+                lost: Box::new(move || {
+                    let _ = tx.send(());
+                }),
+            },
+        );
+        let mut sink = writer.sink();
+        sink.write_all(b"frame").expect("write");
+        sink.flush().expect("flush");
+        assert!(
+            rx.recv_timeout(Duration::from_secs(2)).is_ok(),
+            "a failed write was not reported"
+        );
+    }
+}
