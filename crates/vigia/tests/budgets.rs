@@ -2497,10 +2497,10 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
             if !effects.is_running() {
                 effects.arm(departures(arriving), &theme, Instant::now());
                 let counted = if arriving { &arrivals } else { &sweeps };
-                counted.set(counted.get() + 1);
+                counted.update(|v| v + 1);
                 arriving = !arriving;
             }
-            running.set(running.get() + usize::from(effects.is_running()));
+            running.update(|v| v + usize::from(effects.is_running()));
         }
         time_cpu(|| {
             sample(history, scratch.root(), EDITED_PATH);
@@ -2857,7 +2857,7 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
                 );
                 if let Some(over) = box_cells(&laid, &view) {
                     entrance.process(ARRIVING_FRAME.into(), &mut buf, over);
-                    processed.set(processed.get() + 1);
+                    processed.update(|v| v + 1);
                 }
                 if entrance.done() {
                     entrance = box_entrance(&theme);

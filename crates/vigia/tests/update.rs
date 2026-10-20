@@ -22,7 +22,7 @@ use vigia_core::Standing;
 /// four and a half seconds finds them looking.
 #[test]
 fn the_notice_stays_a_minute() {
-    assert_eq!(ARRIVED_LINGER, Duration::from_secs(60));
+    assert_eq!(ARRIVED_LINGER, Duration::from_mins(1));
     assert_eq!(linger_for(Voice::Arrived), ARRIVED_LINGER);
     assert_ne!(linger_for(Voice::Arrived), linger_for(Voice::Said));
     // The whole of the time, both transitions included, with most of it settled.

@@ -14,9 +14,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # A warning that reaches main is a warning nobody will ever fix. Cargo's own
-  # gate, not RUSTFLAGS: it covers this workspace and not its dependencies,
-  # and leaves the build cache keyed as a local build.
+  # A warning that reaches main is a warning nobody will ever fix.
   CARGO_BUILD_WARNINGS: deny
 
 concurrency:

@@ -455,7 +455,7 @@ fn a_range_carries_every_line_it_covers_to_the_session() {
 /// A message builder that says how many times it was asked for one.
 fn counting(calls: &Cell<u32>) -> impl FnOnce() -> String + '_ {
     move || {
-        calls.set(calls.get() + 1);
+        calls.update(|v| v + 1);
         "the note".to_owned()
     }
 }
