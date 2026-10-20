@@ -3295,9 +3295,19 @@ fn direct_dependencies() -> &'static [(String, bool)] {
             .expect("metadata lists packages")
             .iter()
             .flat_map(|package| package["dependencies"].as_array().expect("a list"))
-            .filter(|dependency| dependency["path"].is_null())
+            // A fork under `vendor/` is a dependency like any other, under the
+            // name the code uses.
+            .filter(|dependency| {
+                dependency["path"]
+                    .as_str()
+                    .is_none_or(|path| Path::new(path).starts_with(repo_root().join("vendor")))
+            })
             .map(|dependency| {
-                let name = dependency["name"].as_str().expect("a name").to_owned();
+                let name = dependency["rename"]
+                    .as_str()
+                    .or(dependency["name"].as_str())
+                    .expect("a name")
+                    .to_owned();
                 (name, dependency["kind"] == "dev")
             })
             .collect();
@@ -3713,6 +3723,71 @@ fn pdf_feature_shipped() {
     );
 }
 
+/// Each fork under `vendor/` replaces the crate it forks in vigia's graph,
+/// so no type or thread-local exists twice. `forks.sh` checks the rest of a
+/// fork, which needs the network.
+#[test]
+fn forks_replace_crates() {
+    let output = Command::new(env!("CARGO"))
+        .args([
+            "tree",
+            "-p",
+            "vigia",
+            "-e",
+            "normal",
+            "--target",
+            "all",
+            "--all-features",
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+            "--offline",
+        ])
+        .current_dir(repo_root())
+        .output()
+        .expect("cargo runs");
+    assert!(output.status.success(), "`cargo tree` failed");
+    let graph = String::from_utf8_lossy(&output.stdout);
+    let mut forks = 0;
+    for entry in std::fs::read_dir(repo_root().join("vendor"))
+        .expect("read vendor/")
+        .flatten()
+    {
+        if !entry.path().join("patches").is_dir() {
+            continue;
+        }
+        let patches = std::fs::read_to_string(entry.path().join("PATCHES.md")).expect("PATCHES.md");
+        let base = patches
+            .lines()
+            .find_map(|line| line.strip_prefix("Base: `"))
+            .and_then(|rest| rest.split_once('`'))
+            .map(|(name, _)| name.to_owned())
+            .expect("PATCHES.md names its base crate");
+        let manifest =
+            std::fs::read_to_string(entry.path().join("Cargo.toml")).expect("Cargo.toml");
+        let fork = manifest
+            .lines()
+            .find_map(|line| line.strip_prefix("name = \""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .expect("the fork has a name");
+        assert!(
+            graph
+                .lines()
+                .any(|line| line.starts_with(&format!("{fork} v"))),
+            "vigia's graph does not hold the fork {fork}"
+        );
+        assert!(
+            !graph
+                .lines()
+                .any(|line| line.starts_with(&format!("{base} v"))),
+            "vigia's graph holds {base} beside its fork {fork}"
+        );
+        forks += 1;
+    }
+    assert!(forks > 0, "no fork was found, so this test checks nothing");
+}
+
 /// A vendored crate built on its own leaves its build output beside it, and
 /// that output holds local paths. None of it is tracked, and git ignores it.
 #[test]
@@ -3965,6 +4040,16 @@ fn deny_policy() {
                 .iter()
                 .any(|(job, block)| job == "ci-complete" && block.contains(" deny,")),
         "ci complete does not wait for and judge the dependency check"
+    );
+    assert!(
+        ci.contains("sh .github/scripts/forks.sh")
+            && ci.contains("sh .github/scripts/forks-suite.sh")
+            && ci.contains("\"forks=${NEEDS_FORKS_RESULT}\"")
+            && ci.contains("NEEDS_FORKS_RESULT: ${{ needs.forks.result }}")
+            && jobs_of(&ci)
+                .iter()
+                .any(|(job, block)| job == "ci-complete" && block.contains(" forks,")),
+        "ci complete does not wait for and judge the forks"
     );
     let weekly = without_comments(&repo_file(".github/workflows/deny.yml"));
     assert!(
