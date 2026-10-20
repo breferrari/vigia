@@ -74,7 +74,7 @@ cargo nextest run --workspace --profile ci --features vigia/pdf    # the suite; 
 cargo nextest run -p vigia --test notes heat  # one suite, then a substring of the test names
 cargo test --workspace --doc                  # the doctests, which nextest does not run
 cargo test --release --test budgets --features vigia/pdf           # a release gate; first_paint is the other, run as its own step like CI does
-cargo clippy --workspace --all-targets
+CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets   # the lints, with the warnings CI refuses
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps   # the docs, with the warnings CI refuses
 cargo fmt --all
 cargo deny check advisories licenses sources   # cargo install cargo-deny --version 0.20.2 --locked
