@@ -1882,6 +1882,18 @@ fn nothing_armed_means_no_deadline_at_all() {
         "a note on its way off the screen did not ask the loop to wake, so its \
          rows stay drawn after the departure until the next event"
     );
+    assert_eq!(
+        patience(
+            Deadlines {
+                held_back: Some(now + LEAVING),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(LEAVING),
+        "a screen held back for a slow terminal did not ask the loop to wake, so \
+         it is drawn only when some other event comes"
+    );
 
     // The nearest of them, whichever it is, because the loop has to wake for
     // the first thing due. Taking the wrong one lets the others run late.

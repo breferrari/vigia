@@ -607,6 +607,8 @@ pub struct Deadlines {
     pub departing: Option<Instant>,
     /// When the note box Esc sent away has its rows dropped.
     pub closing: Option<Instant>,
+    /// When a screen held back for a slow terminal is drawn anyway.
+    pub held_back: Option<Instant>,
 }
 
 /// How long the loop may block before some clock here has to act.
@@ -622,6 +624,7 @@ pub fn patience(due: Deadlines, now: Instant) -> Option<Duration> {
         due.arriving.map(since),
         due.departing.map(since),
         due.closing.map(since),
+        due.held_back.map(since),
     ]
     .into_iter()
     .flatten()

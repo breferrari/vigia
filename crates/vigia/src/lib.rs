@@ -1347,6 +1347,7 @@ impl Shell {
                 departing: self.ledger.ends_in(),
                 // And the frame after the box has left is the one that drops its.
                 closing: self.app.box_ends_in(),
+                held_back: forced_at(self.held_since, self.session.writer().unwritten()),
             },
             now,
         )
@@ -2337,14 +2338,10 @@ impl Shell {
         chrome.noting = repainted(chrome.noting, was, painted);
         let writer = self.session.writer();
         let threshold = writer.last_frame().clamp(SKIP_FLOOR, SKIP_CEILING);
-        let stale = self
-            .held_since
-            .is_some_and(|since| now.saturating_duration_since(since) >= STALE);
+        let stale = forced_at(self.held_since, writer.unwritten()).is_some_and(|at| now >= at);
         if writer.backlogged(threshold) && !stale {
             self.held_since.get_or_insert(now);
-            self.regions = painted;
-            self.hovered = chrome.hovered;
-            self.laid = self.overlays();
+            self.settle_marks(&chrome, painted);
             return Ok(());
         }
         self.held_since = None;
@@ -2382,6 +2379,20 @@ impl Shell {
         })?;
         self.painted = now;
         self.effects_ran = self.effects_running();
+        // A resize between the layout and the draw: the pointer follows the
+        // screen that was drawn.
+        let drawn = if drawn == area {
+            painted
+        } else {
+            render::regions(drawn, &chrome, &self.screen)
+        };
+        self.settle_marks(&chrome, drawn);
+        Ok(())
+    }
+
+    /// Keep the pointer's marks the layout left standing, and lay the pointer
+    /// over `regions`.
+    fn settle_marks(&mut self, chrome: &render::Chrome, regions: Regions) {
         self.hovered = chrome.hovered;
         if chrome.noting.is_none() {
             self.noting = None;
@@ -2389,16 +2400,17 @@ impl Shell {
         if chrome.selected.is_none() {
             self.deselect();
         }
-        // A resize between the layout and the draw: the pointer follows the
-        // screen that was drawn.
-        self.regions = if drawn == area {
-            painted
-        } else {
-            render::regions(drawn, &chrome, &self.screen)
-        };
+        self.regions = regions;
         self.laid = self.overlays();
-        Ok(())
     }
+}
+
+/// When a screen held back since `held_since` is drawn anyway. None once the
+/// backlog is past the ceiling, so a terminal that has stopped reading is not
+/// handed a frame every [`STALE`] for as long as it stays stopped.
+fn forced_at(held_since: Option<Instant>, unwritten: usize) -> Option<Instant> {
+    let since = held_since?;
+    (unwritten <= SKIP_CEILING).then(|| since + STALE)
 }
 
 /// The pointer's marks, compared across one input event.
@@ -2486,6 +2498,22 @@ mod tests {
     //! The one rule in this file that is arithmetic rather than plumbing.
 
     use super::*;
+
+    #[test]
+    fn forced_bounded() {
+        let since = Instant::now();
+        assert_eq!(forced_at(None, 0), None, "nothing held, nothing forced");
+        assert_eq!(
+            forced_at(Some(since), SKIP_CEILING),
+            Some(since + STALE),
+            "a held screen under the ceiling was not drawn after STALE"
+        );
+        assert_eq!(
+            forced_at(Some(since), SKIP_CEILING + 1),
+            None,
+            "a terminal past the ceiling would be handed a frame every STALE"
+        );
+    }
 
     /// The watch thread forwards every tick, not only the first.
     #[test]

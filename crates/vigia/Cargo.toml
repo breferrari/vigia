@@ -83,9 +83,10 @@ windows-sys.workspace = true
 # nobody typed is too, and SPEC.md section 6 puts terminal I/O outside
 # `vigia-core` entirely.
 [target.'cfg(unix)'.dependencies]
-# SPEC.md section 6 names rustix for one act: polling the tty for the OSC 11
-# background reply at startup (#325). Already in the graph beneath crossterm
-# and notify; declaring it makes the direct use deliberate.
+# SPEC.md section 6 names rustix for two acts: polling the tty for the OSC 11
+# background reply at startup (#325), and the terminal writer's own descriptor,
+# opened by `ttyname` and polled for room. Already in the graph beneath
+# crossterm and notify; declaring it makes the direct use deliberate.
 rustix = { version = "1", default-features = false, features = ["alloc", "event", "fs", "std", "termios"] }
 signal-hook.workspace = true
 

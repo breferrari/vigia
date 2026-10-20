@@ -412,6 +412,31 @@ fn resize_while_held() {
 }
 
 #[test]
+fn locked_terminal() {
+    // The terminal's device cannot be opened again by name: the pane writes
+    // through the standard output it was given instead of refusing to start.
+    let (scratch, home) = (tall("writer-locked"), TempDir::new("writer-locked-home"));
+    let script = pty::Script {
+        locked: true,
+        ..script()
+    };
+    let (mut child, mut master) = pty::start(pane(&scratch, &home), &script);
+    let seen = reader(master.try_clone().expect("the terminal's other end"), None);
+    std::thread::sleep(Duration::from_secs(2));
+    master.write_all(b"q").expect("press q");
+    let status = child.exited_unread(Duration::from_secs(3));
+    assert!(
+        status.is_some_and(|status| status.success()),
+        "the pane on a terminal it could not open again did not run and quit: {status:?}"
+    );
+    let shown = text(&seen);
+    assert!(
+        shown.contains(FRAME_END) && shown.contains(&"a".repeat(12)),
+        "the pane on a terminal it could not open again drew nothing"
+    );
+}
+
+#[test]
 fn output_lost() {
     // Input on one terminal and output on another, so closing the output's end
     // can end the pane only through the writer.

@@ -30,6 +30,9 @@ pub struct Script<'a> {
     pub quiet: bool,
     /// The terminal's columns, rows, and width and height in pixels, or none.
     pub size: Option<(u16, u16, u16, u16)>,
+    /// The terminal's device closed to every open by name, as another user's
+    /// is under `su`.
+    pub locked: bool,
 }
 
 /// Run `command` in a fresh terminal under `script`, wait for its `asked`
@@ -69,6 +72,11 @@ pub fn start(mut command: Command, script: &Script<'_>) -> (Reaped, File) {
         };
         // SAFETY: a valid descriptor and a valid winsize.
         unsafe { libc::ioctl(terminal.as_raw_fd(), libc::TIOCSWINSZ, &size) };
+    }
+    if script.locked {
+        // SAFETY: a descriptor this test owns.
+        let locked = unsafe { libc::fchmod(slave.as_raw_fd(), 0) };
+        assert_eq!(locked, 0, "lock the terminal");
     }
     command
         .stdout(Stdio::from(slave.try_clone().expect("dup")))

@@ -195,6 +195,7 @@ fn asked(ask: Ask) -> String {
             detached: ask.detached,
             quiet: false,
             size: None,
+            locked: false,
         },
     )
 }

@@ -156,11 +156,14 @@ pub struct Session {
     /// Declared first, so it drops first and no live `Terminal` outlives the
     /// screen it draws on, even for the length of a drop.
     screen: Screen,
-    /// Second: stopped, within its limit, before the terminal is given back,
-    /// so the restore is never written in the middle of a frame.
+    /// Escapes outside a frame, on the writer's queue after the frames before.
+    /// Before the writer, so its end of the queue is closed when the writer stops.
+    sends: crate::writer::Sink,
+    /// Then the writer: stopped, within its limit, before the terminal is given
+    /// back, so the restore is never written in the middle of a frame.
     writer: crate::writer::Writer,
-    /// Second, so the terminal goes back after the screen is gone. Never read;
-    /// its whole job is its `Drop`.
+    /// Last, so the terminal goes back after the screen is gone and the
+    /// writer has stopped. Never read; its whole job is its `Drop`.
     _takeover: Takeover<Crossterm<crate::writer::Restore>>,
 }
 
@@ -187,6 +190,7 @@ impl Session {
 
         Ok(Self {
             screen,
+            sends: writer.sink(),
             writer,
             _takeover: takeover,
         })
@@ -214,9 +218,7 @@ impl Session {
     ///
     /// The write or the flush fails.
     pub fn send(&mut self, sequence: &str) -> io::Result<()> {
-        let out = self.screen.backend_mut();
-        out.write_all(sequence.as_bytes())?;
-        out.flush()
+        self.sends.send(sequence.as_bytes())
     }
 }
 
@@ -1138,6 +1140,38 @@ mod tests {
                 chunk[..chunk.len() - 1].parse().ok().map(|n| (n, set))
             })
             .collect()
+    }
+
+    #[test]
+    fn restore_order() {
+        // On every platform, Windows included: the restore's first bytes end
+        // an escape string a frame may have left open, and the modes follow.
+        struct Modes(Crossterm<Vec<u8>>);
+        impl Console for Modes {
+            fn take(&mut self, step: Step) -> io::Result<()> {
+                self.0.take(step)
+            }
+            fn give_back(&mut self, step: Step) {
+                // Raw mode is the real terminal's, not the recorded bytes'.
+                if step != Step::RawMode {
+                    self.0.give_back(step);
+                }
+            }
+            fn ready(&mut self) {
+                self.0.ready();
+            }
+        }
+        let mut console = Modes(Crossterm { out: Vec::new() });
+        give_back_all(&mut console, TAKEOVER.len());
+        let out = String::from_utf8(console.0.out).expect("utf8");
+        assert!(
+            out.starts_with("\x1b\\"),
+            "the restore did not begin with the string terminator: {out:?}"
+        );
+        assert!(
+            out.len() > crate::writer::STRING_END.len(),
+            "no mode was given back after the terminator, so this proves nothing: {out:?}"
+        );
     }
 
     #[test]

@@ -19,6 +19,10 @@ static WRITING: AtomicBool = AtomicBool::new(false);
 /// write waits at most [`POLL`] for room.
 pub fn poison() {
     POISONED.store(true, Ordering::SeqCst);
+    // A panic on the writer's own thread would wait on itself.
+    if std::thread::current().name() == Some(THREAD) {
+        return;
+    }
     let until = Instant::now() + 2 * POLL;
     while WRITING.load(Ordering::SeqCst) && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(1));
@@ -28,8 +32,15 @@ pub fn poison() {
 /// The longest one wait for room to write lasts, so a stop is noticed this soon.
 const POLL: Duration = Duration::from_millis(50);
 
+/// The writer thread's name.
+const THREAD: &str = "vigia-writer";
+
 /// How long a dropped writer goes on writing what it was handed.
 const STOP_WAIT: Duration = Duration::from_millis(200);
+
+/// The most a fresh frame buffer reserves, so one large picture does not set
+/// the size of every buffer after it.
+const BUFFER_CAP: usize = 64 * 1024;
 
 /// The most one write hands the terminal, so a stop or a poison is noticed
 /// between pieces of a large frame.
@@ -101,7 +112,7 @@ impl Writer {
         let (done, finished) = mpsc::channel();
         let theirs = Arc::clone(&shared);
         let _ = std::thread::Builder::new()
-            .name("vigia-writer".to_owned())
+            .name(THREAD.to_owned())
             .spawn(move || {
                 let mut out = out;
                 for bytes in frames {
@@ -203,20 +214,37 @@ impl Write for Sink {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        self.hand_over(true)
+    }
+}
+
+impl Sink {
+    /// Hand `bytes` over after what is pending, as something other than a
+    /// frame, so the skip threshold keeps the last frame's size.
+    ///
+    /// # Errors
+    ///
+    /// The writer has stopped.
+    pub fn send(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.pending.extend_from_slice(bytes);
+        self.hand_over(false)
+    }
+
+    fn hand_over(&mut self, frame: bool) -> io::Result<()> {
         if self.pending.is_empty() {
             return Ok(());
         }
-        let bytes = std::mem::replace(
-            &mut self.pending,
-            Vec::with_capacity(self.shared.last.load(Ordering::Acquire)),
-        );
+        let size = self.shared.last.load(Ordering::Acquire).min(BUFFER_CAP);
+        let bytes = std::mem::replace(&mut self.pending, Vec::with_capacity(size));
         let Some(queue) = self.queue.as_ref() else {
             return Err(io::Error::from(io::ErrorKind::BrokenPipe));
         };
         self.shared
             .unwritten
             .fetch_add(bytes.len(), Ordering::AcqRel);
-        self.shared.last.store(bytes.len(), Ordering::Release);
+        if frame {
+            self.shared.last.store(bytes.len(), Ordering::Release);
+        }
         let len = bytes.len();
         queue.send(bytes).map_err(|_| {
             self.shared.unwritten.fetch_sub(len, Ordering::AcqRel);
@@ -263,30 +291,48 @@ fn write_out(out: &mut impl Out, bytes: &[u8], shared: &Shared, wakes: &Wakes) -
 #[cfg(unix)]
 pub struct Tty {
     file: std::fs::File,
+    /// Standard output itself, because its device could not be opened again:
+    /// written blocking, on this thread, as on Windows.
+    blocking: bool,
 }
 
 #[cfg(unix)]
 impl Tty {
     /// Open the device standard output is, nonblocking. Not `/dev/tty`, which
     /// macOS polls as `POLLNVAL`, and not a `dup`, which would share the flag
-    /// with the shell's own output.
+    /// with the shell's own output. Standard output itself, blocking, when the
+    /// device cannot be named or opened again.
     ///
     /// # Errors
     ///
-    /// Standard output is not a terminal, or its device cannot be opened.
+    /// Standard output cannot be duplicated.
     pub fn open() -> io::Result<Self> {
+        use std::os::fd::AsFd;
         use std::os::unix::ffi::OsStrExt;
         use std::os::unix::fs::OpenOptionsExt;
-        let name = rustix::termios::ttyname(std::io::stdout(), Vec::new())?;
-        let path = std::ffi::OsStr::from_bytes(name.as_bytes());
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .custom_flags(
-                rustix::fs::OFlags::NONBLOCK.bits() as i32
-                    | rustix::fs::OFlags::NOCTTY.bits() as i32,
-            )
-            .open(path)?;
-        Ok(Self { file })
+        let file = rustix::termios::ttyname(std::io::stdout(), Vec::new())
+            .map_err(io::Error::from)
+            .and_then(|name| {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .custom_flags(
+                        rustix::fs::OFlags::NONBLOCK.bits() as i32
+                            | rustix::fs::OFlags::NOCTTY.bits() as i32,
+                    )
+                    .open(std::ffi::OsStr::from_bytes(name.as_bytes()))
+            });
+        match file {
+            Ok(file) => Ok(Self {
+                file,
+                blocking: false,
+            }),
+            // Another user's terminal under `su` refuses the open, and a
+            // container may have no device by that name.
+            Err(_) => Ok(Self {
+                file: std::fs::File::from(std::io::stdout().as_fd().try_clone_to_owned()?),
+                blocking: true,
+            }),
+        }
     }
 }
 
@@ -294,6 +340,12 @@ impl Tty {
 impl Out for Tty {
     fn write_some(&mut self, bytes: &[u8], wait: Duration) -> io::Result<usize> {
         use rustix::event::{PollFd, PollFlags, Timespec, poll};
+        if self.blocking {
+            return match self.file.write(bytes) {
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => Ok(0),
+                written => written,
+            };
+        }
         let mut fds = [PollFd::new(&self.file, PollFlags::OUT)];
         let timeout = Timespec::try_from(wait.min(POLL)).expect("under a second");
         match poll(&mut fds, Some(&timeout)) {
@@ -523,6 +575,21 @@ mod tests {
             began.elapsed() < Duration::from_millis(400),
             "a stop against a terminal that never reads took {:?}",
             began.elapsed()
+        );
+    }
+
+    #[test]
+    fn send_not_frame() {
+        let out = Taken::default();
+        let writer = Writer::start(out, Wakes::none());
+        let mut sink = writer.sink();
+        sink.write_all(&[b'x'; 9000]).expect("write");
+        sink.flush().expect("flush");
+        sink.send(b"\x1b]52;c;eA==\x07").expect("send");
+        assert_eq!(
+            writer.last_frame(),
+            9000,
+            "an escape sent outside a frame was taken for the last frame's size"
         );
     }
 
