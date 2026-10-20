@@ -94,6 +94,8 @@ vigia --version                              # or -V. It is the only option ther
 
 Every [release](https://github.com/breferrari/vigia/releases) carries archives for x86-64 Linux, Intel and Apple-silicon macOS, and x86-64 Windows. The Linux build is statically linked against musl, so it runs on any distribution without matching a system libc. `cargo install vigia` (1.1.0) needs Rust 1.89 or newer. Building `main` needs the latest stable, 1.99 or newer.
 
+**Check a download, from 1.2.0 on.** Each release archive carries a GitHub build attestation that ties it to this repository's release workflow and the commit it built. Verify one with `gh attestation verify <archive> --repo breferrari/vigia`. Each binary also carries the list of crates it was built from, so `cargo audit bin vigia` can check an installed copy for known advisories. Archives before 1.2.0 carry neither.
+
 **No C toolchain, on any of those paths.** Every dependency is pure Rust, and CI asserts it on each shipped target rather than claiming it: a `cc`, `cmake` or `bindgen` entering the dependency graph fails the build.
 
 </details>

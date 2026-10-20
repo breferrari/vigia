@@ -4012,3 +4012,35 @@ fn permissions_declared() {
         "the scan missed a job"
     );
 }
+
+/// Each release archive is attested and each binary carries its crate list,
+/// and only the job that attests holds the token scopes for it.
+#[test]
+fn release_attested() {
+    let manifest = repo_file("Cargo.toml");
+    for setting in ["github-attestations = true", "cargo-auditable = true"] {
+        assert!(
+            manifest.lines().any(|line| line == setting),
+            "[workspace.metadata.dist] does not set {setting}"
+        );
+    }
+    let release = without_comments(&repo_file(".github/workflows/release.yml"));
+    let attesting: Vec<String> = jobs_of(&release)
+        .into_iter()
+        .filter(|(_, block)| block.contains("\"attestations\": \"write\""))
+        .map(|(job, _)| job)
+        .collect();
+    assert_eq!(
+        attesting,
+        ["build-local-artifacts"],
+        "the attestation scopes reach other jobs"
+    );
+    let (_, build) = jobs_of(&release)
+        .into_iter()
+        .find(|(job, _)| job == "build-local-artifacts")
+        .expect("dist's build job");
+    assert!(
+        build.contains("uses: actions/attest@"),
+        "the build job attests nothing"
+    );
+}
