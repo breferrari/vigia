@@ -70,6 +70,7 @@ jobs:
   bump:
     name: bump ${{ inputs.bump }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       # **`persist-credentials: false`, and without it this whole change does
       # nothing.** The default leaves the *workflow's* token in `.git/config` as

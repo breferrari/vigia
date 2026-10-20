@@ -55,6 +55,7 @@ jobs:
   plan:
     name: plan replicas
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       replicas: ${{ steps.build.outputs.replicas }}
     steps:
@@ -70,6 +71,7 @@ jobs:
     name: replica ${{ matrix.replica }}
     needs: plan
     runs-on: ${{ inputs.os }}
+    timeout-minutes: 120
     strategy:
       # One replica stalling says nothing about the others, and killing them
       # would throw away samples already paid for.
@@ -137,6 +139,7 @@ jobs:
     needs: [plan, measure]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - shell: bash
         run: |

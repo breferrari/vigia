@@ -5,7 +5,7 @@ mod support;
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
 
-use support::{Scratch, budget};
+use support::{Scratch, budget, ceiling};
 use vigia_core::{Tick, WatchOptions, Watcher};
 
 /// How long to insist that nothing happens.
@@ -35,7 +35,7 @@ fn tick_within(watcher: &mut Watcher<'_>, timeout: Duration) -> Option<Tick> {
     let guard = std::thread::spawn(move || {
         // Wakes early once the tick has arrived, so a passing test does not
         // pay the whole timeout.
-        if finished.recv_timeout(timeout).is_err() {
+        if finished.recv_timeout(ceiling(timeout)).is_err() {
             stop.stop();
         }
     });
@@ -1138,5 +1138,31 @@ fn gitignore_renamed_away() {
     assert!(
         tick_within(&mut watcher, SETTLE).is_some(),
         "a path a renamed-away .gitignore ignored never woke the watch"
+    );
+}
+
+/// `VIGIA_TEST_CEILING` lowers a wait and never raises one.
+#[test]
+fn ceiling_lowers_only() {
+    let wait = Duration::from_secs(10);
+    assert_eq!(
+        support::ceiling_of(wait, None),
+        wait,
+        "unset changed the wait"
+    );
+    assert_eq!(
+        support::ceiling_of(wait, Some("3")),
+        Duration::from_secs(3),
+        "a lower ceiling did not apply"
+    );
+    assert_eq!(
+        support::ceiling_of(wait, Some("60")),
+        wait,
+        "a higher ceiling raised the wait"
+    );
+    assert_eq!(
+        support::ceiling_of(wait, Some("soon")),
+        wait,
+        "garbage changed the wait"
     );
 }

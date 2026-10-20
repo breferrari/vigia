@@ -5,7 +5,7 @@ mod support;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use support::Scratch;
+use support::{Scratch, ceiling};
 use vigia_core::{Tick, WatchOptions, Watcher, Worktree};
 
 /// How long a real change is allowed to take to travel through the OS.
@@ -22,7 +22,7 @@ fn tick_within(watcher: &mut Watcher<'_>, timeout: Duration) -> Option<Tick> {
     let guard = std::thread::spawn(move || {
         // Wakes early once the tick arrives, so a passing test does not pay the
         // whole timeout.
-        if finished.recv_timeout(timeout).is_err() {
+        if finished.recv_timeout(ceiling(timeout)).is_err() {
             stop.stop();
         }
     });

@@ -56,6 +56,7 @@ jobs:
     name: what changed
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       class: ${{ steps.class.outputs.class }}
     steps:
@@ -85,6 +86,7 @@ jobs:
     name: fmt and docs
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
         with:
@@ -165,6 +167,7 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       # Windows and macOS fail for different reasons than Linux does, and
       # cancelling the others hides which.
@@ -260,6 +263,7 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -286,7 +290,7 @@ jobs:
       # the exact shape §7 keeps recording, arrived at through the test
       # *selector* rather than through the gate: green, and about nothing.
       - name: budgets
-        run: cargo test --release --test budgets --features vigia/pdf
+        run: cargo test --release --test budgets --features vigia/pdf -- --nocapture
         env:
           VIGIA_BUDGET_SLACK: "3"
 
@@ -307,7 +311,7 @@ jobs:
       # [#36](https://github.com/breferrari/vigia/issues/36) tracks the
       # underlying flakiness of these gates on hosted runners.
       - name: first paint, which is I7 and is not in budgets.rs
-        run: cargo test --release --test first_paint --features vigia/pdf
+        run: cargo test --release --test first_paint --features vigia/pdf -- --nocapture
         env:
           VIGIA_BUDGET_SLACK: "3"
 
@@ -316,6 +320,7 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -331,6 +336,7 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -383,6 +389,7 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -510,11 +517,76 @@ jobs:
   # the tests that read a document at the repository root or under `docs/`.
   # The cache is the ubuntu test job's, restored and never saved, so a docs
   # pull request neither builds cold nor overwrites the fuller cache.
+  # **Mutation testing of what the pull request changed.** cargo-mutants
+  # mutates only the lines in the diff, and tests each mutant against its own
+  # package's suite under the `mutants` nextest profile, which kills a hung test
+  # at 60s. Sharded so no shard passes 30 minutes. Not in `ci complete`'s needs
+  # yet: it reports, it does not block, until its first runs say whether it
+  # should.
+  mutants:
+    name: mutants (shard ${{ matrix.shard }})
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    env:
+      # A mutant that leaves a variable unused is still a mutant to test.
+      RUSTFLAGS: ""
+      NEXTEST_PROFILE: mutants
+      VIGIA_TEST_CEILING: "15"
+      SHARDS: "8"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ubuntu-latest-mutants
+          save-if: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest,cargo-mutants
+      - name: mutants in the diff
+        shell: bash
+        run: |
+          set -uo pipefail
+          git diff "$(git merge-base origin/main HEAD)" HEAD > pr.diff
+          cargo mutants --in-diff pr.diff --test-tool nextest -j 2 --no-shuffle \
+            --shard "${{ matrix.shard }}/$SHARDS"
+          status=$?
+          count() { [ -f "mutants.out/$1.txt" ] && wc -l < "mutants.out/$1.txt" || echo 0; }
+          {
+            echo "### mutants, shard ${{ matrix.shard }} of $SHARDS"
+            echo
+            echo "caught $(count caught), missed $(count missed), timeout $(count timeout), unviable $(count unviable)"
+            if [ -s mutants.out/missed.txt ]; then
+              echo
+              echo '```'
+              cat mutants.out/missed.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          # 2 is a missed mutant and 3 a timeout, which this job reports and does
+          # not fail on yet. Anything else, such as a red baseline, fails it.
+          case "$status" in 0|2|3) exit 0 ;; *) exit "$status" ;; esac
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-shard-${{ matrix.shard }}
+          path: mutants.out/
+          if-no-files-found: ignore
+
   docs:
     name: documents
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class == 'docs'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -538,6 +610,7 @@ jobs:
     if: always()
     needs: [changes, lint, test, budgets, benches, pure-rust, musl, docs]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
       # The judgement lives in a script so a test can drive it with fabricated

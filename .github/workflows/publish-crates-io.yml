@@ -48,6 +48,7 @@ jobs:
   publish-crates-io:
     name: publish to crates.io
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       PLAN: ${{ inputs.plan }}
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

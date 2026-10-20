@@ -3579,3 +3579,77 @@ fn vendored_output_untracked() {
         );
     }
 }
+
+/// Each job under `jobs:`, by name, with its own lines.
+fn jobs_of(workflow: &str) -> Vec<(String, String)> {
+    let Some((_, body)) = workflow.split_once("\njobs:\n") else {
+        return Vec::new();
+    };
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    for line in body.lines() {
+        let top = line.len() > 2 && line.starts_with("  ") && !line[2..].starts_with(' ');
+        if top && let Some((key, _)) = line.trim().split_once(':') {
+            jobs.push((key.to_owned(), String::new()));
+        } else if !line.is_empty() && !line.starts_with(' ') {
+            break;
+        } else if let Some((_, block)) = jobs.last_mut() {
+            block.push_str(line);
+            block.push('\n');
+        }
+    }
+    jobs
+}
+
+/// Every job in every workflow has a `timeout-minutes`, so none can hold a
+/// runner for GitHub's six hours. `release.yml` is dist's generated file, and
+/// dist has no setting for a job timeout.
+#[test]
+fn jobs_time_bound() {
+    let dir = repo_root().join(".github/workflows");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).expect("the workflows") {
+        let path = entry.expect("an entry").path();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        if !name.ends_with(".yml") || name == "release.yml" {
+            continue;
+        }
+        for (job, block) in jobs_of(&without_comments(&read(&path))) {
+            assert!(
+                keys_at_indent(&block, 4)
+                    .iter()
+                    .any(|key| key == "timeout-minutes"),
+                "{name}: job `{job}` has no timeout-minutes"
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 15,
+        "only {checked} jobs found, so the scan read nothing"
+    );
+}
+
+/// nextest kills a hung test in every profile a run uses.
+#[test]
+fn nextest_time_bound() {
+    let config = without_comments(&repo_file(".config/nextest.toml"));
+    for profile in ["default", "ci", "mutants"] {
+        let header = format!("[profile.{profile}]");
+        let section = config
+            .split_once(&header)
+            .map(|(_, rest)| rest.split("\n[").next().unwrap_or_default())
+            .unwrap_or_else(|| panic!("no {header} in .config/nextest.toml"));
+        let bound = section
+            .lines()
+            .find(|line| line.trim_start().starts_with("slow-timeout"))
+            .unwrap_or_else(|| panic!("{header} sets no slow-timeout"));
+        assert!(
+            bound.contains("terminate-after"),
+            "{header}'s slow-timeout never terminates: {bound}"
+        );
+    }
+}

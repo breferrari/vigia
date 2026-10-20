@@ -150,6 +150,18 @@ rm -f "$MUT/b.txt"
 out=$(cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" -- no-such-command-here 2>&1); got=$?
 [ "$got" -eq 2 ] && unchanged && ok "a test command that never ran aborts" || no "a test command that never ran aborts (said: $out)" 2 "$got"
 
+# An entry's own command runs, and none is needed after `--` when each has one.
+battery '[{"name":"drop gamma","file":"a.txt","old":"gamma","new":"GAMMA","command":"grep -q gamma a.txt"}]'
+out=$(cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" 2>&1); got=$?
+if [ "$got" -eq 0 ] && printf '%s' "$out" | grep -q '^KILLED *drop gamma' && unchanged; then ok "an entry's own command is the one that runs"
+else no "an entry's own command is the one that runs (said: $out)" 0 "$got"; fi
+
+# At the wall-clock limit the run stops, restores, and names what did not run.
+battery '[{"name":"slow","file":"a.txt","old":"beta","new":"BETA"},{"name":"after","file":"a.txt","old":"gamma","new":"GAMMA"}]'
+out=$(cd "$MUT" && node "$MUTATE" "$FIXW/battery.json" --limit 0.05 -- 'grep -q beta a.txt || sleep 30' 2>&1); got=$?
+if [ "$got" -eq 3 ] && printf '%s' "$out" | grep -q '^UNRUN *slow' && printf '%s' "$out" | grep -q '^UNRUN *after' && unchanged; then ok "the limit stops the run and restores the file"
+else no "the limit stops the run and restores the file (said: $out)" 3 "$got"; fi
+
 # A mutation the compiler rejects is not one the tests caught.
 printf 'grep -q beta a.txt || { echo "error[E0425]: cannot find value"; echo "error: could not compile \\`x\\`"; exit 101; }\n' > "$FIX/compile.sh"
 battery '[{"name":"drop beta","file":"a.txt","old":"beta","new":"BETA"}]'
