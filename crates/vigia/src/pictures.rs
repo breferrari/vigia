@@ -578,18 +578,15 @@ impl Pictures {
         let _ = std::thread::Builder::new()
             .name(PAIRS.to_owned())
             .spawn(move || {
-                for candidate in asked {
-                    let score = vigia_core::caught(|| {
-                        let read = |side: &Option<Source>| side.as_ref().and_then(Source::read);
-                        match (read(&candidate.sides.before), read(&candidate.sides.after)) {
-                            (Some(old), Some(new)) => vigia_core::pair_score(&old, &new),
-                            _ => 0,
+                while let Ok(first) = asked.recv() {
+                    // Everything queued, then one wake: each wake walks again.
+                    for candidate in std::iter::once(first).chain(asked.try_iter()) {
+                        let score = vigia_core::caught(|| vigia_core::candidate_score(&candidate))
+                            .unwrap_or(0);
+                        vigia_core::armed(Stage::Pairs);
+                        if scored.send((candidate.key, score)).is_err() {
+                            return;
                         }
-                    })
-                    .unwrap_or(0);
-                    vigia_core::armed(Stage::Pairs);
-                    if scored.send((candidate.key, score)).is_err() {
-                        break;
                     }
                     if let Ok(wake) = woken.lock() {
                         wake();

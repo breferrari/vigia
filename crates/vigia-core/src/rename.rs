@@ -56,6 +56,16 @@ pub fn pair_score(old: &[u8], new: &[u8]) -> u64 {
     copied * MAX_SCORE / max
 }
 
+/// [`pair_score`] of a candidate's two sides, read on the calling thread; 0
+/// when either cannot be read.
+pub fn candidate_score(candidate: &Candidate) -> u64 {
+    let read = |side: &Option<crate::picture::Source>| side.as_ref().and_then(|s| s.read());
+    match (read(&candidate.sides.before), read(&candidate.sides.after)) {
+        (Some(old), Some(new)) => pair_score(&old, &new),
+        _ => 0,
+    }
+}
+
 /// Whether a score pairs.
 pub(crate) fn pairs(score: u64) -> bool {
     score >= MINIMUM_SCORE

@@ -445,12 +445,19 @@ impl Worktree {
     /// side is binary, paired by git's rule. A pair this frame cannot afford
     /// to score is left unpaired and listed for the picture worker.
     fn paired(&self, mut changes: Vec<FileChange>) -> Vec<FileChange> {
-        let removed: Vec<usize> = (0..changes.len())
-            .filter(|&at| changes[at].kind == ChangeKind::Removed && changes[at].before.is_some())
-            .collect();
-        let added: Vec<usize> = (0..changes.len())
-            .filter(|&at| changes[at].kind == ChangeKind::Added && changes[at].after.is_some())
-            .collect();
+        /// A removal and an addition weighed as one rename.
+        struct Weighed {
+            from: usize,
+            to: usize,
+            key: rename::PairKey,
+            bytes: u64,
+        }
+        let of_kind = |kind: ChangeKind| -> Vec<usize> {
+            (0..changes.len())
+                .filter(|&at| changes[at].kind == kind)
+                .collect()
+        };
+        let (removed, added) = (of_kind(ChangeKind::Removed), of_kind(ChangeKind::Added));
         if removed.is_empty()
             || added.is_empty()
             || removed.len() > rename::RENAME_LIMIT
@@ -459,108 +466,111 @@ impl Worktree {
             return changes;
         }
         // Each side's size and stamp, from a header or a `stat`, before a byte.
-        let removed: Vec<(usize, u64, u64)> = removed
-            .into_iter()
-            .filter_map(|at| {
-                let id = changes[at].before?;
-                let size = self.repo().find_header(id).ok()?.size();
-                Some((at, size, picture::blob_stamp(&id)))
-            })
-            .collect();
-        let added: Vec<(usize, u64, u64)> = added
-            .into_iter()
-            .filter_map(|at| match changes[at].after? {
+        let sized = |at: usize| -> Option<(usize, u64, u64)> {
+            let change = &changes[at];
+            let side = match change.kind {
+                ChangeKind::Removed => Side::Blob(change.before?),
+                _ => change.after?,
+            };
+            match side {
                 Side::Blob(id) => {
                     let size = self.repo().find_header(id).ok()?.size();
                     Some((at, size, picture::blob_stamp(&id)))
                 }
                 Side::Worktree => {
-                    let meta =
-                        std::fs::symlink_metadata(self.workdir.join(&changes[at].path)).ok()?;
+                    let meta = std::fs::symlink_metadata(self.workdir.join(&change.path)).ok()?;
                     meta.is_file()
                         .then(|| (at, meta.len(), picture::file_stamp(&meta)))
                 }
-            })
-            .collect();
-        let mut weighed: Vec<(usize, usize, rename::PairKey, u64)> = removed
+            }
+        };
+        let removed: Vec<_> = removed.into_iter().filter_map(sized).collect();
+        let added: Vec<_> = added.into_iter().filter_map(sized).collect();
+        let mut weighed: Vec<Weighed> = removed
             .iter()
             .flat_map(|&(from, from_size, from_stamp)| {
                 added.iter().filter_map(move |&(to, to_size, to_stamp)| {
-                    rename::sizes_fit(from_size, to_size).then_some((
+                    rename::sizes_fit(from_size, to_size).then_some(Weighed {
                         from,
                         to,
-                        (from_stamp, to_stamp),
-                        from_size + to_size,
-                    ))
+                        key: (from_stamp, to_stamp),
+                        bytes: from_size + to_size,
+                    })
                 })
             })
             .collect();
         // The cheapest first, so the budget goes furthest.
-        weighed.sort_by_key(|&(.., bytes)| bytes);
+        weighed.sort_by_key(|pair| pair.bytes);
+        // Each side read once in this walk, however many pairs it is in.
+        let mut read: HashMap<usize, Option<Vec<u8>>> = HashMap::new();
+        let mut bytes_of = |at: usize| {
+            read.entry(at)
+                .or_insert_with(|| {
+                    let sides = self.image_sources(&changes[at]);
+                    sides.after.or(sides.before)?.read()
+                })
+                .clone()
+        };
+        let mut listed: std::collections::HashSet<rename::PairKey> = self
+            .unscored
+            .borrow()
+            .iter()
+            .map(|candidate| candidate.key)
+            .collect();
         let mut scored = Vec::new();
-        let mut unscored = self.unscored.borrow_mut();
-        for (from, to, key, bytes) in weighed {
-            let known = self.pair_scores.borrow().get(&key).copied();
+        for pair in weighed {
+            let known = self.pair_scores.borrow().get(&pair.key).copied();
             let score = match known {
                 Some(score) => score,
-                None if bytes <= self.pair_budget.get() => {
-                    self.pair_budget.set(self.pair_budget.get() - bytes);
-                    self.pair_bytes.set(self.pair_bytes.get() + bytes);
-                    let sides = self.pair_sources(&changes[from], &changes[to]);
-                    let score = match (
-                        sides.before.and_then(|s| s.read()),
-                        sides.after.and_then(|s| s.read()),
-                    ) {
+                None if pair.bytes <= self.pair_budget.get() => {
+                    self.pair_budget.set(self.pair_budget.get() - pair.bytes);
+                    self.pair_bytes.set(self.pair_bytes.get() + pair.bytes);
+                    let score = match (bytes_of(pair.from), bytes_of(pair.to)) {
                         (Some(old), Some(new)) => rename::pair_score(&old, &new),
                         _ => 0,
                     };
-                    self.pair_scores.borrow_mut().insert(key, score);
+                    self.pair_scores.borrow_mut().insert(pair.key, score);
                     score
                 }
                 None => {
-                    if !unscored.iter().any(|candidate| candidate.key == key) {
-                        unscored.push(rename::Candidate {
-                            key,
-                            sides: self.pair_sources(&changes[from], &changes[to]),
+                    if listed.insert(pair.key) {
+                        self.unscored.borrow_mut().push(rename::Candidate {
+                            key: pair.key,
+                            sides: self.pair_sources(&changes[pair.from], &changes[pair.to]),
                         });
                     }
                     continue;
                 }
             };
             if rename::pairs(score) {
-                scored.push((score, from, to));
+                scored.push((score, pair.from, pair.to));
             }
         }
-        drop(unscored);
         // Best first; a tie goes to the same file name, as `gix` breaks one.
-        let name = |path: &str| path.rsplit('/').next().unwrap_or(path).to_owned();
+        let name = |at: usize| changes[at].path.rsplit('/').next().unwrap_or_default();
         scored.sort_by(|a, b| {
-            b.0.cmp(&a.0).then_with(|| {
-                let same = |&(_, from, to): &(u64, usize, usize)| {
-                    name(&changes[from].path) == name(&changes[to].path)
-                };
-                same(b).cmp(&same(a))
-            })
+            let same = |&(_, from, to): &(u64, usize, usize)| name(from) == name(to);
+            b.0.cmp(&a.0).then_with(|| same(b).cmp(&same(a)))
         });
         let mut used = std::collections::HashSet::new();
-        let mut gone = std::collections::HashSet::new();
         for (_, from, to) in scored {
             if used.contains(&from) || used.contains(&to) {
                 continue;
             }
             used.extend([from, to]);
-            gone.insert(from);
-            let source = changes[from].clone();
+            let source = changes[from].path.clone();
+            let before = changes[from].before;
             let target = &mut changes[to];
-            target.kind = ChangeKind::Renamed { from: source.path };
-            target.before = source.before;
+            target.kind = ChangeKind::Renamed { from: source };
+            target.before = before;
         }
-        let mut at = 0;
-        changes.retain(|_| {
-            at += 1;
-            !gone.contains(&(at - 1))
-        });
+        // A removal that paired is the rename now, listed under its new path.
         changes
+            .into_iter()
+            .enumerate()
+            .filter(|(at, change)| !(change.kind == ChangeKind::Removed && used.contains(at)))
+            .map(|(_, change)| change)
+            .collect()
     }
 
     /// Where a candidate pair's two sides are read from.

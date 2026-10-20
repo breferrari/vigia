@@ -7,33 +7,14 @@ mod support;
 use std::time::{Duration, Instant};
 
 use ratatui_image::picker::Picker;
-use support::{Scratch, changes_sorted};
+use support::{Scratch, changes_sorted, noise, tail_changed};
 use vigia::pictures::{Inks, Pictures};
 use vigia_core::ChangeKind;
-
-/// `length` bytes of noise from `seed`, a NUL among them.
-fn noise(seed: u64, length: usize) -> Vec<u8> {
-    let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
-    let mut out: Vec<u8> = (0..length)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state as u8
-        })
-        .collect();
-    out[0] = 0;
-    out
-}
 
 #[test]
 fn binary_rename_paired_by_worker() {
     let old = noise(1, 2 * 1024 * 1024);
-    let mut new = old.clone();
-    let tail = new.len() - new.len() / 10;
-    for byte in &mut new[tail..] {
-        *byte ^= 0x5a;
-    }
+    let new = tail_changed(&old, 0.1);
     let scratch = Scratch::new("rename-worker");
     scratch.write("a.bin", &old);
     scratch.commit_all("initial");

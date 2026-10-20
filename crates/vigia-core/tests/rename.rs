@@ -2,34 +2,8 @@
 
 mod support;
 
-use support::{Scratch, changes_sorted};
+use support::{Scratch, changes_sorted, noise, tail_changed};
 use vigia_core::{ChangeKind, FileChange, Frame, pair_score};
-
-/// `length` bytes of noise from `seed`, a NUL among them, so each reads as
-/// binary and two seeds share no chunk.
-fn noise(seed: u64, length: usize) -> Vec<u8> {
-    let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
-    let mut out: Vec<u8> = (0..length)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state as u8
-        })
-        .collect();
-    out[0] = 0;
-    out
-}
-
-/// `bytes` with its last `share` of them changed.
-fn tail_changed(bytes: &[u8], share: f64) -> Vec<u8> {
-    let mut out = bytes.to_vec();
-    let from = out.len() - (out.len() as f64 * share) as usize;
-    for byte in &mut out[from..] {
-        *byte ^= 0x5a;
-    }
-    out
-}
 
 /// `list` with each path borrowed.
 fn refs(list: &[(String, Vec<u8>)]) -> Vec<(&str, Vec<u8>)> {

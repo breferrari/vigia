@@ -1291,27 +1291,15 @@ fn lfs_compare_frame() {
 /// cold frame scores one pair of 1 MiB, the most a frame scores. Without
 /// `moved`, the same addition beside the file left in place.
 fn rename_repo(name: &str, moved: bool) -> Scratch {
-    let mut state = 0x9e37_79b9_7f4a_7c15u64;
-    let old: Vec<u8> = (0..512 * 1024)
-        .map(|_| {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            state as u8
-        })
-        .collect();
-    let mut new = old.clone();
-    let tail = new.len() - new.len() / 10;
-    for byte in &mut new[tail..] {
-        *byte ^= 0x5a;
-    }
+    let old = support::noise(1, 512 * 1024);
+    let new = support::tail_changed(&old, 0.1);
     let scratch = Scratch::new(name);
-    scratch.write("a.bin", [&[0u8][..], &old[1..]].concat());
+    scratch.write("a.bin", &old);
     scratch.commit_all("initial");
     if moved {
         std::fs::remove_file(scratch.path_of("a.bin")).expect("remove");
     }
-    scratch.write("b.bin", [&[0u8][..], &new[1..]].concat());
+    scratch.write("b.bin", &new);
     scratch
 }
 
