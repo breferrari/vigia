@@ -12,18 +12,15 @@ const MINIMUM_SCORE: u64 = MAX_SCORE / 2;
 pub(crate) const RENAME_LIMIT: usize = 1000;
 /// The most candidate bytes one frame reads. A pair past it is left to the
 /// picture worker.
-#[doc(hidden)]
-pub const FRAME_BUDGET: u64 = 256 * 1024;
+pub(crate) const FRAME_BUDGET: u64 = 256 * 1024;
 /// What scoring one pair costs that budget beyond its sides' bytes, so a
 /// frame scores at most 256 pairs however small.
 pub(crate) const PAIR_COST: u64 = 1024;
 /// The least any read of a side costs that budget, a sniff's length, since
 /// what a small read costs is opening the file.
-#[doc(hidden)]
-pub const READ_COST: u64 = crate::hunk::BINARY_SNIFF_LEN as u64;
+pub(crate) const READ_COST: u64 = crate::hunk::BINARY_SNIFF_LEN as u64;
 /// The most pairs one frame lists for the worker.
-#[doc(hidden)]
-pub const LISTED_MAX: usize = (FRAME_BUDGET / PAIR_COST) as usize;
+pub(crate) const LISTED_MAX: usize = (FRAME_BUDGET / PAIR_COST) as usize;
 
 /// One pair of versions: the removal's blob stamp and the addition's stamp.
 pub type PairKey = (u64, u64);

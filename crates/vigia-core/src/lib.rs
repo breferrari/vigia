@@ -66,15 +66,11 @@ pub use notes::{
 };
 pub use picture::{Format, ImageSide, Picture, Source, Sources};
 pub use rename::{Candidate, PairKey, candidate_score, pair_score, pairs};
-#[doc(hidden)]
-pub use rename::{FRAME_BUDGET, LISTED_MAX, READ_COST};
 pub use session::{Registration, Registry};
 pub use standing::{Reading, Standing};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
-#[doc(hidden)]
-pub use worktree::PAIRS_KEPT;
 pub use worktree::{
     ChangeOptions, Changes, Counted, INDEXED_EXTENSION, INDEXED_EXTENSIONS, INDEXED_PATH, Indexed,
-    Landmark, Page, SHORT_ID, Worktree, indexed_extensions,
+    Landmark, Page, SHORT_ID, Worktree, indexed_extensions, listing_walks,
 };
