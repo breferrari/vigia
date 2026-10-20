@@ -4248,21 +4248,21 @@ fn release_attested() {
 #[allow(dead_code)]
 mod frames;
 
-/// Each frame picture under `assets/` draws the rows of the snapshot it was
-/// drawn from, so a renderer change cannot leave a stale picture. A failure is
-/// fixed by `cargo run -p xtask --bin frames`.
+/// Each frame picture under `assets/` is exactly what the generator draws from
+/// its snapshot today, every picture there is one the generator knows, and every
+/// docs page that shows one names it with its label. A failure is fixed by
+/// `cargo run -p xtask --bin frames`.
 #[test]
 fn frame_svgs_match() {
     for frame in frames::FRAMES {
         let snapshot = repo_file(&format!("{}/{}", frames::SNAPSHOTS, frame.snapshot));
-        let rows = frames::snapshot_rows(&snapshot);
-        let wanted: Vec<String> = frame
-            .rows
-            .iter()
-            .flat_map(|&(start, end)| start..end)
-            .map(|i| frames::squeezed(&rows[i]))
-            .collect();
         let svg = repo_file(&format!("assets/{}", frame.file));
+        assert!(
+            svg == frames::draw(frame, &snapshot),
+            "{} is not what {} draws today; run `cargo run -p xtask --bin frames`",
+            frame.file,
+            frame.snapshot
+        );
         // XML forbids a double hyphen inside a comment, and a viewer then draws
         // nothing at all.
         for comment in svg.split("<!--").skip(1) {
@@ -4273,14 +4273,37 @@ fn frame_svgs_match() {
                 frame.file
             );
         }
-        let drawn: Vec<String> = frames::svg_rows(&svg)
-            .iter()
-            .map(|row| frames::squeezed(row))
-            .collect();
-        assert_eq!(
-            drawn, wanted,
-            "{} no longer draws the rows of {}; run `cargo run -p xtask --bin frames`",
-            frame.file, frame.snapshot
-        );
+    }
+    let known: Vec<&str> = frames::FRAMES.iter().map(|frame| frame.file).collect();
+    for entry in std::fs::read_dir(repo_root().join("assets"))
+        .expect("read assets/")
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("frame-") {
+            assert!(
+                known.contains(&name.as_str()),
+                "assets/{name} is a frame the generator no longer draws"
+            );
+        }
+    }
+    for entry in std::fs::read_dir(repo_root().join("docs"))
+        .expect("read docs/")
+        .flatten()
+    {
+        let page = std::fs::read_to_string(entry.path()).unwrap_or_default();
+        for frame in frames::FRAMES {
+            let image = format!("(../assets/{})", frame.file);
+            if let Some(at) = page.find(&image) {
+                let alt = page[..at].rsplit("![").next().unwrap_or_default();
+                assert_eq!(
+                    alt.trim_end_matches(']'),
+                    frame.label,
+                    "{} shows {} with alt text that is not its label",
+                    entry.path().display(),
+                    frame.file
+                );
+            }
+        }
     }
 }

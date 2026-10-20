@@ -78,27 +78,16 @@ pub fn snapshot_rows(snapshot: &str) -> Vec<String> {
     body.trim_end_matches('\n')
         .lines()
         .map(|row| {
-            row.strip_prefix('"')
-                .and_then(|r| r.strip_suffix('"'))
-                .unwrap_or(row)
-                .trim_end()
-                .to_owned()
+            // A quoted row, which a wide glyph follows with a `Hidden by` note.
+            match row
+                .strip_prefix('"')
+                .and_then(|r| r.rfind('"').map(|end| &r[..end]))
+            {
+                Some(inner) => inner.trim_end().to_owned(),
+                None => row.trim_end().to_owned(),
+            }
         })
         .collect()
-}
-
-/// The rows a picture draws, as text, in order.
-pub fn svg_rows(svg: &str) -> Vec<String> {
-    svg.split("<text class=\"m row\"")
-        .skip(1)
-        .map(|text| unescape(&untag(text.split("</text>").next().unwrap_or_default())))
-        .collect()
-}
-
-/// A row with its runs of spaces made one, which is how a picture and its
-/// snapshot are compared: a picture places a row's right half by coordinate.
-pub fn squeezed(row: &str) -> String {
-    row.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 const CELL: f64 = 8.1;
@@ -112,8 +101,18 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
         .rows
         .iter()
         .flat_map(|&(start, end)| start..end)
-        .map(|i| every[i].as_str())
+        .map(|i| {
+            every.get(i).map_or_else(
+                || panic!("{} has no row {} for {}", frame.snapshot, i + 1, frame.file),
+                String::as_str,
+            )
+        })
         .collect();
+    assert!(
+        rows.len() >= 2,
+        "{} needs a header and a status row",
+        frame.file
+    );
     let cols = rows.iter().map(|r| r.chars().count()).max().unwrap_or(0);
     let width = (16.0 + cols as f64 * CELL + 16.0).round() as usize;
     let body = (rows.len() - 2) * PITCH + 16;
@@ -237,7 +236,7 @@ fn tones(row: &str, first: bool, last: bool) -> Vec<&'static str> {
     let mut tones = vec![if last { "dim" } else { "fg" }; n];
     // A diff row's tone stops at the first box edge drawn over it.
     let edge = chars.iter().position(|c| "│┌└├".contains(*c)).unwrap_or(n);
-    let trimmed: String = chars.iter().collect::<String>().trim_start().to_owned();
+    let trimmed = row.trim_start();
     let number = chars
         .iter()
         .skip_while(|c| **c == ' ')
@@ -263,19 +262,32 @@ fn tones(row: &str, first: bool, last: bool) -> Vec<&'static str> {
     }
     for (i, c) in chars.iter().enumerate() {
         match c {
-            '┌' | '┐' | '└' | '┘' | '│' | '─' | '├' | '┤' | '_' => {
-                tones[i] = "faint"
-            }
+            '┌' | '┐' | '└' | '┘' | '│' | '─' | '├' | '┤' => tones[i] = "faint",
             '■' => tones[i] = "dim",
             '▁' | '▂' | '▃' | '▄' | '▅' | '▆' | '▇' | '█' | '▸' | '▾' | '↳' | '✕' | '▲' | '▼'
             | '●' | '▶' | '←' => tones[i] = "cyn",
             _ => {}
         }
     }
-    // The counts at the end of a file row.
+    // A run of three or more underscores is an empty sparkline, not text.
+    let mut i = 0;
+    while i < n {
+        let run = chars[i..].iter().take_while(|c| **c == '_').count();
+        if run >= 3 {
+            tones[i..i + run].fill("faint");
+        }
+        i += run.max(1);
+    }
+    let words = words(&chars);
+    // The counts at the end of a file row, a scrollbar glyph beside them or not.
     if !first && !last {
-        let words: Vec<(usize, String)> = words(&chars);
-        if let [.., (a, plus), (b, minus)] = words.as_slice()
+        let counted: Vec<&(usize, String)> = words
+            .iter()
+            .rev()
+            .skip_while(|(_, word)| word.chars().all(|c| "▲▼█│".contains(c)))
+            .take(2)
+            .collect();
+        if let [(b, minus), (a, plus)] = counted.as_slice()
             && plus.starts_with('+')
             && minus.starts_with('-')
             && plus[1..].chars().all(|c| c.is_ascii_digit())
@@ -287,19 +299,21 @@ fn tones(row: &str, first: bool, last: bool) -> Vec<&'static str> {
     }
     // A note's state word on its box edge, and a run's label on its rule.
     if chars.contains(&'─') {
-        for (at, word) in words(&chars) {
+        for (at, word) in &words {
             if ["open", "seen", "changed", "gone", "staged", "unstaged"].contains(&word.as_str()) {
-                tones[at..at + word.chars().count()].fill("con");
+                tones[*at..at + word.chars().count()].fill("con");
             }
         }
     }
     // A file row's kind letter.
-    let lead = chars
+    let list_lead = chars
         .iter()
         .take_while(|c| **c == ' ' || **c == '▸')
         .count();
-    if chars.get(lead).is_some_and(|c| "MADRU".contains(*c)) && chars.get(lead + 1) == Some(&' ') {
-        tones[lead] = "dim";
+    if chars.get(list_lead).is_some_and(|c| "MADRU".contains(*c))
+        && chars.get(list_lead + 1) == Some(&' ')
+    {
+        tones[list_lead] = "dim";
     }
     tones
 }
@@ -327,26 +341,4 @@ fn escape(text: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
-}
-
-fn unescape(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-        .replace("&amp;", "&")
-}
-
-fn untag(element: &str) -> String {
-    let mut out = String::new();
-    let mut inside = true;
-    for ch in element.chars() {
-        match ch {
-            '>' if inside => inside = false,
-            '<' => inside = true,
-            _ if !inside => out.push(ch),
-            _ => {}
-        }
-    }
-    out
 }

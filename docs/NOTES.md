@@ -23,7 +23,7 @@ Every note draws under its line with one word for where it stands.
 
 Four notes on one file, each in a different state:
 
-![The vigia pane with one changed file carrying four notes: one whose line has left the diff, drawn under the file&#x27;s heading and marked gone; one the agent has read and answered, marked seen with its reply under it; one on the changed line, marked open; and one whose line was edited under it, marked changed.](../assets/frame-note-states.svg)
+![The vigia pane with one changed file carrying four notes: one whose line has left the diff, drawn under the file's heading and marked gone; one the agent has read and answered, marked seen with its reply under it; one on the changed line, marked open; and one whose line was edited under it, marked changed.](../assets/frame-note-states.svg)
 
 | | |
 |---|---|

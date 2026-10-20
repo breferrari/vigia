@@ -247,9 +247,9 @@ These pages track `main`. For a released version, browse its tag.
 
 **Does it go online?** Once per start, to ask crates.io whether a newer release exists. `VIGIA_UPDATE=off` turns that off. Nothing else leaves the machine.
 
-**Does it need git-lfs?** No. The pane never starts `git-lfs`, and from 1.2.0 (unreleased) it reads an LFS image from the local LFS store.
+**Does it need git-lfs?** No. The pane never starts `git-lfs`, and it reads an LFS image from the local LFS store (from 1.2.0, unreleased).
 
-**Does it work on Windows?** Yes. Use the PowerShell installer above. From 1.2.0 (unreleased), Windows Terminal 1.22 and later draws pictures sharp.
+**Does it work on Windows?** Yes. Use the PowerShell installer above. Windows Terminal 1.22 and later draws pictures sharp (from 1.2.0, unreleased).
 
 **Which terminals draw sharp pictures?** (from 1.2.0, unreleased)
 
