@@ -17,7 +17,7 @@ Take **one** task from `ROADMAP.md` and carry it to merged. Do not take part of 
 > - **The tools are pre-authorized.** The request to run this skill is also the request to run `/simplify`, `/two-axis-review`, `/code-review` and the agents that they start.
 > - **Apply review findings without asking.** Fix each finding that is worth a fix. In the PR body, list each finding that you skip, with a one-line reason. In a core area (step 6), if you cannot name why a finding is wrong, fix it. A finding that declines or narrows what the reader asked for is stop 4 below. Do not apply it as a fix.
 > - **A documented choice wins.** Take it and name it in the report. A documented refusal is a reason with a date. Make sure that the reason is still true (step 3).
-> - **An open choice goes to the branch that delivers what was asked.** Finish the pass and put the question in the report. Do not build less to be safe. A missing feature gives the reader nothing to review. The reader can reject an extra feature in review.
+> - **An open choice goes to the branch that delivers what was asked.** Finish the pass and put the question in the report. Do not build less to be safe. A missing feature gives the reader nothing to review.
 >
 > Four things stop the pass, and all four are about *what*:
 >
@@ -71,7 +71,7 @@ Take the **topmost unstarted row** in the `ROADMAP.md` section `next.sh` named. 
 ### Declines
 
 - Reach a decline early. Whether the reason holds is a question of fact.
-- A decline has a higher bar than a build: its reason must survive a check. A bad build is visible in review. A bad refusal is not visible, and no gate can find a feature that nobody built. "It costs a wake", "it needs a timer" and "no API reports that" are claims with answers. All three were wrong in this repo before.
+- A decline has a higher bar than a build: its reason must survive a check. A bad build is visible in review. A bad refusal is not visible, and no gate can find a feature that nobody built. "It costs a wake", "it needs a timer" and "no API reports that" are claims with answers.
 - If the reader asked for the thing, build it. "Possible, affordable, but I prefer another design" is a preference, not a reason.
 - Put the reason in `SPEC.md` in the fewest words that evidence can prove false. Put the evidence in `RULINGS.md`.
 
@@ -88,7 +88,7 @@ For an issue with the `decision` label:
 
 ## 2. Load the context
 
-Read the issue first. For a research or look-and-feel task, next find how other tools solve the problem. Then read the `SPEC.md` sections that the issue touches and the commits that changed those sections. This order keeps the record from limiting the options.
+Read the issue first. For a research or look-and-feel task, next find how other tools solve the problem. Then read the `SPEC.md` sections that the issue touches and the commits that changed those sections.
 
 Then query `vigil` for the three things that the repo does not hold:
 
@@ -96,7 +96,7 @@ Then query `vigil` for the three things that the repo does not hold:
 - Lessons from other projects, for example a `gix` limitation or a measurement trap.
 - History from before the code, for example why the product is monitor-class.
 
-Use `search` for the decision you will change. `recall` is often empty, and an empty result means nothing. Strategic context can leak into public text that you write with it in mind. The commit guard misses it.
+Know which of the three you need. Use `search` for the decision you will change. `recall` is often empty, and an empty result means nothing. Strategic context can leak into public text that you write with it in mind. The commit guard misses it.
 
 ## 3. Plan, and wait for approval
 
@@ -114,7 +114,7 @@ The plan contains these parts:
 
 Measure to learn the answer. Do not run a measurement that can only support a no.
 
-The same holds after the plan. A claim about how something outside the repo behaves, in a question to the reader, a ruling request, a review answer or a report, carries its source, or is marked *unverified* and settled before anything is built on it.
+The same holds after the plan. A claim about how something outside the repo behaves, in a question to the reader, a ruling request, a review answer or a report, carries its source, or is marked *unverified* and settled before anything is built on it. *Ruled 2026-10-20, reader.* User-facing: none.
 
 **One fresh context must hold the work.** The context must hold the issue, the spec sections, the changed files and the new tests. It must also have room to think. If it cannot, split the issue into child issues. Each child needs a full path through spec, code and gates. Mark which child blocks which. A split is stop 2. Show the split in the plan, and file the child issues after the reader approves. For a wide mechanical refactor, use expand then contract: add the new form, move the call sites in batches, then delete the old form.
 
@@ -164,7 +164,7 @@ Then prove the result:
 
 ## 7. Mark ready and merge
 
-Before `gh pr ready`, put exactly one of the labels `release` or `internal` on the PR. The label follows the changed paths, not what a user can see. Any path under `crates/*/src/` or `crates/*/assets/`, a dependency the binary builds with in `Cargo.toml` or `Cargo.lock`, or install (the `dist` metadata in `Cargo.toml`, `release.yml`) makes the PR `release`, a comment or a refactor included, because the binary changed. Everything else, which is process, CI, skills, `SPEC.md`, `ROADMAP.md`, tests and gates, is `internal`. Ruled 2026-09-30, reader. User-facing: none. A `release` PR carries `Release-note: <one line the user can read>` in a commit body. An `internal` PR carries `Release-note: none`. Start an `internal` title with its kind: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:` or `chore:`. Start a `release` title with `fix:` for a defect or `feat:` for a new feature.
+Before `gh pr ready`, put exactly one of the labels `release` or `internal` on the PR with `gh pr edit <n> --add-label <label>`. The label follows the changed paths, not what a user can see. Any path under `crates/*/src/` or `crates/*/assets/`, a dependency the binary builds with in `Cargo.toml` or `Cargo.lock`, or install (the `dist` metadata in `Cargo.toml`, `release.yml`) makes the PR `release`, a comment or a refactor included, because the binary changed. Everything else, which is process, CI, skills, `SPEC.md`, `ROADMAP.md`, tests and gates, is `internal`. Ruled 2026-09-30, reader. User-facing: none. A `release` PR carries `Release-note: <one line the user can read>` in a commit body. An `internal` PR carries `Release-note: none`. Start an `internal` title with its kind: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:` or `chore:`. Start a `release` title with `fix:` for a defect or `feat:` for a new feature.
 
 Before `gh pr ready`, name the commit each step 6 review read; a later code commit is reviewed first. `gh pr ready` starts the matrix, so mark the PR ready once, after the local suite is green and the plan diff is clean.
 
