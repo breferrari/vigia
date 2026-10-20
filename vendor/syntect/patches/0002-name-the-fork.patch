@@ -1,0 +1,49 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 6182a06..e27d2e1 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -11,7 +11,7 @@
+ 
+ [package]
+ edition = "2021"
+-name = "syntect"
++name = "vigia-syntect"
+ version = "5.3.0"
+ authors = ["Tristan Hume <tristan@thume.ca>"]
+ build = false
+@@ -20,14 +20,17 @@ exclude = [
+     "/scripts/*",
+     "/Makefile",
+     "/codecov.yml",
++    "/Cargo.toml.orig",
++    "/PATCHES.md",
++    "/patches/*",
+ ]
+ autolib = false
+ autobins = false
+ autoexamples = false
+ autotests = false
+ autobenches = false
+-description = "library for high quality syntax highlighting and code intelligence using Sublime Text's grammars"
+-documentation = "https://docs.rs/syntect"
++description = "syntect 5.3.0 with the patches vigia ships, until upstream releases them. Use syntect instead."
++documentation = "https://docs.rs/vigia-syntect"
+ readme = "Readme.md"
+ keywords = [
+     "syntax",
+@@ -42,7 +45,7 @@ categories = [
+     "text-processing",
+ ]
+ license = "MIT"
+-repository = "https://github.com/trishume/syntect"
++repository = "https://github.com/breferrari/vigia"
+ 
+ [package.metadata.docs.rs]
+ features = ["metadata"]
+@@ -263,3 +266,6 @@ opt-level = 2
+ 
+ [profile.dev.package.regex-syntax]
+ opt-level = 2
++
++[lints.rust]
++mismatched_lifetime_syntaxes = "allow"

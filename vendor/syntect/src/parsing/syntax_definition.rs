@@ -269,11 +269,14 @@ impl MatchPattern {
     /// Used by the parser to compile a regex which needs to reference
     /// regions from another matched pattern.
     pub fn regex_with_refs(&self, region: &Region, text: &str) -> Regex {
-        let new_regex = substitute_backrefs_in_regex(self.regex.regex_str(), |i| {
-            region.pos(i).map(|(start, end)| escape(&text[start..end]))
-        });
+        Regex::new(self.regex_str_with_refs(region, text))
+    }
 
-        Regex::new(new_regex)
+    /// The pattern `regex_with_refs` would compile, without compiling it.
+    pub(crate) fn regex_str_with_refs(&self, region: &Region, text: &str) -> String {
+        substitute_backrefs_in_regex(self.regex.regex_str(), |i| {
+            region.pos(i).map(|(start, end)| escape(&text[start..end]))
+        })
     }
 
     pub fn regex(&self) -> &Regex {
