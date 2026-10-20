@@ -806,12 +806,9 @@ impl<'w> Frame<'w> {
         let what = if let Some(measured) = self.spans.get_mut(change)
             && let Some(taken) = measured.taken.as_ref()
         {
-            let mut awaited = 0;
-            let what = match verdict(taken, change, now, &mut fresh) {
-                Verdict::Keep if taken.arrived(&mut awaited) => Verdict::Remeasure,
-                what => what,
-            };
-            self.stats.probes += awaited;
+            // An arriving object fills only an image side, whose span is `binary`
+            // either way; `diff` reads the picture again.
+            let what = verdict(taken, change, now, &mut fresh);
             if what != Verdict::Remeasure {
                 measured.answered = true;
             }

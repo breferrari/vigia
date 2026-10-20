@@ -1468,7 +1468,10 @@ fn store_armed_once() {
 
     for round in 0..3 {
         scratch.write("a.txt", format!("{round}\n"));
-        assert!(tick_within(&mut watcher, SETTLE).is_some(), "the write did not tick");
+        assert!(
+            tick_within(&mut watcher, SETTLE).is_some(),
+            "the write did not tick"
+        );
         while tick_within(&mut watcher, IDLE).is_some() {}
     }
     assert_eq!(
@@ -1476,5 +1479,28 @@ fn store_armed_once() {
         1,
         "the store was armed again: {:?}",
         watcher.store_watched()
+    );
+}
+
+/// A store inside the worktree is under the tree's watch, and its directories
+/// appearing never arm one of its own.
+#[test]
+fn inside_store_never_armed() {
+    let scratch = Scratch::new("watch-lfs-inside");
+    scratch.write("a.txt", "x\n");
+    scratch.write(".gitattributes", LFS_LINE);
+    scratch.commit_all("initial");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    land_object(&scratch.path_of(".git/lfs"));
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the object did not tick"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    assert!(
+        !watcher.store_wanted(),
+        "a store inside the tree armed a watch of its own"
     );
 }
