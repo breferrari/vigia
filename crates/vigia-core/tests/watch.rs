@@ -1207,11 +1207,10 @@ fn arming() -> Duration {
 }
 
 /// Drive `watcher` until its store's own watch covers exactly `paths`, since a
-/// finished arm is only taken while it waits for a tick. Says whether it ticked.
-fn store_covers(watcher: &mut Watcher<'_>, paths: &[&std::path::Path], within: Duration) -> bool {
+/// finished arm is only taken while it waits for a tick.
+fn store_covers(watcher: &mut Watcher<'_>, paths: &[&std::path::Path], within: Duration) {
     let canonical = |path: &std::path::Path| path.canonicalize().ok();
     let deadline = Instant::now() + within;
-    let mut ticked = false;
     loop {
         let watched = watcher.store_watched();
         if watched.len() == paths.len()
@@ -1221,13 +1220,13 @@ fn store_covers(watcher: &mut Watcher<'_>, paths: &[&std::path::Path], within: D
                     .any(|held| canonical(held) == canonical(path))
             })
         {
-            return ticked;
+            return;
         }
         assert!(
             Instant::now() < deadline,
             "the store watched {watched:?}, not {paths:?}"
         );
-        ticked |= tick_within(watcher, Duration::from_millis(50)).is_some();
+        let _ = tick_within(watcher, Duration::from_millis(50));
     }
 }
 
@@ -1242,14 +1241,13 @@ fn lfs_storage_write_ticks() {
     store_covers(&mut watcher, &[holder.path()], arming());
 
     land_object(&store);
-    let mut ticked = store_covers(&mut watcher, &[&store.join("objects")], arming());
-    while tick_within(&mut watcher, IDLE).is_some() {
-        ticked = true;
-    }
+    // Waited on directly: a stop mid-burst, as `store_covers` sends, drops the tick.
     assert!(
-        ticked,
+        tick_within(&mut watcher, arming()).is_some(),
         "the first object, landing as its store armed, produced no tick"
     );
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
+    while tick_within(&mut watcher, IDLE).is_some() {}
     std::fs::write(store.join(OBJECT).with_extension("next"), "more\n").expect("second");
     assert!(
         tick_within(&mut watcher, SETTLE).is_some(),
