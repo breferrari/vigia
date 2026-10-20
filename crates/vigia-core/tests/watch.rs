@@ -1197,8 +1197,14 @@ const LFS_LINE: &str = "*.png filter=lfs diff=lfs merge=lfs -text\n";
 
 /// Only a guard against a hang: a passing wait returns when the arm does. Each
 /// arm restarts a macOS event stream, which took tens of seconds with six
-/// watch suites running at once.
-const ARMING: Duration = Duration::from_secs(180);
+/// watch suites running at once. `VIGIA_TEST_CEILING` (seconds) shortens it for
+/// a mutation run, where the hang is the kill.
+fn arming() -> Duration {
+    std::env::var("VIGIA_TEST_CEILING")
+        .ok()
+        .and_then(|secs| secs.parse().ok())
+        .map_or(Duration::from_secs(180), Duration::from_secs)
+}
 
 /// Drive `watcher` until its store's own watch covers exactly `paths`, since a
 /// finished arm is only taken while it waits for a tick. Says whether it ticked.
@@ -1233,10 +1239,10 @@ fn lfs_storage_write_ticks() {
     let scratch = lfs_scratch("watch-lfs-storage-repo", ".gitattributes", LFS_LINE, &store);
     let worktree = scratch.worktree();
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
-    store_covers(&mut watcher, &[holder.path()], ARMING);
+    store_covers(&mut watcher, &[holder.path()], arming());
 
     land_object(&store);
-    let mut ticked = store_covers(&mut watcher, &[&store.join("objects")], ARMING);
+    let mut ticked = store_covers(&mut watcher, &[&store.join("objects")], arming());
     while tick_within(&mut watcher, IDLE).is_some() {
         ticked = true;
     }
@@ -1264,10 +1270,10 @@ fn lfs_ancestor_released() {
     );
     let worktree = scratch.worktree();
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
-    store_covers(&mut watcher, &[holder.path()], ARMING);
+    store_covers(&mut watcher, &[holder.path()], arming());
 
     std::fs::create_dir_all(store.join("objects")).expect("the store");
-    store_covers(&mut watcher, &[&store.join("objects")], ARMING);
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
 }
 
 #[test]
@@ -1281,7 +1287,7 @@ fn linked_lfs_store_ticks() {
     store_covers(
         &mut watcher,
         &[&scratch.path_of(".git/lfs/objects")],
-        ARMING,
+        arming(),
     );
     while tick_within(&mut watcher, IDLE).is_some() {}
 
@@ -1305,7 +1311,7 @@ fn nested_lfs_attributes_arm() {
     );
     let worktree = scratch.worktree();
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
-    store_covers(&mut watcher, &[&store.join("objects")], ARMING);
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
     while tick_within(&mut watcher, IDLE).is_some() {}
 
     land_object(&store);
@@ -1379,7 +1385,7 @@ fn lfs_adopted_mid_session_arms() {
         tick_within(&mut watcher, SETTLE).is_some(),
         "the attributes write produced no tick"
     );
-    store_covers(&mut watcher, &[&store.join("objects")], ARMING);
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
     while tick_within(&mut watcher, IDLE).is_some() {}
     land_object(&store);
     assert!(

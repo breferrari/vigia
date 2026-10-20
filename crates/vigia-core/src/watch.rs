@@ -1147,7 +1147,13 @@ mod tests {
     }
 
     /// Only a guard against a hang: a passing wait returns when the arm does.
-    const ARMING: Duration = Duration::from_secs(60);
+    /// `VIGIA_TEST_CEILING` (seconds) shortens it for a mutation run.
+    fn arming() -> Duration {
+        std::env::var("VIGIA_TEST_CEILING")
+            .ok()
+            .and_then(|secs| secs.parse().ok())
+            .map_or(Duration::from_secs(60), Duration::from_secs)
+    }
 
     /// A store arm that fails as a full inotify table does.
     #[test]
@@ -1160,7 +1166,7 @@ mod tests {
             Err(notify::Error::new(notify::ErrorKind::MaxFilesWatch))
         });
         assert!(
-            ticks_within(&mut watcher, ARMING),
+            ticks_within(&mut watcher, arming()),
             "the failure did not tick"
         );
         let notice = watcher.take_store_notice().expect("no notice");
@@ -1219,7 +1225,7 @@ mod tests {
         });
         std::fs::write(store.join("objects").join("object"), "x\n").expect("write");
         assert!(
-            ticks_within(&mut watcher, ARMING),
+            ticks_within(&mut watcher, arming()),
             "an object landing during the arm produced no tick"
         );
     }
