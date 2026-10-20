@@ -231,20 +231,12 @@ fn check_drawable(is_terminal: bool) -> io::Result<()> {
     }
 }
 
-/// The writer's wakes, for a session nobody waits on.
-fn unheard() -> crate::writer::Wakes {
-    crate::writer::Wakes {
-        cells: Box::new(|| {}),
-        lost: Box::new(|| {}),
-    }
-}
-
 /// For a test in a child process: take the terminal, hand the writer a frame
 /// that opens a Kitty image and never ends it, and panic while it is written.
 #[doc(hidden)]
 pub fn panic_mid_frame() {
     install_panic_hook();
-    let mut session = Session::enter(unheard()).expect("take the terminal");
+    let mut session = Session::enter(crate::writer::Wakes::none()).expect("take the terminal");
     let mut frame = b"\x1b_Ga=t,f=32,s=400,v=400,i=77,q=2,m=1;".to_vec();
     frame.extend(std::iter::repeat_n(b'A', 300_000));
     let out = session.screen().backend_mut();
@@ -269,7 +261,7 @@ pub fn output_flags() -> (bool, bool) {
             .contains(rustix::fs::OFlags::NONBLOCK)
     };
     let before = blocking();
-    let session = Session::enter(unheard()).expect("take the terminal");
+    let session = Session::enter(crate::writer::Wakes::none()).expect("take the terminal");
     let during = blocking();
     drop(session);
     (before, during)
@@ -1211,6 +1203,36 @@ mod tests {
         check_drawable(true).expect("a terminal is drawable");
     }
 
+    /// Every source file the crate ships, for the scans below.
+    const SOURCES: [(&str, &str); 26] = [
+        ("lib.rs", include_str!("lib.rs")),
+        ("main.rs", include_str!("main.rs")),
+        ("app.rs", include_str!("app.rs")),
+        ("clipboard.rs", include_str!("clipboard.rs")),
+        ("colour.rs", include_str!("colour.rs")),
+        ("config.rs", include_str!("config.rs")),
+        ("glyphs.rs", include_str!("glyphs.rs")),
+        ("icons.rs", include_str!("icons.rs")),
+        ("input.rs", include_str!("input.rs")),
+        ("mcp.rs", include_str!("mcp.rs")),
+        ("memory.rs", include_str!("memory.rs")),
+        ("menu.rs", include_str!("menu.rs")),
+        ("motion.rs", include_str!("motion.rs")),
+        ("notes.rs", include_str!("notes.rs")),
+        ("pictures.rs", include_str!("pictures.rs")),
+        ("positions.rs", include_str!("positions.rs")),
+        ("post.rs", include_str!("post.rs")),
+        ("quote.rs", include_str!("quote.rs")),
+        ("render.rs", include_str!("render.rs")),
+        ("signal.rs", include_str!("signal.rs")),
+        ("state.rs", include_str!("state.rs")),
+        ("terminal.rs", include_str!("terminal.rs")),
+        ("theme.rs", include_str!("theme.rs")),
+        ("update.rs", include_str!("update.rs")),
+        ("view.rs", include_str!("view.rs")),
+        ("writer.rs", include_str!("writer.rs")),
+    ];
+
     #[test]
     fn no_stray_writes() {
         // Every byte after the takeover goes through the writer. These may touch
@@ -1218,45 +1240,8 @@ mod tests {
         // which speaks JSON there and draws nothing, this file's takeover and
         // queries, and the writer.
         const ALLOWED: [&str; 4] = ["main.rs", "mcp.rs", "terminal.rs", "writer.rs"];
-        const SOURCES: [(&str, &str); 22] = [
-            ("lib.rs", include_str!("lib.rs")),
-            ("app.rs", include_str!("app.rs")),
-            ("clipboard.rs", include_str!("clipboard.rs")),
-            ("colour.rs", include_str!("colour.rs")),
-            ("config.rs", include_str!("config.rs")),
-            ("glyphs.rs", include_str!("glyphs.rs")),
-            ("icons.rs", include_str!("icons.rs")),
-            ("input.rs", include_str!("input.rs")),
-            ("memory.rs", include_str!("memory.rs")),
-            ("menu.rs", include_str!("menu.rs")),
-            ("motion.rs", include_str!("motion.rs")),
-            ("notes.rs", include_str!("notes.rs")),
-            ("pictures.rs", include_str!("pictures.rs")),
-            ("positions.rs", include_str!("positions.rs")),
-            ("post.rs", include_str!("post.rs")),
-            ("quote.rs", include_str!("quote.rs")),
-            ("render.rs", include_str!("render.rs")),
-            ("signal.rs", include_str!("signal.rs")),
-            ("state.rs", include_str!("state.rs")),
-            ("theme.rs", include_str!("theme.rs")),
-            ("update.rs", include_str!("update.rs")),
-            ("view.rs", include_str!("view.rs")),
-        ];
-        let lib = include_str!("lib.rs");
-        for module in lib.lines().filter_map(|line| {
-            let line = line.trim();
-            line.strip_prefix("mod ")
-                .or_else(|| line.strip_prefix("pub mod "))
-                .and_then(|rest| rest.strip_suffix(';'))
-        }) {
-            let file = format!("{module}.rs");
-            assert!(
-                ALLOWED.contains(&file.as_str()) || SOURCES.iter().any(|(name, _)| *name == file),
-                "`mod {module};` is neither scanned nor allowed to write; add it to SOURCES"
-            );
-        }
         let mut found = Vec::new();
-        for (name, source) in SOURCES {
+        for (name, source) in SOURCES.iter().filter(|(name, _)| !ALLOWED.contains(name)) {
             // Tests may print: their output is the test runner's, not the pane's.
             let shipped = source
                 .split("#[cfg(test)]\nmod tests")
@@ -1289,34 +1274,6 @@ mod tests {
     fn no_exit_path_in_the_shell_skips_the_destructors() {
         // The structural half of "the terminal is restored on every exit". What makes
         // that true is that every exit drops `Shell`, which owns the `Session`.
-        const SOURCES: [(&str, &str); 26] = [
-            ("lib.rs", include_str!("lib.rs")),
-            ("main.rs", include_str!("main.rs")),
-            ("app.rs", include_str!("app.rs")),
-            ("clipboard.rs", include_str!("clipboard.rs")),
-            ("colour.rs", include_str!("colour.rs")),
-            ("config.rs", include_str!("config.rs")),
-            ("glyphs.rs", include_str!("glyphs.rs")),
-            ("icons.rs", include_str!("icons.rs")),
-            ("input.rs", include_str!("input.rs")),
-            ("mcp.rs", include_str!("mcp.rs")),
-            ("memory.rs", include_str!("memory.rs")),
-            ("menu.rs", include_str!("menu.rs")),
-            ("motion.rs", include_str!("motion.rs")),
-            ("notes.rs", include_str!("notes.rs")),
-            ("pictures.rs", include_str!("pictures.rs")),
-            ("positions.rs", include_str!("positions.rs")),
-            ("post.rs", include_str!("post.rs")),
-            ("quote.rs", include_str!("quote.rs")),
-            ("render.rs", include_str!("render.rs")),
-            ("signal.rs", include_str!("signal.rs")),
-            ("state.rs", include_str!("state.rs")),
-            ("terminal.rs", include_str!("terminal.rs")),
-            ("theme.rs", include_str!("theme.rs")),
-            ("update.rs", include_str!("update.rs")),
-            ("view.rs", include_str!("view.rs")),
-            ("writer.rs", include_str!("writer.rs")),
-        ];
 
         // The list above is checked against `lib.rs` rather than trusted, so a
         // module added later cannot be quietly exempt from the scan.

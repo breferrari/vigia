@@ -26,6 +26,17 @@ pub struct Wakes {
     pub lost: Box<dyn Fn() + Send>,
 }
 
+impl Wakes {
+    /// Wakes nobody listens for.
+    #[must_use]
+    pub fn none() -> Self {
+        Self {
+            cells: Box::new(|| {}),
+            lost: Box::new(|| {}),
+        }
+    }
+}
+
 /// State the loop and the writer share.
 #[derive(Default)]
 struct Shared {
@@ -178,7 +189,10 @@ impl Write for Sink {
         if self.pending.is_empty() {
             return Ok(());
         }
-        let bytes = std::mem::take(&mut self.pending);
+        let bytes = std::mem::replace(
+            &mut self.pending,
+            Vec::with_capacity(self.shared.last.load(Ordering::Acquire)),
+        );
         let Some(queue) = self.queue.as_ref() else {
             return Err(io::Error::from(io::ErrorKind::BrokenPipe));
         };
@@ -259,10 +273,7 @@ impl Out for Tty {
     fn write_some(&mut self, bytes: &[u8], wait: Duration) -> io::Result<usize> {
         use rustix::event::{PollFd, PollFlags, Timespec, poll};
         let mut fds = [PollFd::new(&self.file, PollFlags::OUT)];
-        let timeout = Timespec::try_from(wait).unwrap_or(Timespec {
-            tv_sec: 0,
-            tv_nsec: 50_000_000,
-        });
+        let timeout = Timespec::try_from(wait.min(POLL)).expect("under a second");
         match poll(&mut fds, Some(&timeout)) {
             Ok(0) => return Ok(0),
             Ok(_) => {}
@@ -416,18 +427,11 @@ mod tests {
         }
     }
 
-    fn quiet() -> Wakes {
-        Wakes {
-            cells: Box::new(|| {}),
-            lost: Box::new(|| {}),
-        }
-    }
-
     #[test]
     fn writer_order() {
         let out = Taken::default();
         out.room.store(usize::MAX, Ordering::Release);
-        let writer = Writer::start(out.clone(), quiet());
+        let writer = Writer::start(out.clone(), Wakes::none());
         let mut sink = writer.sink();
         let mut sent = Vec::new();
         for n in 0..200u32 {
@@ -487,7 +491,7 @@ mod tests {
     fn stop_bounded() {
         // A terminal that never reads: the stop gives up within its limit.
         let out = Taken::default();
-        let mut writer = Writer::start(out, quiet());
+        let mut writer = Writer::start(out, Wakes::none());
         let mut sink = writer.sink();
         sink.write_all(&[b'x'; 100_000]).expect("write");
         sink.flush().expect("flush");
