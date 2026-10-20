@@ -1,0 +1,28 @@
+---
+source: crates/vigia/tests/notes.rs
+expression: "typed.rows().join(\"\\n\")"
+---
+  fixture · current ▾ · 1 changed                                     +1    -1  
+                                                                                
+▸ M src/watch.rs                         ■■■■■■■■■■■■ ____________    +1    -1  
+────────────────────────────────────────────────────────────────────────────────
+  M src/watch.rs                         ■■■■■■■■■■■■ ____________    +1    -1  
+  @@ -2,7 +2,7 @@                                                               
+  2   line 2                                                                    
+  3   line 3                                                                    
+  4   line 4                                                                    
+  5 - line 5                                                                    
+  5 +     margin.checked_mul(2).unwrap_or(margin)                               
+      ┌ note · src/watch.rs:5 ───────────────────────────────────────────────┐  
+      │ should this reset on every event, or just the fir                    │  
+      └ Enter sends · Esc cancels ───────────────────────────────────────────┘  
+  6   line 6                                                                    
+  7   line 7                                                                    
+  8   line 8                                                                    
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+────────────────────────────────────────────────────────────────────────────────
+  q quit · f follow · m config · ? keys                          follow ▶  1/1

@@ -7673,3 +7673,45 @@ fn rows_follow_the_window() {
         view.built
     );
 }
+
+/// One file carrying a note in every state, for `docs/NOTES.md`.
+#[test]
+fn note_states_frame() {
+    let scratch = fixture("notes-states-frame");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let mut put = |id: &str, line: u32, text: &str, body: &str, status, reply: Option<&str>| {
+        let mut left = note(id, line, text, body);
+        left.status = status;
+        left.reply = reply.map(str::to_owned);
+        rig.store.put(&left).expect("put");
+    };
+    put("n1", 5, EDITED, "use saturating_mul here", Status::Open, None);
+    put("n2", 3, "line 3", "why keep this line?", Status::Seen, Some("it seeds the margin; kept"));
+    put("n3", 7, "line 7 as it was", "rename this", Status::Open, None);
+    put("n4", 11, "line 11", "check the end", Status::Open, None);
+    rig.reload();
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    let rows: Vec<String> = (0..TALL.height).map(|y| painted.text(y)).collect();
+    insta::assert_snapshot!(rows.join("\n"));
+}
+
+/// The note box open under a line with a sentence half typed, for
+/// `docs/NOTES.md`.
+#[test]
+fn note_box_frame() {
+    let scratch = fixture("notes-box-frame");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, _) = plain.gutter();
+    assert!(rig.press_opens(&plain, left + 1, y));
+    rig.type_text("should this reset on every event, or just the fir");
+    let typed = rig.paint(&mut frame, PANE, Pointing::default());
+    insta::assert_snapshot!(typed.rows().join("\n"));
+}
