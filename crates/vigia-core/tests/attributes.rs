@@ -529,8 +529,9 @@ fn lfs_verdicts_pruned() {
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     assert_eq!(worktree.lfs_cached(), 1, "the setup kept no verdict");
-    // Back to the stored pointer, which the walk no longer flags.
-    scratch.git(&["checkout", "--", "a.png"]);
+    // Back to the stored pointer, which the walk no longer flags. Written
+    // rather than checked out, since checkout would run the broken driver.
+    scratch.write("a.png", support::lfs_pointer(&object, 0xab).1);
     frame.advance().expect("advance after the restore");
     assert_eq!(
         worktree.lfs_cached(),

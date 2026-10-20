@@ -344,7 +344,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in
 | ⬜ | PDF image panels | [#638](https://github.com/breferrari/vigia/issues/638) |
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
 | ✅ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
-| ⬜ | Run no filter driver during status **Found while building #655** | [#659](https://github.com/breferrari/vigia/issues/659) |
+| ✅ | Run no filter driver during status **Found while building #655** | [#659](https://github.com/breferrari/vigia/issues/659) |
 | ⬜ | Redraw an LFS image when its object arrives **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
 | ⬜ | Leave picture rows out of the scrollbar's count **Found by review on #657** | [#660](https://github.com/breferrari/vigia/issues/660) |
 | ⬜ | Resend Kitty images after a tmux reattach **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
