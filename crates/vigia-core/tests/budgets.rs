@@ -1543,8 +1543,9 @@ fn fenced_markdown_budget() {
         at(&fence),
         at(&control)
     );
+    let median = |samples: &Samples| samples.percentile(0.5).expect("samples");
     assert!(
-        at(&control) < at(&fence),
+        median(&control) < median(&fence),
         "the control costs as much as the block, so the gate is not timing the grammar"
     );
     holds_p99(

@@ -3291,21 +3291,24 @@ fn direct_dependencies() -> &'static [(String, bool)] {
         );
         let metadata: serde_json::Value =
             serde_json::from_slice(&output.stdout).expect("cargo metadata answers JSON");
-        // `canonicalize` gives Windows a `\\?\` prefix that metadata's paths lack.
-        let root = repo_root();
-        let vendor = Path::new(root.to_str().expect("a UTF-8 root").trim_start_matches(r"\\?\"))
-            .join("vendor");
+        let members: BTreeSet<&str> = metadata["packages"]
+            .as_array()
+            .expect("metadata lists packages")
+            .iter()
+            .filter_map(|package| package["name"].as_str())
+            .collect();
 
         let found: BTreeSet<(String, bool)> = metadata["packages"]
             .as_array()
             .expect("metadata lists packages")
             .iter()
             .flat_map(|package| package["dependencies"].as_array().expect("a list"))
-            // A fork under `vendor/` is a dependency like any other.
+            // A path dependency on another member is the workspace, not a
+            // dependency; a fork under `vendor/` is one like any other.
             .filter(|dependency| {
-                dependency["path"]
+                !dependency["name"]
                     .as_str()
-                    .is_none_or(|path| Path::new(path).starts_with(&vendor))
+                    .is_some_and(|name| members.contains(name))
             })
             // A renamed dependency by both names, the crate's and the code's.
             .flat_map(|dependency| {
