@@ -3911,6 +3911,7 @@ fn split_actions(
 fn actions_one_version() {
     let mut seen: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
         std::collections::BTreeMap::new();
+    let mut released = std::collections::BTreeSet::new();
     for entry in std::fs::read_dir(repo_root().join(".github/workflows")).expect("the workflows") {
         let path = entry.expect("an entry").path();
         for line in without_comments(&read(&path)).lines() {
@@ -3922,6 +3923,9 @@ fn actions_one_version() {
                 continue;
             };
             if let Some((action, rev)) = target.trim().split_once('@') {
+                if path.ends_with("release.yml") {
+                    released.insert(action.to_owned());
+                }
                 seen.entry(action.to_owned())
                     .or_default()
                     .insert(rev.to_owned());
@@ -3951,21 +3955,11 @@ fn actions_one_version() {
     }
     // Every action release.yml uses is pinned through dist, or the next
     // `dist generate` puts its tag back.
-    let release = without_comments(&repo_file(".github/workflows/release.yml"));
-    for line in release.lines() {
-        let Some(target) = line
-            .trim_start()
-            .trim_start_matches("- ")
-            .strip_prefix("uses:")
-        else {
-            continue;
-        };
-        if let Some((action, _)) = target.trim().split_once('@') {
-            assert!(
-                pins.contains(&format!("\"{action}\"")),
-                "dist does not pin {action}"
-            );
-        }
+    for action in &released {
+        assert!(
+            pins.contains(&format!("\"{action}\"")),
+            "dist does not pin {action}"
+        );
     }
     assert_eq!(
         split_actions(&seen),
@@ -4043,22 +4037,28 @@ fn release_attested() {
         );
     }
     let release = without_comments(&repo_file(".github/workflows/release.yml"));
-    let attesting: Vec<String> = jobs_of(&release)
-        .into_iter()
+    let jobs = jobs_of(&release);
+    let attesting: Vec<&str> = jobs
+        .iter()
         .filter(|(_, block)| block.contains("\"attestations\": \"write\""))
-        .map(|(job, _)| job)
+        .map(|(job, _)| job.as_str())
         .collect();
     assert_eq!(
         attesting,
         ["build-local-artifacts"],
         "the attestation scopes reach other jobs"
     );
-    let (_, build) = jobs_of(&release)
-        .into_iter()
+    let build = jobs
+        .iter()
         .find(|(job, _)| job == "build-local-artifacts")
+        .map(|(_, block)| block.as_str())
         .expect("dist's build job");
     assert!(
         build.contains("uses: actions/attest@"),
         "the build job attests nothing"
+    );
+    assert!(
+        build.contains("Install cargo-auditable"),
+        "the build job builds without cargo-auditable"
     );
 }
