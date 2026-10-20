@@ -103,7 +103,7 @@ Know which of the three you need. Use `search` for the decision that you will ch
 
 Enter plan mode. Do not write code before a person approves the plan. Step 6 compares the shipped work with this plan.
 
-**A pass is time-boxed.** Plan to merge within 3 hours of approval. Mutation is scoped proof, not a completion target: one pass of about 10 mutants on the decisions the PR makes, in 15 minutes or less. A survivor gets a test if that is cheap, or a line in the PR's known limits, and no follow-up issue. An equivalent mutant on code the PR wrote gets that code deleted. One run, never a second "final" round. *Ruled 2026-10-20, reader.* If the pass is not converging at 2 hours, send the coordinator a status with what is left. *Ruled 2026-10-20, reader.* User-facing: none.
+**A pass is time-boxed.** Plan to merge within 3 hours of approval. The clock runs from plan approval and does not restart after a pause; a pass past 3 hours stops, lists what is left, and merges or reports. Mutation is scoped proof, not a completion target: one pass of about 10 mutants on the decisions the PR makes, in 15 minutes or less. A survivor gets a test if that is cheap, or a line in the PR's known limits, and no follow-up issue. An equivalent mutant on code the PR wrote gets that code deleted. One run, never a second "final" round. *Ruled 2026-10-20, reader.* If the pass is not converging at 2 hours, send the coordinator a status with what is left. *Ruled 2026-10-20, reader.* User-facing: none.
 
 The plan contains these parts:
 
