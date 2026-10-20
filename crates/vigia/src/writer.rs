@@ -589,6 +589,22 @@ mod tests {
     }
 
     #[test]
+    fn drop_bounded() {
+        let writer = Writer::start(Taken::default(), Wakes::none());
+        let mut sink = writer.sink();
+        sink.write_all(&[b'x'; 9000]).expect("write");
+        sink.flush().expect("flush");
+        drop(sink);
+        let began = Instant::now();
+        drop(writer);
+        assert!(
+            began.elapsed() < Duration::from_millis(500),
+            "dropping a writer whose terminal never reads took {:?}",
+            began.elapsed()
+        );
+    }
+
+    #[test]
     fn send_not_frame() {
         let out = Taken::default();
         let writer = Writer::start(out, Wakes::none());
