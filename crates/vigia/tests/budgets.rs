@@ -3823,7 +3823,7 @@ fn held_kitty(scratch: &Scratch, rate: u64) -> Held {
 
     // The cursor hide that ends every draw.
     const END: &[u8] = b"\x1b[?25l";
-    const KEYS: usize = 120;
+    const KEYS: usize = 180;
 
     let home = support::TempDir::new("held-home");
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_vigia"));
@@ -3848,10 +3848,10 @@ fn held_kitty(scratch: &Scratch, rate: u64) -> Held {
     let reads: Arc<Mutex<Reads>> = Arc::default();
     let into = Arc::clone(&reads);
     std::thread::spawn(move || {
-        // Paced against the total read, since a sleep per read rounds up to the
-        // scheduler's tick and would read slower than `rate`.
-        let begun = Instant::now();
-        let mut total = 0u64;
+        // Paced against when the reads so far are due, since a sleep per read
+        // rounds up to the scheduler's tick. Never ahead of now, so time spent
+        // idle is not credit to read a burst faster than `rate`.
+        let mut due = Instant::now();
         let mut buffer = [0u8; 4096];
         while let Ok(read) = master.read(&mut buffer) {
             if read == 0 {
@@ -3860,8 +3860,7 @@ fn held_kitty(scratch: &Scratch, rate: u64) -> Held {
             into.lock()
                 .expect("reads")
                 .push((Instant::now(), buffer[..read].to_vec()));
-            total += read as u64;
-            let due = begun + Duration::from_secs_f64(total as f64 / rate as f64);
+            due = due.max(Instant::now()) + Duration::from_secs_f64(read as f64 / rate as f64);
             if let Some(wait) = due.checked_duration_since(Instant::now()) {
                 std::thread::sleep(wait);
             }
@@ -3892,13 +3891,11 @@ fn held_kitty(scratch: &Scratch, rate: u64) -> Held {
     let _ = writer.write_all(b"q");
 
     let reads = reads.lock().expect("reads");
-    let first = reads
-        .iter()
-        .position(|(at, _)| *at >= keys[0])
-        .unwrap_or(reads.len());
+    // From the first paint, since the pictures on screen at the start are sent
+    // before any key.
     let mut ends: Vec<Instant> = Vec::new();
     let mut wire: Vec<u8> = Vec::new();
-    for (at, bytes) in &reads[first..] {
+    for (at, bytes) in reads.iter() {
         let from = wire.len().saturating_sub(END.len() - 1);
         wire.extend_from_slice(bytes);
         let found = wire[from..]
@@ -3977,8 +3974,10 @@ fn held_scroll_kitty() {
             "at {rate} B/s a frame carried {} bytes of transmit, past {TRANSMIT_FRAME}",
             held.frame_transmit
         );
-        assert!(
-            held.begun > 0 && held.begun <= 3 * images,
+        // Every picture reached, and none sent twice: a resend takes a new id.
+        assert_eq!(
+            held.begun,
+            3 * images,
             "at {rate} B/s {} Kitty images were sent for {images} pictures of three panels",
             held.begun
         );
