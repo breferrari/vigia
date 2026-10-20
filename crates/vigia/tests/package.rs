@@ -3586,12 +3586,11 @@ fn jobs_of(workflow: &str) -> Vec<(String, String)> {
         return Vec::new();
     };
     // `jobs:` is the last top-level key in every workflow here.
-    let body = rest;
-    let names = keys_at_indent(body, 2);
+    let names = keys_at_indent(rest, 2);
     names
         .iter()
         .map(|name| {
-            let from = body
+            let from = rest
                 .split_once(&format!("\n  {name}:\n"))
                 .map_or("", |(_, rest)| rest);
             let next = names

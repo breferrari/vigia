@@ -512,17 +512,11 @@ jobs:
   # draft, and a draft cannot be merged in any case, so the run it would be
   # protecting cannot happen. `ready_for_review` is in this workflow's trigger
   # list so the full matrix runs the moment the work is claimed finished.
-  # The suites that read a document, on one platform, for a pull request that
-  # changed only documents. `package.rs::docs_suites_named` holds this list to
-  # the tests that read a document at the repository root or under `docs/`.
-  # The cache is the ubuntu test job's, restored and never saved, so a docs
-  # pull request neither builds cold nor overwrites the fuller cache.
   # **Mutation testing of what the pull request changed.** cargo-mutants
   # mutates only the lines in the diff, and tests each mutant against its own
   # package's suite under the `mutants` nextest profile, which kills a hung test
-  # at 60s. Sharded so no shard passes 30 minutes. Not in `ci complete`'s needs
-  # yet: it reports, it does not block, until its first runs say whether it
-  # should.
+  # at 90s. Sharded so no shard passes 30 minutes. It reports and does not
+  # block: it is not in `ci complete`'s needs.
   mutants:
     name: mutants (shard ${{ matrix.shard }})
     needs: [changes]
@@ -581,6 +575,11 @@ jobs:
           path: mutants.out/
           if-no-files-found: ignore
 
+  # The suites that read a document, on one platform, for a pull request that
+  # changed only documents. `package.rs::docs_suites_named` holds this list to
+  # the tests that read a document at the repository root or under `docs/`.
+  # The cache is the ubuntu test job's, restored and never saved, so a docs
+  # pull request neither builds cold nor overwrites the fuller cache.
   docs:
     name: documents
     needs: [changes]

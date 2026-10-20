@@ -51,14 +51,14 @@ for (const m of battery) {
 
 // The caller's shell, since cmd.exe on Windows may not resolve what Git Bash does.
 const shell = process.env.SHELL || true;
-// Run `line` until it exits or the limit passes; at the limit its whole process
-// tree is killed, since a shell's children outlive the shell. `status` is null
-// when it was stopped.
 let running = null;
+// The whole process tree, since a shell's children outlive the shell.
 const stop = (child) => {
 	if (process.platform === "win32") execSync(`taskkill /T /F /PID ${child.pid}`, { stdio: "ignore" });
 	else process.kill(-child.pid, "SIGKILL");
 };
+// Run `line` until it exits or the limit passes. `status` is null when the limit
+// stopped it.
 function test(line) {
 	return new Promise((resolve) => {
 		const child = spawn(line, { shell, detached: process.platform !== "win32" });

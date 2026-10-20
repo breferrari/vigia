@@ -12,8 +12,8 @@ slow-timeout = { period = "30s", terminate-after = 4 }
 fail-fast = false
 slow-timeout = { period = "30s", terminate-after = 4 }
 
-# For mutation runs, where a hang is the kill: 60s is still above the slowest
-# test, so no correct test is cut short.
+# For mutation runs, where a hang is the kill: 90s, 1.9x the slowest test, so a
+# correct test on a loaded runner is not cut short.
 [profile.mutants]
 fail-fast = true
-slow-timeout = { period = "15s", terminate-after = 4 }
+slow-timeout = { period = "30s", terminate-after = 3 }

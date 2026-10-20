@@ -103,7 +103,7 @@ Know which of the three you need. Use `search` for the decision that you will ch
 
 Enter plan mode. Do not write code before a person approves the plan. Step 6 compares the shipped work with this plan.
 
-**A pass is time-boxed.** Plan to merge within 3 hours of approval. Mutation gets at most 30 minutes, on the behaviour the PR adds or changes. If the pass is not converging at 2 hours, send the coordinator a status with what is left. *Ruled 2026-10-20, reader.*
+**A pass is time-boxed.** Plan to merge within 3 hours of approval. Mutation gets at most 30 minutes, on the behaviour the PR adds or changes. If the pass is not converging at 2 hours, send the coordinator a status with what is left. *Ruled 2026-10-20, reader.* User-facing: none.
 
 The plan contains these parts:
 
