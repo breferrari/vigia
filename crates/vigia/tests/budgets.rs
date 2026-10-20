@@ -3484,14 +3484,19 @@ fn pdf_frame_read() {
         view
     };
     // The first paint a reader sees, cold, in a pane of its own.
-    let (sized, cold_wall, cold_cpu) = pdf_cold_paint(&scratch, pane);
+    let (sized, read, cold_wall, cold_cpu) = pdf_cold_paint(&scratch, pane);
     assert_eq!(
         sized, 5,
         "not every PDF drew a size line, so this would time less"
     );
     eprintln!(
         "note: the first frame with {sized} changed 16 MiB PDFs on screen took {cold_cpu:?} \
-         of thread CPU, {cold_wall:?} on the wall"
+         of thread CPU, {cold_wall:?} on the wall, and read {read} bytes"
+    );
+    // What the CPU gate cannot see: a frame that waited on reading them whole.
+    assert!(
+        read < 1024 * 1024,
+        "the first frame read {read} bytes of five 16 MiB PDFs, more than their headers"
     );
     paint(&mut frame, &mut app, &mut highlighter);
     // Read once more when they settle, as every file read inside the margin is.
@@ -3508,21 +3513,26 @@ fn pdf_frame_read() {
         "I9: the first frame with five changed 16 MiB PDFs on screen took {cold_cpu:?} \
          of thread CPU ({cold_wall:?} on the wall)"
     );
+    let _timed = exclusively_timed();
+    let mut cold = || {
+        let (sized, _, wall, cpu) = pdf_cold_paint(&scratch, pane);
+        assert_eq!(
+            sized, 5,
+            "a fresh pane drew {sized} of five PDFs, so it would time less"
+        );
+        (wall, cpu)
+    };
     let mut colds = Samples::new(COLD_PDF_FRAMES);
     for _ in 0..COLD_PDF_FRAMES {
-        colds.push(pdf_cold_paint(&scratch, pane).1);
+        colds.push(cold().0);
     }
     holds_p99(
         "I9: the first frame of a fresh pane with five changed 16 MiB PDFs on screen",
         budget(I9_FRAME),
         &colds,
         String::new,
-        || {
-            let (_, wall, cpu) = pdf_cold_paint(&scratch, pane);
-            (wall, cpu)
-        },
+        &mut cold,
     );
-    let _timed = exclusively_timed();
     let mut timed = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
         time_cpu(|| {
             paint(frame, app, highlighter);
@@ -3554,9 +3564,9 @@ fn pdf_frame_read() {
 const COLD_PDF_FRAMES: usize = 20;
 
 /// The first frame of a fresh pane over `scratch`'s changed PDFs: how many drew
-/// a size line, and its wall and thread CPU time.
+/// a size line, the bytes it read, and its wall and thread CPU time.
 #[cfg(feature = "pdf")]
-fn pdf_cold_paint(scratch: &Scratch, pane: Rect) -> (usize, Duration, Duration) {
+fn pdf_cold_paint(scratch: &Scratch, pane: Rect) -> (usize, u64, Duration, Duration) {
     use vigia::pictures::{Inks, Pictures};
 
     let worktree = scratch.worktree();
@@ -3607,7 +3617,8 @@ fn pdf_cold_paint(scratch: &Scratch, pane: Rect) -> (usize, Duration, Duration) 
         .iter()
         .filter(|row| matches!(row, Row::Sized { .. }))
         .count();
-    (sized, wall, cpu)
+    let stats = frame.stats();
+    (sized, stats.bytes + stats.measured_bytes, wall, cpu)
 }
 
 fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<u8>) {
