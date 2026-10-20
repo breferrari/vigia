@@ -6,7 +6,6 @@
 //! outcome between them, which is silence.
 
 use std::fmt;
-use std::io::Read;
 
 use crate::colour::override_of;
 
@@ -111,7 +110,10 @@ std::cfg_select! {
     any(target_arch = "x86_64", target_arch = "aarch64") => {
         /// Ask the registry, or answer nothing.
         fn fetch() -> Option<String> {
-            const ENDPOINT: &str = concat!("https://crates.io/api/v1/crates/", env!("CARGO_PKG_NAME"));
+            use std::io::Read;
+
+            const ENDPOINT: &str =
+                concat!("https://crates.io/api/v1/crates/", env!("CARGO_PKG_NAME"));
             // Long enough for a cold handshake on a slow link, short enough that the
             // answer is still about a pane somebody is looking at.
             const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);

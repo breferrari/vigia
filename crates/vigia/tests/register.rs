@@ -143,8 +143,8 @@ fn is_comment(line: &str) -> bool {
 /// `# Errors`, `# Panics` and `# Safety` sections are excluded, capped at
 /// [`COMPELLED_LINES`] each. They are not discretionary: `clippy`'s
 /// `missing_errors_doc`, `missing_panics_doc`, `missing_safety_doc` and
-/// `undocumented_unsafe_blocks` fail the build without them, and CI runs
-/// `-D warnings`. Counting them here put two gates in opposition, and the only
+/// `undocumented_unsafe_blocks` fail the build without them, and CI denies
+/// warnings. Counting them here put two gates in opposition, and the only
 /// way a session could satisfy both was to delete an ordinary comment that
 /// explained something real in order to pay for a section a lint demanded. That
 /// is the ratchet buying worse code, which is the opposite of its job — it

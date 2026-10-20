@@ -11,6 +11,7 @@ mod repo;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
+use std::assert_matches;
 use vigia::{
     Action, App, Chrome, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, HeatBucket, ListRow, Pointing,
     Position, Regions, Row, Theme, View, action_for, body_layout, regions, render,
@@ -929,19 +930,15 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
     // The last column of the rail and the first of the diff, which is the one
     // pair a row cannot tell apart in this layout and the only pair that could
     // ever have been got wrong.
-    assert!(
-        matches!(
-            action_for(&event(boundary - 1, row), told),
-            Some(Action::ScrollList(_))
-        ),
+    assert_matches!(
+        action_for(&event(boundary - 1, row), told),
+        Some(Action::ScrollList(_)),
         "a wheel on the rail's last column did not reach the map: {:?}",
         action_for(&event(boundary - 1, row), told)
     );
-    assert!(
-        matches!(
-            action_for(&event(boundary, row), told),
-            Some(Action::Scroll(_))
-        ),
+    assert_matches!(
+        action_for(&event(boundary, row), told),
+        Some(Action::Scroll(_)),
         "a wheel on the diff's first column did not reach the diff: {:?}",
         action_for(&event(boundary, row), told)
     );
@@ -962,11 +959,9 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         Some(Action::ListRow(1)),
         "clicking the rail's second row did not jump the diff to its second file"
     );
-    assert!(
-        matches!(
-            action_for(&click(boundary + 2, told.list.top + 1), told),
-            None | Some(Action::DiffTo(_))
-        ),
+    assert_matches!(
+        action_for(&click(boundary + 2, told.list.top + 1), told),
+        None | Some(Action::DiffTo(_)),
         "clicking inside the diff was routed to the map: {:?}",
         action_for(&click(boundary + 2, told.list.top + 1), told)
     );
@@ -979,8 +974,9 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         "the fixture's rail is as tall as its column, so the row below it is not \
          reachable and this half asserts nothing"
     );
-    assert!(
-        matches!(action_for(&event(2, empty), told), Some(Action::Scroll(_))),
+    assert_matches!(
+        action_for(&event(2, empty), told),
+        Some(Action::Scroll(_)),
         "a wheel below the rail's last file did not fall through to the diff: {:?}",
         action_for(&event(2, empty), told)
     );

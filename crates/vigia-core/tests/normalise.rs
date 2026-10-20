@@ -2,6 +2,7 @@
 
 mod support;
 
+use std::assert_matches;
 use support::{Numstat, Scratch, changes_sorted, delta, numbered_lines};
 use vigia_core::{Error, Frame, Worktree};
 
@@ -437,8 +438,9 @@ fn a_filter_that_cannot_be_built_fails_the_diff() {
     let error = worktree
         .diff(&change)
         .expect_err("an unbuildable filter was reported as a successful diff");
-    assert!(
-        matches!(error, Error::FilterSetup(_)),
+    assert_matches!(
+        error,
+        Error::FilterSetup(_),
         "reported {error:?}, so a filter that could not be built either fell back \
          to the raw bytes or was mistaken for some other failure"
     );

@@ -363,7 +363,7 @@ Milestone: [Phase 10](https://github.com/breferrari/vigia/milestone/11). Ships i
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | Adopt Rust 1.99 features | [#642](https://github.com/breferrari/vigia/issues/642) |
+| ✅ | Adopt Rust 1.99 features | [#642](https://github.com/breferrari/vigia/issues/642) |
 
 ## Phase 11 — off the paint
 

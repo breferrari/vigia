@@ -108,8 +108,9 @@ fn every_key_on_the_map_goes_to_the_open_box_and_means_itself_again_after() {
             action_for(event, Regions::default()).is_some(),
             "{event:?} is not on the map, so this gate is not sweeping the map"
         );
-        assert!(
-            matches!(box_route(event, over), BoxRoute::Edit(_)),
+        assert_matches!(
+            box_route(event, over),
+            BoxRoute::Edit(_),
             "{event:?} reached the pane while the box was open"
         );
     }
@@ -832,18 +833,14 @@ fn a_press_on_one_regions_bar_is_not_the_others() {
     // because on the stacked layout the two regions never share a row and on the
     // rail nothing was asking.
     let drag = MouseEventKind::Drag(MouseButton::Left);
-    assert!(
-        matches!(
-            action_for(&at(drag, 29, row), side_by_side),
-            Some(Action::ListTo(_))
-        ),
+    assert_matches!(
+        action_for(&at(drag, 29, row), side_by_side),
+        Some(Action::ListTo(_)),
         "a drag on the rail's bar did not seek the map"
     );
-    assert!(
-        matches!(
-            action_for(&at(drag, 99, row), side_by_side),
-            Some(Action::DiffTo(_))
-        ),
+    assert_matches!(
+        action_for(&at(drag, 99, row), side_by_side),
+        Some(Action::DiffTo(_)),
         "a drag on the diff's bar seeked the map, because the row is the rail's too"
     );
 }
@@ -998,8 +995,9 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
     // the map.
     for row in [8u16, 19] {
         let action = action_for(&at(press, 79, row), regions).expect("a step");
-        assert!(
-            matches!(action, Action::Scroll(_)),
+        assert_matches!(
+            action,
+            Action::Scroll(_),
             "a press on the diff's bar at row {row} produced {action:?}"
         );
     }

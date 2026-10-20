@@ -4,6 +4,7 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::assert_matches;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -1409,8 +1410,9 @@ fn a_session_start_payload_registers_and_a_session_end_clears() {
     // every event that is not the end records.
     for event in ["SessionStart", "SessionResume", "anything else"] {
         let payload = json!({"session_id": "bbbb-2222", "hook_event_name": event});
-        assert!(
-            matches!(hooked(&payload, env), Some(Hooked::Put(_))),
+        assert_matches!(
+            hooked(&payload, env),
+            Some(Hooked::Put(_)),
             "{event} did not record"
         );
     }

@@ -1,5 +1,6 @@
 //! What a view builds out of a real diff.
 
+use std::assert_matches;
 use std::time::Instant;
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
@@ -177,8 +178,9 @@ fn a_file_is_its_heading_then_its_hunks() {
             Row::File(entry) => {
                 let churn = &entry.churn;
                 headings += 1;
-                assert!(
-                    matches!(view.rows.get(index + 1), Some(Row::Hunk { .. })),
+                assert_matches!(
+                    view.rows.get(index + 1),
+                    Some(Row::Hunk { .. }),
                     "the row after a heading is {:?}, not a hunk header",
                     view.rows.get(index + 1)
                 );
@@ -885,11 +887,11 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
         )
         .expect("view");
 
-    assert!(
-        matches!(
+    assert_matches!(
+
             view.rows.first(),
             Some(Row::File(entry)) if entry.churn.is_none()
-        ),
+        ,
         "a binary file's heading is {:?}, and a +/- count for it would be a lie",
         view.rows.first()
     );

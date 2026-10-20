@@ -4,6 +4,7 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::assert_matches;
 use std::time::Duration;
 
 use ratatui::layout::Rect;
@@ -488,8 +489,8 @@ fn pdf_other_aspect_rows() {
         "{drawn:?}"
     );
     // Fitted into the first page's shape, 1024 tall by 512 wide.
-    assert!(
-        matches!(drawn.verdict, Some(Verdict::Changed { total, .. }) if total == 512 * 1024),
+    assert_matches!(
+        drawn.verdict, Some(Verdict::Changed { total, .. }) if total == 512 * 1024,
         "the changed page was not fitted into the first page's shape: {drawn:?}"
     );
 }
@@ -695,10 +696,7 @@ fn pdf_predictor_in_place() {
             &zlib_zeros(250 << 20),
         ),
     );
-    assert!(
-        matches!(drawn.verdict, Some(Verdict::Changed { .. })),
-        "{drawn:?}"
-    );
+    assert_matches!(drawn.verdict, Some(Verdict::Changed { .. }), "{drawn:?}");
     if let (Some(before), Some(after)) = (before, support::peak_resident()) {
         assert!(
             after < before + HELD,

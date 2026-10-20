@@ -452,8 +452,9 @@ impl Rig {
                 KeyCode::Char(c),
                 KeyModifiers::NONE,
             )));
-            assert!(
-                matches!(route, BoxRoute::Edit(_)),
+            assert_matches!(
+                route,
+                BoxRoute::Edit(_),
                 "{c:?} did not reach the box: {route:?}"
             );
         }
@@ -2539,8 +2540,9 @@ fn a_renamed_file_carries_its_note_to_the_new_path() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    assert!(
-        matches!(frame.files()[0].kind, ChangeKind::Renamed { .. }),
+    assert_matches!(
+        frame.files()[0].kind,
+        ChangeKind::Renamed { .. },
         "the fixture is not a rename: {:?}",
         frame.files()[0].kind
     );
@@ -2749,8 +2751,8 @@ fn a_note_whose_text_one_run_moved_and_the_other_edited_over_goes_where_the_text
         "the note landed in the run that edited over its line:\n{}",
         painted.rows().join("\n")
     );
-    assert!(
-        matches!(&painted.view.rows[at - 1], Row::Line { number: 9, text, .. } if text == "line 8"),
+    assert_matches!(
+        &painted.view.rows[at - 1], Row::Line { number: 9, text, .. } if text == "line 8",
         "{:?}",
         painted.view.rows[at - 1]
     );
@@ -3825,11 +3827,9 @@ fn a_continuation_row_anchors_to_its_head_line() {
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
     let y = painted.row_of("a long line that wraps");
     let (left, _, origin) = painted.gutter();
-    assert!(
-        matches!(
-            painted.view.rows[usize::from(y + 1 - painted.laid.diff.top)],
-            Row::Wrap { .. }
-        ),
+    assert_matches!(
+        painted.view.rows[usize::from(y + 1 - painted.laid.diff.top)],
+        Row::Wrap { .. },
         "the line did not wrap:\n{}",
         painted.text(y + 1)
     );
@@ -7656,8 +7656,9 @@ fn rows_follow_the_window() {
         .view(&mut frame, &mut highlighter, &history, screen)
         .expect("view");
     assert_eq!(view.rows.len(), height, "the screen did not fill");
-    assert!(
-        matches!(view.rows.last(), Some(Row::Note { .. })),
+    assert_matches!(
+        view.rows.last(),
+        Some(Row::Note { .. }),
         "the screen's last row is not the answer's, so the answer is not what fills it"
     );
     let drawn = view

@@ -7,6 +7,7 @@ mod pty;
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::assert_matches;
 use std::time::Duration;
 
 use ratatui::layout::Rect;
@@ -361,8 +362,8 @@ fn main_panic_restores() {
     let (text, status) = ran("main", pty::Script::default());
     let restore = text.find("\x1b[?1049l");
     let message = text.find("the main thread on purpose");
-    assert!(
-        matches!((restore, message), (Some(r), Some(m)) if r < m),
+    assert_matches!(
+        (restore, message), (Some(r), Some(m)) if r < m,
         "the terminal was not restored before the panic message: {text:?}"
     );
     assert!(
@@ -418,8 +419,8 @@ fn main_installs_abort_hook() {
     let main = include_str!("../src/main.rs");
     let hook = main.find("vigia::install_abort_hook();");
     let dispatch = main.find("match vigia::request_for(");
-    assert!(
-        matches!((hook, dispatch), (Some(h), Some(d)) if h < d),
+    assert_matches!(
+        (hook, dispatch), (Some(h), Some(d)) if h < d,
         "main does not install the base panic hook before any mode runs"
     );
 }

@@ -245,8 +245,8 @@ fn a_value_that_is_neither_on_nor_off_names_its_line_and_its_key() {
     // set the rail and said nothing.
     for source in ["rail = on off\n", "rail=on=off\n", "single = on true\n"] {
         let err = config::parse(source).expect_err("a trailing token");
-        assert!(
-            matches!(&err, ConfigError::UnknownValue { value, .. } if value.contains(' ') || value.contains('=')),
+        assert_matches!(
+            &err, ConfigError::UnknownValue { value, .. } if value.contains(' ') || value.contains('='),
             "{source:?} was accepted, or refused without quoting what it read: {err:?}"
         );
     }
@@ -438,8 +438,9 @@ fn absent_is_not_an_error_and_unreadable_is() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a directory to read as a file");
     let err = config::load(&dir).expect_err("a directory does not read as a file");
-    assert!(
-        matches!(err, ConfigError::Unreadable { .. }),
+    assert_matches!(
+        err,
+        ConfigError::Unreadable { .. },
         "reading a directory reported {err:?}"
     );
     assert!(
@@ -728,16 +729,15 @@ fn every_view_toggle_has_a_key_or_a_reason() {
     // `b` is the whole exclusion list since B22: `f` left it when the menu made
     // what a reader flips worth keeping, and `REVOCATIONS.md` holds what its
     // exclusion said.
-    assert!(
-        matches!(place_of(&Action::ToggleStanding), Place::Excluded(_)),
+    assert_matches!(
+        place_of(&Action::ToggleStanding),
+        Place::Excluded(_),
         "`b` left the exclusion list, and `SPEC.md` §11.2 B6 is what has to change \
          before this does"
     );
-    assert!(
-        matches!(
-            place_of(&Action::ToggleFollow),
-            Place::Key { key: "follow", .. }
-        ),
+    assert_matches!(
+        place_of(&Action::ToggleFollow),
+        Place::Key { key: "follow", .. },
         "`f` is not a key of the file, which B22 ruled it is"
     );
 }
@@ -815,8 +815,8 @@ fn a_hide_pattern_is_read_from_the_file() {
 fn a_pattern_that_does_not_compile_is_refused_by_line() {
     let err = config::parse("# mine\nrail = on\nhide = ^target/(\n")
         .expect_err("an unclosed group is not a pattern");
-    assert!(
-        matches!(&err, ConfigError::BadPattern { line, .. } if *line == 3),
+    assert_matches!(
+        &err, ConfigError::BadPattern { line, .. } if *line == 3,
         "a bad pattern was accepted, or refused without its line: {err:?}"
     );
     let said = err.to_string();
@@ -1077,8 +1077,8 @@ fn a_save_refuses_a_file_that_no_longer_parses() {
     std::fs::write(&path, "rail = off\nrail = on\n").expect("seed a file it refuses");
 
     let refused = config::save(&path, &Config::default()).expect_err("a save over a bad file");
-    assert!(
-        matches!(&refused, ConfigError::RepeatedKey { key, .. } if key == "rail"),
+    assert_matches!(
+        &refused, ConfigError::RepeatedKey { key, .. } if key == "rail",
         "the refusal is not the parser's own: {refused:?}"
     );
     assert_eq!(
@@ -1169,13 +1169,13 @@ rail = off
     );
     // And the file is still the one the next launch will refuse, so nothing was
     // repaired behind their back.
-    assert!(
-        matches!(
+    assert_matches!(
+
             config::parse(&out),
             Err(ConfigError::RepeatedKey { key, .. }) if key == "rail"
-        ),
+        ,
         "the rewrite made a file `parse` accepts out of one it refuses:
-{out}"
+    {out}"
     );
 }
 

@@ -6,6 +6,7 @@ mod support;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use std::assert_matches;
 use vigia::{
     Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, Row, Theme, View, Viewport,
     body_layout, regions, render,
@@ -1343,8 +1344,9 @@ fn a_separator_is_not_drawn_with_no_room_for_a_file_beneath_it() {
     // the fifth, so it does not appear.
     let plan = vigia::list_plan(frame.files(), 0, 4);
     assert_eq!(plan.len(), 4);
-    assert!(
-        matches!(plan[3], vigia::Slot::File(_)),
+    assert_matches!(
+        plan[3],
+        vigia::Slot::File(_),
         "the window ends on a label naming a run it cannot show: {plan:?}"
     );
 }
@@ -1697,8 +1699,9 @@ fn a_one_row_list_draws_its_runs_label() {
             "a one-row list from top {top} drew {} rows",
             plan.len()
         );
-        assert!(
-            matches!(plan[0], vigia::Slot::Group { .. }),
+        assert_matches!(
+            plan[0],
+            vigia::Slot::Group { .. },
             "a one-row list from top {top} drew a file with no run label above \
              it, which files the change under whatever heading happens to be \
              on screen: {plan:?}"

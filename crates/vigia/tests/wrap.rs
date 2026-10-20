@@ -9,6 +9,7 @@ mod screen;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use std::assert_matches;
 use vigia::{
     Action, App, Body, Glyphs, Pointing, Row, TRACK_SCALE, Theme, View, Viewport, body_layout,
     diff_height, regions, render,
@@ -650,8 +651,9 @@ fn every_jump_still_lands_on_a_heading_when_lines_wrap() {
             "a jump to file {file} with wrapping on landed {} rows into its block",
             view.top.row
         );
-        assert!(
-            matches!(view.rows.first(), Some(Row::File(_))),
+        assert_matches!(
+            view.rows.first(),
+            Some(Row::File(_)),
             "a jump to file {file} with wrapping on did not put its heading on the \
              top row: {:?}",
             view.rows.first()
@@ -1193,8 +1195,9 @@ fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
         back.top.row, 0,
         "`k` did not come back to the top of the diff"
     );
-    assert!(
-        matches!(back.rows.first(), Some(Row::File(_))),
+    assert_matches!(
+        back.rows.first(),
+        Some(Row::File(_)),
         "the reader came back to the top of the diff and the heading was still \
          trimmed off it, with nothing above to scroll to:\n{}",
         rows.join("\n")
@@ -1210,8 +1213,9 @@ fn a_diff_that_fits_unwrapped_and_not_wrapped_keeps_its_heading() {
         "a diff shorter than the pane in its own rows did not clamp back to its \
          own top"
     );
-    assert!(
-        matches!(over.rows.first(), Some(Row::File(_))),
+    assert_matches!(
+        over.rows.first(),
+        Some(Row::File(_)),
         "scrolling past the end of a diff shorter than the pane trimmed its \
          heading off the top, and there is nothing above to scroll to:\n{}",
         rows.join("\n")

@@ -12,6 +12,7 @@ use ratatui::crossterm::event::{
 };
 use ratatui::layout::Rect;
 use ratatui::style::Color;
+use std::assert_matches;
 use vigia::{
     Action, App, Chrome, Glyphs, Grabbed, Hovered, Pointing, Regions, Sheet, Theme, action_for,
     body_layout, regions, render,
@@ -350,8 +351,9 @@ fn the_sheet_is_opaque() {
 
         for y in sheet.top..sheet.top + sheet.height {
             for x in sheet.left..sheet.left + sheet.width {
-                assert!(
-                    matches!(open[(x, y)].style().bg, None | Some(Color::Reset)),
+                assert_matches!(
+                    open[(x, y)].style().bg,
+                    None | Some(Color::Reset),
                     "cell {x},{y} inside the {}x{} pane's sheet kept the \
                      background {:?} from what it covers, so the sheet is a tint \
                      rather than a window",

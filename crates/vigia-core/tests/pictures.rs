@@ -2,6 +2,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::io::Cursor;
 
 use image::{ImageFormat, RgbaImage};
@@ -831,9 +832,9 @@ fn image_renamed_changed_staged() {
         .iter()
         .filter(|change| change.origin == Origin::Staged)
         .collect();
-    assert!(
-        matches!(staged.as_slice(), [change] if change.path == "b.png"
-            && change.kind == vigia_core::ChangeKind::Renamed { from: "a.png".to_owned() }),
+    assert_matches!(
+        staged.as_slice(), [change] if change.path == "b.png"
+            && change.kind == vigia_core::ChangeKind::Renamed { from: "a.png".to_owned() },
         "{staged:?}"
     );
 }

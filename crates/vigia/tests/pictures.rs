@@ -3,6 +3,7 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::assert_matches;
 use std::io::Cursor;
 use std::time::Duration;
 
@@ -723,8 +724,8 @@ fn landing_on_heading() {
         (1, 0),
         "moving to the image did not land on its heading"
     );
-    assert!(
-        matches!(view.rows.first(), Some(Row::File(entry)) if entry.path == "b.png"),
+    assert_matches!(
+        view.rows.first(), Some(Row::File(entry)) if entry.path == "b.png",
         "the image's heading is not the first row"
     );
 }
@@ -1107,8 +1108,8 @@ fn picture_rows_step() {
             usize::from(part) + 1,
             "step {part} did not move one row into the picture"
         );
-        assert!(
-            matches!(view.rows[0], Row::Picture { part: at, .. } if at == part),
+        assert_matches!(
+            view.rows[0], Row::Picture { part: at, .. } if at == part,
             "step {part} did not open the screen on picture row {part}: {:?}",
             view.rows[0]
         );
@@ -1135,8 +1136,8 @@ fn picture_rows_step_back() {
     let view = pane.settled(&mut frame);
     assert_eq!(view.top.under, rows, "a step up passed over the picture");
     let last = u16::try_from(rows - 1).expect("rows");
-    assert!(
-        matches!(view.rows[0], Row::Picture { part, .. } if part == last),
+    assert_matches!(
+        view.rows[0], Row::Picture { part, .. } if part == last,
         "a step up did not open on the picture's last row: {:?}",
         view.rows[0]
     );
@@ -1160,8 +1161,8 @@ fn cut_by_top(
     let uncut = pane.draw(&whole);
     pane.scroll(&mut frame, isize::from(u8::try_from(cut).expect("cut")) + 1);
     let view = pane.settled(&mut frame);
-    assert!(
-        matches!(view.rows[0], Row::Picture { part, .. } if part == cut),
+    assert_matches!(
+        view.rows[0], Row::Picture { part, .. } if part == cut,
         "the screen does not open on picture row {cut}: {:?}",
         view.rows[0]
     );

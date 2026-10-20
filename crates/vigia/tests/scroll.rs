@@ -4,6 +4,7 @@
 mod support;
 
 use ratatui::layout::Rect;
+use std::assert_matches;
 use vigia::{Action, App, Body, Pointing, Position, Row, View, body_layout, diff_height};
 use vigia_core::{Frame, Highlighter, History, Standing};
 
@@ -289,11 +290,9 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
         TOTAL,
         "the screen is full but ends somewhere other than the end of the diff: {top:?}"
     );
-    assert!(
-        matches!(
-            view.rows.last().expect("a drawn row"),
-            Row::Line { .. } | Row::Reason { .. }
-        ),
+    assert_matches!(
+        view.rows.last().expect("a drawn row"),
+        Row::Line { .. } | Row::Reason { .. },
         "the bottom row is {:?} rather than content",
         view.rows.last()
     );
@@ -1163,8 +1162,9 @@ fn every_jump_lands_on_a_heading_and_never_on_a_gap() {
         let view = app
             .view(&mut frame, &mut highlighter, &history, split())
             .expect("view");
-        assert!(
-            matches!(view.rows.first(), Some(Row::File(_))),
+        assert_matches!(
+            view.rows.first(),
+            Some(Row::File(_)),
             "{name} landed on {:?} rather than on a file's heading",
             view.rows.first()
         );
@@ -1723,8 +1723,9 @@ fn note_shrinks_under() {
         },
         "a note that shrank under the offset did not clamp it to its last row"
     );
-    assert!(
-        matches!(after.rows[0], Row::Note { last: true, .. }),
+    assert_matches!(
+        after.rows[0],
+        Row::Note { last: true, .. },
         "the top after the clamp is not the note's last row: {:?}",
         after.rows[0]
     );
