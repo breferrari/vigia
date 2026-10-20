@@ -25,5 +25,7 @@ for dir in "$root"/vendor/*/; do
     git -C "$work/$name" apply "$patch"
   done
   echo "vendor/$name: $suite"
-  (cd "$work/$name" && sh -c "$suite")
+  # Upstream's manifest lacks the lint allowances our name-the-fork patch adds,
+  # and its own warnings are not ours to deny; vendor/ still builds under deny.
+  (cd "$work/$name" && env -u CARGO_BUILD_WARNINGS sh -c "$suite")
 done
