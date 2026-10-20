@@ -1,23 +1,16 @@
-# What `zizmor` may leave unfixed, each with why. Everything in release.yml is
-# dist's generated output: dist has no setting for these, and a hand edit is
-# overwritten by `dist generate` and refused by dist's own check.
+# What zizmor may leave unfixed. The release.yml lines are dist's generated
+# output, which no dist setting changes.
 rules:
   excessive-permissions:
-    ignore:
-      - release.yml
+    ignore: ["release.yml:18"]
   template-injection:
-    ignore:
-      - release.yml
+    ignore: ["release.yml:83", "release.yml:134", "release.yml:144", "release.yml:148", "release.yml:201", "release.yml:251", "release.yml:282"]
   unpinned-images:
-    ignore:
-      - release.yml
+    ignore: ["release.yml:114"]
   secrets-inherit:
-    ignore:
-      - release.yml
+    ignore: ["release.yml:335"]
   self-repository:
-    ignore:
-      - release.yml
+    ignore: ["release.yml:335"]
   # Trusted publishing is its own change on the roadmap.
   use-trusted-publishing:
-    ignore:
-      - publish-crates-io.yml
+    ignore: ["publish-crates-io.yml:122"]

@@ -3874,3 +3874,54 @@ fn actions_pinned() {
         "ci complete does not judge the workflow audit"
     );
 }
+
+/// Each action runs at one commit everywhere: every workflow, and the commits
+/// dist pins `release.yml` to.
+#[test]
+fn actions_one_version() {
+    let mut seen: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> =
+        std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(repo_root().join(".github/workflows")).expect("the workflows") {
+        let path = entry.expect("an entry").path();
+        for line in without_comments(&read(&path)).lines() {
+            let Some(target) = line
+                .trim_start()
+                .trim_start_matches("- ")
+                .strip_prefix("uses:")
+            else {
+                continue;
+            };
+            if let Some((action, rev)) = target.trim().split_once('@') {
+                seen.entry(action.to_owned())
+                    .or_default()
+                    .insert(rev.to_owned());
+            }
+        }
+    }
+    let manifest = repo_file("Cargo.toml");
+    let pins = manifest
+        .lines()
+        .find(|line| line.starts_with("github-action-commits = {"))
+        .expect("dist pins the release workflow's actions");
+    for pair in pins
+        .split(['{', '}', ','])
+        .filter(|part| part.contains('='))
+    {
+        let (action, rev) = pair.split_once('=').expect("a pair");
+        let (action, rev) = (
+            action.trim().trim_matches('"'),
+            rev.trim().trim_matches('"'),
+        );
+        if action == "github-action-commits" {
+            continue;
+        }
+        seen.entry(action.to_owned())
+            .or_default()
+            .insert(rev.to_owned());
+    }
+    let split: Vec<_> = seen.iter().filter(|(_, revs)| revs.len() > 1).collect();
+    assert!(
+        split.is_empty(),
+        "actions at more than one commit: {split:?}"
+    );
+}

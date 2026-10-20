@@ -107,7 +107,6 @@ jobs:
           IN_TEST: ${{ inputs.test }}
           REPLICA: ${{ matrix.replica }}
           IN_OS: ${{ inputs.os }}
-          IN_SLACK: ${{ inputs.slack }}
           VIGIA_BUDGET_SLACK: ${{ inputs.slack }}
         run: |
           set -u
@@ -136,7 +135,7 @@ jobs:
           {
             echo "### replica ${REPLICA} on ${IN_OS}"
             echo
-            echo "\`${IN_TEST}\` — **$fail failed of $iterations** (slack ${IN_SLACK})"
+            echo "\`${IN_TEST}\` — **$fail failed of $iterations** (slack ${VIGIA_BUDGET_SLACK})"
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Exit 0 on a failing test, on purpose: see the header. A replica

@@ -30,6 +30,8 @@ concurrency:
   # On a branch, only the newest push is worth checking.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+permissions: {}
+
 # Every job below carries `if: github.event.pull_request.draft != true`, and it
 # is written five times rather than once because a workflow has no place to say
 # it once. What it buys: a branch iterates inside a draft for free, and the full
@@ -41,8 +43,6 @@ concurrency:
 # It is a cost rule, not a correctness rule. Nothing merges without these having
 # run: the same jobs fire on `ready_for_review`, and branch protection reads the
 # result of that run rather than of a run that was skipped.
-permissions: {}
-
 jobs:
   # **What a pull request changed decides what runs.** A pull request that
   # touches only documents, skills, templates or images runs the suites that
@@ -442,8 +442,7 @@ jobs:
       - run: cargo deny check advisories licenses sources
       - run: cargo deny --exclude-dev check bans
 
-  # Every workflow audited on every pull request, documents-only ones too,
-  # since a broken workflow is code whatever else the pull request touched.
+  # Every workflow, on documents-only pull requests too.
   zizmor:
     name: workflow audit
     if: github.event.pull_request.draft != true
