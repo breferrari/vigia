@@ -334,15 +334,13 @@ fn store_notice_footer() {
     ] {
         assert!(shell.contains(seam), "`{seam}` is gone from the shell");
     }
-    let watch = include_str!("../../vigia-core/src/watch.rs");
-    for (name, code) in [("lib.rs", shell.as_str()), ("watch.rs", watch)] {
-        for line in code.lines().filter(|line| line.contains("notice")) {
-            assert!(
-                !line.contains("eprint") && !line.contains("stderr"),
-                "{name} writes the store notice to stderr: {line}"
-            );
-        }
+    for line in shell.lines().filter(|line| line.contains("notice")) {
+        assert!(
+            !line.contains("eprint") && !line.contains("stderr"),
+            "the shell writes the store notice to stderr: {line}"
+        );
     }
+    let watch = include_str!("../../vigia-core/src/watch.rs");
     assert!(
         !watch.contains("eprint") && !watch.contains("stderr"),
         "the watch writes to stderr"

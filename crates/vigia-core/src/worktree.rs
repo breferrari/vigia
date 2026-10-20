@@ -267,7 +267,7 @@ impl Worktree {
             self.lfs_wait_until(std::time::SystemTime::now());
             return None;
         }
-        let object = self.lfs_path(oid)?;
+        let object = self.lfs_path(oid).ok()?;
         self.lfs_budget.set(self.lfs_budget.get() - size);
         self.lfs_compares.set(self.lfs_compares.get() + 1);
         same_bytes(path, &object, size)
@@ -904,10 +904,15 @@ impl Worktree {
 
     /// The object an LFS pointer names, from this repository's local store.
     fn lfs_side(&self, oid: &str, named: Option<Format>, cost: &mut u64) -> Option<ImageSide> {
-        let Some(path) = self.lfs_path(oid) else {
-            let missing = picture::lfs_object(&self.lfs_store(), oid);
-            self.lfs_missing.borrow_mut().push(missing);
-            return None;
+        let path = match self.lfs_path(oid) {
+            Ok(path) => path,
+            Err(missing) => {
+                let mut awaiting = self.lfs_missing.borrow_mut();
+                if !awaiting.contains(&missing) {
+                    awaiting.push(missing);
+                }
+                return None;
+            }
         };
         self.file_side(&path, false, named, cost)
     }
@@ -917,13 +922,16 @@ impl Worktree {
         std::mem::take(&mut self.lfs_missing.borrow_mut())
     }
 
-    /// Where the LFS object `oid` is stored, when it is a file there. Followed, so
-    /// a store reached through a link reads, and a fifo is never opened.
-    fn lfs_path(&self, oid: &str) -> Option<PathBuf> {
+    /// Where the LFS object `oid` is stored, when it is a file there, and where it
+    /// would be otherwise. Followed, so a store reached through a link reads, and
+    /// a fifo is never opened.
+    fn lfs_path(&self, oid: &str) -> std::result::Result<PathBuf, PathBuf> {
         let path = picture::lfs_object(&self.lfs_store(), oid);
-        std::fs::metadata(&path)
-            .is_ok_and(|meta| meta.is_file())
-            .then_some(path)
+        if std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
+            Ok(path)
+        } else {
+            Err(path)
+        }
     }
 
     fn lfs_store(&self) -> PathBuf {
@@ -946,7 +954,9 @@ impl Worktree {
                     .ok()
                     .filter(|meta| meta.len() < picture::POINTER_MAX as u64)
                     .and_then(|_| std::fs::read(&path).ok())
-                    .and_then(|head| picture::lfs_oid(&head).and_then(|oid| self.lfs_path(oid)));
+                    .and_then(|head| {
+                        picture::lfs_oid(&head).and_then(|oid| self.lfs_path(oid).ok())
+                    });
                 Some(Source::File(pointer.unwrap_or(path)))
             }
             None => None,

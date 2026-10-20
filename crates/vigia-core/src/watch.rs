@@ -182,9 +182,11 @@ pub struct Watcher<'repo> {
     /// The LFS store's `objects`, in every spelling as for `roots`. An object
     /// landing there can turn a `binary` side into a picture.
     store: Vec<PathBuf>,
-    /// `objects` outside the worktree that does not exist yet, and the deepest
-    /// existing ancestor watched until it appears.
-    store_pending: Option<(PathBuf, PathBuf)>,
+    /// The store's `objects` as the config names it.
+    store_objects: PathBuf,
+    /// While `objects` outside the worktree does not exist yet, its deepest
+    /// existing ancestor, watched until it appears.
+    store_ancestor: Option<PathBuf>,
     /// Why the store could not be watched, until [`Self::take_store_notice`].
     store_notice: Option<String>,
     index: IndexWatch,
@@ -247,15 +249,8 @@ impl<'repo> Watcher<'repo> {
         };
         let objects = tidy(&lfs_store_of(repo)).join("objects");
         let mut store = spellings_of(&objects, &roots);
-        // A store not made yet has no canonical spelling of its own, so its
-        // nearest existing ancestor lends one.
-        if let Some(spelling) = objects.ancestors().find_map(|dir| {
-            Some(
-                dir.canonicalize()
-                    .ok()?
-                    .join(objects.strip_prefix(dir).ok()?),
-            )
-        }) && !store.contains(&spelling)
+        if let Some(spelling) = ancestor_spelling(&objects)
+            && !store.contains(&spelling)
         {
             store.push(spelling);
         }
@@ -325,7 +320,8 @@ impl<'repo> Watcher<'repo> {
             git_dir,
             common_dir,
             store,
-            store_pending: None,
+            store_objects: objects,
+            store_ancestor: None,
             store_notice: None,
             index,
             options,
@@ -335,44 +331,51 @@ impl<'repo> Watcher<'repo> {
         };
         // Inside the worktree, the recursive watch above already covers it.
         if outside {
-            watcher.arm_store(objects);
+            watcher.arm_store();
         }
         Ok(watcher)
     }
 
-    /// Watch `objects`, or its deepest existing ancestor until it appears. A
-    /// failure keeps every other watch and is reported once.
-    fn arm_store(&mut self, objects: PathBuf) -> bool {
-        let mut last = self.store_pending.take().map(|(_, ancestor)| ancestor);
-        loop {
-            let (path, mode) = if objects.is_dir() {
-                (objects.as_path(), RecursiveMode::Recursive)
-            } else {
-                let Some(ancestor) = objects.ancestors().skip(1).find(|dir| dir.is_dir()) else {
-                    return false;
-                };
-                // Already watched, and its child is still missing.
-                if last.as_deref() == Some(ancestor) {
-                    let ancestor = ancestor.to_path_buf();
-                    self.store_pending = Some((objects, ancestor));
-                    return false;
-                }
-                (ancestor, RecursiveMode::NonRecursive)
+    /// Watch `objects`, or its deepest existing ancestor until it appears, and
+    /// say whether `objects` is watched now.
+    fn arm_store(&mut self) -> bool {
+        while !self.store_objects.is_dir() {
+            let Some(ancestor) = self
+                .store_objects
+                .ancestors()
+                .skip(1)
+                .find(|dir| dir.is_dir())
+                .map(Path::to_path_buf)
+            else {
+                return false;
             };
-            if let Err(error) = (self.arm)(&mut self.backend, path, mode) {
-                // A recursive watch that stopped partway holds what it added.
-                // Only that one: an ancestor may be a watch of the main set.
-                if mode == RecursiveMode::Recursive {
-                    let _ = self.backend.unwatch(path);
-                }
-                self.store_notice = Some(store_notice(&error));
+            // Already watched, and its child is still missing.
+            if self.store_ancestor.as_ref() == Some(&ancestor)
+                || !self.arm_or_notice(&ancestor, RecursiveMode::NonRecursive)
+            {
                 return false;
             }
-            if mode == RecursiveMode::Recursive {
-                return true;
-            }
-            last = Some(path.to_path_buf());
+            self.store_ancestor = Some(ancestor);
         }
+        self.store_ancestor = None;
+        let objects = self.store_objects.clone();
+        self.arm_or_notice(&objects, RecursiveMode::Recursive)
+    }
+
+    /// Arm one store watch. A failure keeps every other watch, stops waiting
+    /// for the store, and is reported once.
+    fn arm_or_notice(&mut self, path: &Path, mode: RecursiveMode) -> bool {
+        let Err(error) = (self.arm)(&mut self.backend, path, mode) else {
+            return true;
+        };
+        // A recursive watch that stopped partway holds what it added. Only that
+        // one: an ancestor may be a watch of the main set.
+        if mode == RecursiveMode::Recursive {
+            let _ = self.backend.unwatch(path);
+        }
+        self.store_ancestor = None;
+        self.store_notice = Some(store_notice(&error));
+        false
     }
 
     /// Once, why an LFS object landing will not redraw its file until the next
@@ -498,14 +501,12 @@ impl<'repo> Watcher<'repo> {
     /// This event's path relative to the worktree, and whether it is a
     /// directory, or `None` when nothing the display depends on is behind it.
     fn relative<'p>(&mut self, path: &'p Path) -> Option<(&'p Path, bool)> {
-        // A directory on the way to a store that does not exist yet.
-        if let Some((objects, _)) = &self.store_pending
+        // Either a directory on the way to a store that now exists, or a write
+        // in the store.
+        let arrived = self.store_ancestor.is_some()
             && self.store.iter().any(|spelling| spelling.starts_with(path))
-            && self.arm_store(objects.clone())
-        {
-            return Some((Path::new(".git"), false));
-        }
-        if within(&self.store, path).is_some() {
+            && self.arm_store();
+        if arrived || within(&self.store, path).is_some() {
             return Some((Path::new(".git"), false));
         }
         // A git-dir event comes back as `.git`, which `followable` never follows.
@@ -769,6 +770,13 @@ fn store_notice(error: &notify::Error) -> String {
     format!("LFS images redraw on the next change, not when their objects arrive: {reason}")
 }
 
+/// `path` spelled through its nearest existing ancestor's canonical form, which a
+/// path not made yet has none of its own.
+fn ancestor_spelling(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .find_map(|dir| Some(dir.canonicalize().ok()?.join(path.strip_prefix(dir).ok()?)))
+}
+
 /// `path` relative to the first of `roots` it is under.
 fn within<'p>(roots: &[PathBuf], path: &'p Path) -> Option<&'p Path> {
     roots.iter().find_map(|root| path.strip_prefix(root).ok())
@@ -895,12 +903,18 @@ mod tests {
     /// arm fails as a full inotify table does.
     #[test]
     fn store_arm_fails_soft() {
-        let base = std::env::temp_dir().join(format!(
+        struct Removed(PathBuf);
+        impl Drop for Removed {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let base = Removed(std::env::temp_dir().join(format!(
             "vigia-store-arm-{}-{:?}",
             std::process::id(),
             std::time::SystemTime::now()
-        ));
-        let (tree, store) = (base.join("tree"), base.join("store"));
+        )));
+        let (tree, store) = (base.0.join("tree"), base.0.join("store"));
         std::fs::create_dir_all(store.join("objects")).expect("store");
         std::fs::create_dir_all(&tree).expect("tree");
         let git = |args: &[&str]| {
@@ -933,18 +947,17 @@ mod tests {
         );
         assert_eq!(watcher.take_store_notice(), None, "the notice came twice");
 
-        let stop = watcher.stopper();
+        std::fs::write(tree.join("a.txt"), "x\n").expect("write");
+        let (stop, (ticked, waiting)) = (watcher.stopper(), mpsc::channel::<()>());
         let guard = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(300));
-            std::fs::write(tree.join("a.txt"), "x\n").expect("write");
-            std::thread::sleep(Duration::from_secs(10));
-            stop.stop();
+            if waiting.recv_timeout(Duration::from_secs(10)).is_err() {
+                stop.stop();
+            }
         });
         assert!(watcher.next_tick().is_some(), "a tree write did not tick");
+        let _ = ticked.send(());
+        guard.join().expect("the guard");
         assert_eq!(watcher.take_store_notice(), None, "the notice came again");
-        drop(watcher);
-        drop(guard);
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// Build a path the way the host spells one, so the Windows run and the

@@ -2318,12 +2318,12 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>
             }
         };
         watcher.hide(hide);
-        let notice = |watcher: &mut vigia_core::Watcher<'_>| {
-            watcher
-                .take_store_notice()
-                .is_none_or(|message| tx.send(Wake::Notice(message)).is_ok())
+        // Whether the shell is still there to be told.
+        let told = |watcher: &mut vigia_core::Watcher<'_>| match watcher.take_store_notice() {
+            Some(message) => tx.send(Wake::Notice(message)).is_ok(),
+            None => true,
         };
-        if !notice(&mut watcher) {
+        if !told(&mut watcher) {
             return;
         }
 
@@ -2331,7 +2331,7 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>
         // every tick triggers one status walk, and a walk finds whatever the events
         // missed.
         while let Some(tick) = watcher.next_tick() {
-            if tx.send(Wake::Tick(tick.paths)).is_err() || !notice(&mut watcher) {
+            if tx.send(Wake::Tick(tick.paths)).is_err() || !told(&mut watcher) {
                 return;
             }
         }

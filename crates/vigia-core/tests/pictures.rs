@@ -777,16 +777,6 @@ fn image_sources() {
     );
 }
 
-/// Back-date `rela`, so a frame's diff of it is settled and reused.
-fn backdate(scratch: &Scratch, rela: &str) {
-    let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
-    std::fs::File::options()
-        .write(true)
-        .open(scratch.path_of(rela))
-        .and_then(|file| file.set_modified(past))
-        .expect("back-date the file");
-}
-
 /// The frame's diff of its only file, after one advance.
 fn framed(frame: &mut vigia_core::Frame<'_>) -> FileDiff {
     frame.advance().expect("advance");
@@ -798,7 +788,7 @@ fn framed(frame: &mut vigia_core::Frame<'_>) -> FileDiff {
 fn lfs_object_arrives() {
     let old = png(24, 40, 1);
     let (scratch, oid) = lfs_repo("picture-lfs-arrives", &old, &png(30, 50, 2));
-    backdate(&scratch, "a.png");
+    scratch.backdate("a.png");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     assert!(
@@ -833,7 +823,7 @@ fn lfs_new_object_arrives() {
     let (scratch, old_oid) = lfs_repo("picture-lfs-new-arrives", &old, pointer.as_bytes());
     let lfs = scratch.root().join(".git").join("lfs");
     store(&lfs, &old_oid, &old);
-    backdate(&scratch, "a.png");
+    scratch.backdate("a.png");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     let after = |diff: FileDiff| diff.picture.and_then(|picture| picture.after);
@@ -859,8 +849,8 @@ fn lfs_wait_reuses() {
     scratch.git(&["add", "b.txt"]);
     scratch.git(&["commit", "-q", "-m", "text"]);
     scratch.write("b.txt", "two\n");
-    backdate(&scratch, "a.png");
-    backdate(&scratch, "b.txt");
+    scratch.backdate("a.png");
+    scratch.backdate("b.txt");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     support::materialise(&mut frame);
