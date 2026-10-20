@@ -498,6 +498,13 @@ pub struct Pictures {
     decoded: Arc<AtomicU64>,
     /// Sizes the worker found since [`Pictures::found_sizes`] last took them.
     found: Vec<(u64, u32, u32)>,
+    /// Pairs sent to be scored as renames, each once.
+    asked: HashSet<vigia_core::PairKey>,
+    /// Where they go: a thread beside the picture worker, which needs no picker
+    /// and skips nothing scrolled away.
+    pairs: mpsc::Sender<vigia_core::Candidate>,
+    /// Each pair's score, as it lands.
+    scores: mpsc::Receiver<(vigia_core::PairKey, u64)>,
 }
 
 /// A Kitty image id no other picture, nor another pane on the same terminal,
@@ -527,6 +534,10 @@ std::thread_local! {
 static OFF_WORKER: AtomicU64 = AtomicU64::new(0);
 /// The worker thread's name, which is how a decode knows where it runs.
 const WORKER: &str = "vigia-pictures";
+/// The thread that scores renames.
+const PAIRS: &str = "vigia-pairs";
+/// The most pairs remembered as sent before the record starts again.
+const ASKED_KEPT: usize = 4096;
 
 pub use vigia_core::{Stage, panic_next};
 
@@ -560,6 +571,30 @@ impl Pictures {
     /// A cache whose worker holds every job until [`Pictures::pick`] says how
     /// to encode, so nothing is built twice.
     pub fn unpicked(inks: Inks, wake: Box<dyn Fn() + Send>) -> Self {
+        let wake: Arc<Mutex<Box<dyn Fn() + Send>>> = Arc::new(Mutex::new(wake));
+        let (pairs, asked) = mpsc::channel::<vigia_core::Candidate>();
+        let (scored, scores) = mpsc::channel();
+        let woken = Arc::clone(&wake);
+        let _ = std::thread::Builder::new()
+            .name(PAIRS.to_owned())
+            .spawn(move || {
+                for candidate in asked {
+                    let score = vigia_core::caught(|| {
+                        let read = |side: &Option<Source>| side.as_ref().and_then(Source::read);
+                        match (read(&candidate.sides.before), read(&candidate.sides.after)) {
+                            (Some(old), Some(new)) => vigia_core::pair_score(&old, &new),
+                            _ => 0,
+                        }
+                    })
+                    .unwrap_or(0);
+                    if scored.send((candidate.key, score)).is_err() {
+                        break;
+                    }
+                    if let Ok(wake) = woken.lock() {
+                        wake();
+                    }
+                }
+            });
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel();
         let (picked, picker) = mpsc::channel::<Picker>();
@@ -593,7 +628,9 @@ impl Pictures {
                     if outbox.send((job.key, built)).is_err() {
                         break;
                     }
-                    wake();
+                    if let Ok(wake) = wake.lock() {
+                        wake();
+                    }
                 }
             });
         Self {
@@ -607,7 +644,30 @@ impl Pictures {
             picker: Some(picked),
             decoded,
             found: Vec::new(),
+            asked: HashSet::new(),
+            pairs,
+            scores,
         }
+    }
+
+    /// Send the pairs `frame` could not afford to score to be scored, each
+    /// once.
+    pub fn score_pairs(&mut self, frame: &vigia_core::Frame<'_>) {
+        // Kept bounded: an old version's pair is never asked for again.
+        if self.asked.len() >= ASKED_KEPT {
+            self.asked.clear();
+        }
+        for candidate in frame.unscored_pairs() {
+            if self.asked.insert(candidate.key) && self.pairs.send(candidate).is_err() {
+                return;
+            }
+        }
+    }
+
+    /// The rename scores found since the last call, for
+    /// [`vigia_core::Frame::learn_pair`].
+    pub fn found_pairs(&mut self) -> Vec<(vigia_core::PairKey, u64)> {
+        self.scores.try_iter().collect()
     }
 
     /// The sizes the worker found for sides the frame path left unsized, by

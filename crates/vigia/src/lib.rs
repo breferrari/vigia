@@ -603,6 +603,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             shell.settle_notes(began);
             // The margin's end after a print that moved, which no filesystem event marks.
             shell.settle_heights(&mut frame);
+            shell.settle_pairs(&mut frame);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, &mut aside, began)?;
             shell.request_warm(&worktree, &tx);
@@ -891,6 +892,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         shell.settle_notes(began);
         // And the settle deadline, which can fall due under a drained batch too.
         shell.settle_heights(&mut frame);
+        // And a rename the worker scored, which pairs on this frame.
+        shell.settle_pairs(&mut frame);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -1311,6 +1314,21 @@ impl Shell {
     /// deadline is consumed on the turn that finds it and not on a timeout.
     fn settle_heights(&mut self, frame: &mut vigia_core::Frame) {
         if let Err(e) = frame.advance_if_settled(SystemTime::now()) {
+            self.walk_failed(frame, &e);
+        }
+    }
+
+    /// Pair the renames the worker scored since the last frame: the walk again,
+    /// once, with their scores filed.
+    fn settle_pairs(&mut self, frame: &mut vigia_core::Frame) {
+        let found = self.pictures.found_pairs();
+        if found.is_empty() {
+            return;
+        }
+        for (key, score) in found {
+            frame.learn_pair(key, score);
+        }
+        if let Err(e) = frame.advance() {
             self.walk_failed(frame, &e);
         }
     }
@@ -2189,6 +2207,8 @@ impl Shell {
                 self.app.select(None);
             }
         }
+        // Whatever this frame's walks could not afford to pair goes to the worker.
+        self.pictures.score_pairs(frame);
         // A span the collect resolved to nothing is not a selection, whatever the
         // pointer did: it draws nothing, and left standing it would take `Esc`.
         if !self.app.holds_a_selection() {
@@ -3253,6 +3273,14 @@ mod tests {
                      settled height on that path waits for the next event",
                 );
             assert!(walked < paint);
+            let paired = code[previous..paint]
+                .rfind("shell.settle_pairs(&mut frame)")
+                .map(|at| previous + at)
+                .expect(
+                    "a paint with no `settle_pairs` before it in the same arm, so a \
+                     rename the worker scored waits for the next event",
+                );
+            assert!(paired < paint);
             let noted = code[previous..paint]
                 .rfind("shell.settle_notes(began)")
                 .map(|at| previous + at)
