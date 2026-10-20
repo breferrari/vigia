@@ -3,7 +3,7 @@
 mod support;
 
 #[cfg(target_os = "linux")]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "linux")]
 use support::Scratch;
@@ -64,12 +64,20 @@ fn lfs_store_watch_cost() {
     let worktree = scratch.worktree();
     let started = Instant::now();
     let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    // The store arms on a thread of its own; the arm ends when it holds one.
+    while watcher.store_watched().is_empty() {
+        assert_eq!(
+            watcher.take_store_notice(),
+            None,
+            "the store's watch failed to arm"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(60),
+            "the store never armed"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let time = started.elapsed();
-    assert_eq!(
-        watcher.take_store_notice(),
-        None,
-        "the store's watch failed to arm"
-    );
     let watches = inotify_watches().saturating_sub(control_watches);
     let line = format!(
         "lfs_store_watch_cost: 5000 objects, {directories} directories, {watches} store watches, \
