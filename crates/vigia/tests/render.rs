@@ -2117,7 +2117,7 @@ const FRAME_TIMES: [Duration; 10] = [
     Duration::from_micros(999_499),
     Duration::from_micros(999_500),
     Duration::from_secs(1),
-    Duration::from_secs(3600),
+    Duration::from_hours(1),
     Duration::MAX,
 ];
 

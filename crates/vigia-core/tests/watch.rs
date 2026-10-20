@@ -443,7 +443,7 @@ fn an_index_refresh_that_moves_only_stat_data_produces_no_tick() {
     std::fs::File::options()
         .write(true)
         .open(scratch.path_of("a.txt"))
-        .and_then(|file| file.set_modified(SystemTime::now() - Duration::from_secs(3600)))
+        .and_then(|file| file.set_modified(SystemTime::now() - Duration::from_hours(1)))
         .expect("age a.txt");
     let scratch = scratch.settled();
     let before = std::fs::read(scratch.path_of(".git/index")).expect("read the index");

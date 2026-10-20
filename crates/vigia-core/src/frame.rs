@@ -1278,7 +1278,7 @@ mod tests {
     fn a_modification_time_in_the_future_is_never_settled() {
         let read_started = epoch(1_000_000);
         assert!(!settled(
-            read_started + Duration::from_secs(3600),
+            read_started + Duration::from_hours(1),
             read_started
         ));
 
