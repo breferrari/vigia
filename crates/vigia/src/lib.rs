@@ -157,6 +157,9 @@ const SKIP_CEILING: usize = 256 * 1024;
 /// How long a frame may be held back before one is drawn anyway.
 const STALE: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// How long the first frame has to reach the terminal before the picture query.
+const QUERY_DRAIN: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// What the terminal writer tells this shell, wired to its wake channel.
 fn writer_wakes(tx: &Sender<Wake>) -> writer::Wakes {
     let (cells, lost) = (tx.clone(), tx.clone());
@@ -534,16 +537,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // keys. `SPEC.md` §11.1.
     // Unix asks only a terminal that answered the background query; Windows,
     // which sends no other, always asks. Forced half-blocks need no answer.
-    let ask = forced != Some(ratatui_image::picker::ProtocolType::Halfblocks)
-        && (cfg!(windows) || !reply.is_empty());
     // The query writes the terminal directly, so the first frame has to be out
-    // before it starts, or its bytes would land inside the frame's.
-    if ask {
-        let _ = shell
-            .session
-            .writer()
-            .drain(std::time::Duration::from_millis(500));
-    }
+    // before it starts, or its bytes would land inside the frame's. A terminal
+    // that has not read it by then is not asked.
+    let ask = forced != Some(ratatui_image::picker::ProtocolType::Halfblocks)
+        && (cfg!(windows) || !reply.is_empty())
+        && shell.session.writer().drain(QUERY_DRAIN);
     let (mut picker, answer) = terminal::picker(ask);
     picker.set_protocol_type(pictures::protocol_of(forced, answer, &|key: &str| {
         std::env::var(key).ok()
@@ -2349,8 +2348,10 @@ impl Shell {
             return Ok(());
         }
         self.held_since = None;
+        let mut drawn = area;
         self.session.screen().draw(|f| {
             let area = f.area();
+            drawn = area;
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
             // After the widgets, because an effect works on the cells they drew.
             // The notes' own, each over the cells its note drew this frame. A note
@@ -2388,7 +2389,13 @@ impl Shell {
         if chrome.selected.is_none() {
             self.deselect();
         }
-        self.regions = painted;
+        // A resize between the layout and the draw: the pointer follows the
+        // screen that was drawn.
+        self.regions = if drawn == area {
+            painted
+        } else {
+            render::regions(drawn, &chrome, &self.screen)
+        };
         self.laid = self.overlays();
         Ok(())
     }

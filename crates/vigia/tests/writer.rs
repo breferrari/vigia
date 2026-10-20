@@ -30,13 +30,18 @@ const LEAVE: &str = "\x1b[?1049l";
 /// letter twelve times, the next letter on the next line, so a scroll of any
 /// number of rows not a multiple of 26 rewrites every cell of every row.
 fn tall(name: &str) -> Scratch {
+    wide(name, 12)
+}
+
+/// [`tall`], with lines `width` letters long.
+fn wide(name: &str, width: usize) -> Scratch {
     let scratch = Scratch::new(name);
     let lines = |n: usize| {
         (0..n)
             .map(|i| {
                 format!(
                     "{}\n",
-                    char::from(b'a' + (i % 26) as u8).to_string().repeat(12)
+                    char::from(b'a' + (i % 26) as u8).to_string().repeat(width)
                 )
             })
             .collect::<String>()
@@ -172,19 +177,27 @@ fn quit_bounded() {
 fn signal_restores() {
     for (name, signal) in [("SIGTERM", libc::SIGTERM), ("SIGHUP", libc::SIGHUP)] {
         let (scratch, home) = (tall("writer-signal"), TempDir::new("writer-signal-home"));
-        let (mut child, master) = pty::start(pane(&scratch, &home), &script());
+        let (mut child, mut master) = pty::start(pane(&scratch, &home), &script());
         let reading = master.try_clone().expect("the terminal's other end");
-        // Held, so the writer is part way through a frame when the signal lands.
+        // Unread, with keys behind it, so the writer is part way through a frame
+        // when the signal lands.
         std::thread::sleep(Duration::from_secs(2));
+        for _ in 0..30 {
+            master.write_all(b"j").expect("press j");
+        }
+        std::thread::sleep(Duration::from_millis(300));
         // SAFETY: a pid this test started, and a signal number from libc.
         unsafe { libc::kill(child.pid() as i32, signal) };
         let began = Instant::now();
         let seen = reader(reading, None);
         let status = child.exited_unread(Duration::from_secs(3));
         assert!(status.is_some(), "{name} did not end the pane");
+        // The pane's own part is at most 500 ms: the writer's 200 ms stop and the
+        // restore's 300 ms deadline. The rest is the runner's.
         assert!(
-            began.elapsed() < Duration::from_millis(1500),
-            "{name} took {:?} to end a pane whose terminal was behind",
+            began.elapsed() < Duration::from_secs(1),
+            "{name} took {:?} to end a pane whose terminal was behind, past the 500 ms \
+             the writer's stop and the restore's deadline allow, plus 500 ms for the runner",
             began.elapsed()
         );
         std::thread::sleep(Duration::from_millis(300));
@@ -260,13 +273,21 @@ fn stdout_flags() {
     );
 }
 
+/// How long [`skipped_draw`]'s lines are.
+const RUN: usize = 200;
+
 #[test]
 fn skipped_draw() {
     // Keys arrive while the terminal reads nothing. They are applied as they
     // come, the frames for them are held, and on release a few frames show the
-    // newest state rather than one frame per key.
-    let (scratch, home) = (tall("writer-skip"), TempDir::new("writer-skip-home"));
-    let (mut child, mut master) = pty::start(pane(&scratch, &home), &script());
+    // newest state rather than one frame per key. The frames are wide so the
+    // kernel holds only a couple: a Linux pty holds about 20 KB.
+    let (scratch, home) = (wide("writer-skip", RUN), TempDir::new("writer-skip-home"));
+    let script = pty::Script {
+        size: Some((250, 60, 2500, 1200)),
+        ..script()
+    };
+    let (mut child, mut master) = pty::start(pane(&scratch, &home), &script);
     let paused = Arc::new(AtomicBool::new(false));
     let seen = paused_reader(
         master.try_clone().expect("the terminal's other end"),
@@ -306,7 +327,7 @@ fn skipped_draw() {
     let rows = (b'a'..=b'z')
         .map(|letter| {
             after
-                .matches(&char::from(letter).to_string().repeat(12))
+                .matches(&char::from(letter).to_string().repeat(RUN))
                 .count()
         })
         .sum::<usize>();
@@ -314,6 +335,120 @@ fn skipped_draw() {
         rows >= 20,
         "{rows} rows were redrawn on release, so the scroll the held keys made was not applied"
     );
+}
+
+#[test]
+fn resize_while_held() {
+    // The window narrows while frames are held back: on release the screen is
+    // drawn for the new width, not the one the held frames were laid out for.
+    let (scratch, home) = (
+        wide("writer-resize", RUN),
+        TempDir::new("writer-resize-home"),
+    );
+    let script = pty::Script {
+        size: Some((250, 60, 2500, 1200)),
+        ..script()
+    };
+    let (mut child, mut master) = pty::start(pane(&scratch, &home), &script);
+    let paused = Arc::new(AtomicBool::new(false));
+    let seen = paused_reader(
+        master.try_clone().expect("the terminal's other end"),
+        None,
+        Arc::clone(&paused),
+    );
+    std::thread::sleep(Duration::from_secs(2));
+    paused.store(true, Ordering::Release);
+    std::thread::sleep(Duration::from_millis(50));
+    for _ in 0..20 {
+        master.write_all(b"j").expect("press j");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let narrow = libc::winsize {
+        ws_row: 40,
+        ws_col: 120,
+        ws_xpixel: 1200,
+        ws_ypixel: 800,
+    };
+    // SAFETY: a descriptor this test owns, and a valid winsize.
+    unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &narrow) };
+    for _ in 0..20 {
+        master.write_all(b"j").expect("press j");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    paused.store(false, Ordering::Release);
+    std::thread::sleep(Duration::from_millis(600));
+    master.write_all(b"q").expect("press q");
+    let status = child.exited_unread(Duration::from_secs(3));
+    assert!(
+        status.is_some_and(|status| status.success()),
+        "the pane did not end cleanly after a resize while held: {status:?}"
+    );
+    let shown = text(&seen);
+    let cleared = shown
+        .rfind("\x1b[2J")
+        .expect("the resize never cleared the screen");
+    let last = &shown[cleared..];
+    let full = (b'a'..=b'z')
+        .map(|letter| {
+            last.matches(&char::from(letter).to_string().repeat(RUN))
+                .count()
+        })
+        .sum::<usize>();
+    let narrowed = (b'a'..=b'z')
+        .map(|letter| {
+            last.matches(&char::from(letter).to_string().repeat(80))
+                .count()
+        })
+        .sum::<usize>();
+    assert_eq!(
+        full, 0,
+        "after the resize a row was drawn {RUN} wide on a screen 120 wide"
+    );
+    assert!(
+        narrowed >= 20,
+        "{narrowed} rows were drawn after the resize, so the narrow screen was never drawn"
+    );
+}
+
+#[test]
+fn output_lost() {
+    // Input on one terminal and output on another, so closing the output's end
+    // can end the pane only through the writer.
+    let (scratch, home) = (tall("writer-lost"), TempDir::new("writer-lost-home"));
+    let (mut child, mut input, mut output, mut stderr) = pty::split(pane(&scratch, &home));
+    // SAFETY: a descriptor this test owns.
+    unsafe { libc::fcntl(output.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) };
+    let mut seen = Vec::new();
+    let mut buffer = [0u8; 65536];
+    // Past the startup queries too, which would read the keys as their answer.
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(2) {
+        match output.read(&mut buffer) {
+            Ok(n) if n > 0 => seen.extend_from_slice(&buffer[..n]),
+            _ => std::thread::sleep(Duration::from_millis(5)),
+        }
+    }
+    assert!(text_of(&seen).contains(FRAME_END), "the pane never drew");
+    drop(output);
+    for _ in 0..5 {
+        let _ = input.write_all(b"j");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        child.exited_unread(Duration::from_secs(3)).is_some(),
+        "the pane went on with no terminal to draw on"
+    );
+    let mut said = String::new();
+    let _ = stderr.read_to_string(&mut said);
+    assert!(
+        said.contains("stopped taking output"),
+        "the pane did not say its output was lost: {said:?}"
+    );
+}
+
+fn text_of(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 #[test]

@@ -9,10 +9,27 @@ use std::time::{Duration, Instant};
 
 /// Set by a panic's or a signal's restore: the writer writes nothing more, so
 /// the restore is the last thing the terminal reads.
-pub static POISONED: AtomicBool = AtomicBool::new(false);
+static POISONED: AtomicBool = AtomicBool::new(false);
+
+/// Whether a write to the terminal is in flight, so a restore can wait it out.
+static WRITING: AtomicBool = AtomicBool::new(false);
+
+/// Stop every writer, and wait until no write of theirs is in flight, so the
+/// restore that follows is the last thing the terminal reads. Bounded: a
+/// write waits at most [`POLL`] for room.
+pub fn poison() {
+    POISONED.store(true, Ordering::SeqCst);
+    let until = Instant::now() + 2 * POLL;
+    while WRITING.load(Ordering::SeqCst) && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
 
 /// The longest one wait for room to write lasts, so a stop is noticed this soon.
 const POLL: Duration = Duration::from_millis(50);
+
+/// How long a dropped writer goes on writing what it was handed.
+const STOP_WAIT: Duration = Duration::from_millis(200);
 
 /// The most one write hands the terminal, so a stop or a poison is noticed
 /// between pieces of a large frame.
@@ -65,7 +82,7 @@ impl Shared {
     }
 
     fn stopping(&self) -> bool {
-        self.abandon.load(Ordering::Acquire) || POISONED.load(Ordering::Acquire)
+        self.abandon.load(Ordering::Acquire) || POISONED.load(Ordering::SeqCst)
     }
 }
 
@@ -167,7 +184,7 @@ impl Writer {
 
 impl Drop for Writer {
     fn drop(&mut self) {
-        self.stop(Duration::from_millis(200));
+        self.stop(STOP_WAIT);
     }
 }
 
@@ -223,12 +240,17 @@ pub trait Out {
 fn write_out(out: &mut impl Out, bytes: &[u8], shared: &Shared, wakes: &Wakes) -> io::Result<()> {
     let mut rest = bytes;
     while !rest.is_empty() {
+        // Marked before the check, so `poison` either stops this write or waits for it.
+        WRITING.store(true, Ordering::SeqCst);
         if shared.stopping() {
+            WRITING.store(false, Ordering::SeqCst);
             shared.wrote(rest.len(), wakes);
             return Ok(());
         }
         let piece = &rest[..rest.len().min(PIECE)];
-        let written = out.write_some(piece, POLL)?;
+        let written = out.write_some(piece, POLL);
+        WRITING.store(false, Ordering::SeqCst);
+        let written = written?;
         if written > 0 {
             shared.wrote(written, wakes);
             rest = &rest[written..];

@@ -98,6 +98,45 @@ pub fn start(mut command: Command, script: &Script<'_>) -> (Reaped, File) {
     (child, terminal)
 }
 
+/// Start `command` with its input and controlling terminal on one terminal and
+/// its output on another: the child, both masters, and its standard error.
+pub fn split(mut command: Command) -> (Reaped, File, File, std::process::ChildStderr) {
+    let (input, input_slave) = open();
+    let (output, output_slave) = open();
+    let size = libc::winsize {
+        ws_row: 40,
+        ws_col: 100,
+        ws_xpixel: 1000,
+        ws_ypixel: 800,
+    };
+    for master in [&input, &output] {
+        // SAFETY: descriptors this test owns, and a valid winsize. Closed on
+        // exec, or the child would hold the masters open and never see a hangup.
+        unsafe {
+            libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ, &size);
+            libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
+        }
+    }
+    command
+        .stdin(Stdio::from(input_slave.try_clone().expect("dup")))
+        .stdout(Stdio::from(output_slave.try_clone().expect("dup")))
+        .stderr(Stdio::piped());
+    // SAFETY: only async-signal-safe calls between fork and exec. The
+    // controlling terminal is taken through stdin, the input's.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = command.spawn().expect("spawn the child");
+    let stderr = child.stderr.take().expect("piped");
+    drop((input_slave, output_slave));
+    (Reaped(child), input, output, stderr)
+}
+
 /// The child's `asked` line.
 pub fn asked_line(text: &str) -> &str {
     text.lines()

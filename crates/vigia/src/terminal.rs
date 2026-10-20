@@ -272,7 +272,7 @@ fn install_hook() {
     // Under the pane's own, so the pane ends the process whoever started it.
     install_abort_hook();
     install_hook_in(&HOOK, || {
-        crate::writer::POISONED.store(true, std::sync::atomic::Ordering::Release);
+        crate::writer::poison();
         restore_everything(&mut Crossterm::on_terminal());
     });
 }
