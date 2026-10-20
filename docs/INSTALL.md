@@ -1,11 +1,5 @@
 # Installing vigia
 
-With a Rust toolchain:
-
-```sh
-cargo install vigia
-```
-
 Homebrew, on macOS and Linux:
 
 ```sh
@@ -21,6 +15,14 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/breferrari/vigia/releas
 # Windows
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/breferrari/vigia/releases/latest/download/vigia-installer.ps1 | iex"
 ```
+
+From source, with a Rust toolchain:
+
+```sh
+cargo install vigia
+```
+
+A source build leaves PDF pictures off: PDFs need a release binary or Homebrew.
 
 ```sh
 vigia ~/code/some-repo                       # or any path

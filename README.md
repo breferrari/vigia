@@ -12,6 +12,8 @@
 
 It shows the working-tree diff live, as the agent writes it. Click a line, type one sentence, and it goes to the agent that wrote that line.
 
+`< 50 ms` to first paint · `60 fps` while files are being written · `0` wakeups while idle · legible at `40` columns · pure Rust, on macOS · Linux · Windows
+
 </div>
 
 <img src="assets/preview.svg" alt="The vigia interface: a pinned list of changed files, each row carrying a caret, a status letter, a path, a note mark, a change sparkline, a heat strip and line counts, above a syntax highlighted diff whose own file heading repeats the same row, with a note box open under a changed line holding a half-typed sentence for the agent, a scrollbar down its side and a status bar showing key hints, frame time, resident memory and the follow state." width="100%">
@@ -36,6 +38,16 @@ It shows the working-tree diff live, as the agent writes it. Click a line, type 
 
 > [!NOTE]
 > **A monitor, not a reviewer.** It can browse history and send your notes to the agent, but it asks nothing of you. A reviewer is something you launch, work through and finish. `vigia` is already open, correct before you touch it, and still correct if you never do.
+
+## ⏱️ Try it in 30 seconds
+
+```sh
+brew install breferrari/tap/vigia                 # macOS and Linux
+vigia                                             # in the pane beside your agent, inside a repo
+claude mcp add --scope user vigia -- vigia mcp    # optional: let your notes reach Claude Code
+```
+
+No Homebrew, or on Windows? [Install](#install) has a prebuilt installer for each.
 
 ---
 
@@ -95,14 +107,17 @@ Then add the three hooks to `~/.claude/settings.json`. [**Notes to the agent**](
 
 ---
 
+<a id="install"></a>
+
 ## 🚀 Install
 
+Homebrew, on macOS and Linux:
+
 ```sh
-cargo install vigia                          # with a Rust toolchain
-brew install breferrari/tap/vigia            # Homebrew, macOS and Linux
+brew install breferrari/tap/vigia
 ```
 
-Or a prebuilt binary with no toolchain at all:
+A prebuilt binary, with no toolchain at all:
 
 ```sh
 # macOS and Linux
@@ -111,6 +126,8 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/breferrari/vigia/releas
 # Windows
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/breferrari/vigia/releases/latest/download/vigia-installer.ps1 | iex"
 ```
+
+From source, with a Rust toolchain: `cargo install vigia`. A source build leaves PDF pictures off.
 
 [**Installing**](https://github.com/breferrari/vigia/blob/main/docs/INSTALL.md) covers the release archives, checking a download, and upgrading on Windows while an agent session is open.
 
@@ -214,6 +231,27 @@ NO_COLOR=1 vigia                # every ladder collapses to something readable
 These pages track `main`. For a released version, browse its tag.
 
 **About the picture at the top.** It is a mockup drawn with `VIGIA_THEME=dark`, not a screenshot, and everything in it draws in the real pane. One difference: the real header shows your worktree's name where the picture says `vigia`.
+
+## ❓ Questions
+
+**Does it change my repository?** No. It writes nothing into the worktree and nothing into `.git`. Your notes live in a directory for this worktree under your state directory.
+
+**Does it need an agent?** No. It is a live diff on its own. An agent is only needed to receive your notes.
+
+**Does it go online?** Once per start, to ask crates.io whether a newer release exists. `VIGIA_UPDATE=off` turns that off. Nothing else leaves the machine.
+
+**Does it need git-lfs?** No. An LFS image is read from the local LFS store, and the pane never starts `git-lfs`.
+
+**Does it work on Windows?** Yes. Use the PowerShell installer above, and Windows Terminal draws pictures sharp.
+
+**Which terminals draw sharp pictures?**
+
+| Draws | Terminals |
+|---|---|
+| Kitty graphics | kitty, Ghostty, and either one through tmux |
+| Sixel | foot, Windows Terminal |
+| iTerm2 images | iTerm2, WezTerm |
+| Half-blocks | everything else, given 24-bit colour |
 
 ## 🗺️ Status
 
