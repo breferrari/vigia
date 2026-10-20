@@ -807,8 +807,7 @@ fn worker_skips_hidden() {
     assert_eq!(pane.pictures.kept(), 0, "a picture off screen was kept");
 }
 
-/// The Kitty placeholder every cell of a Kitty picture carries.
-const PLACEHOLDER: char = '\u{10EEEE}';
+use vigia::pictures::PLACEHOLDER;
 
 /// A settled pane drawing a modified screen image in `protocol`.
 fn protocol_pane(name: &str, protocol: ProtocolType) -> (Scratch, Pane) {

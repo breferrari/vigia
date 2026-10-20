@@ -1196,22 +1196,20 @@ impl Shell {
 
     /// Send the Kitty deletes owed, unless an image is part way out.
     fn write_deletes(&mut self) {
-        use std::io::Write;
         let deletes = self.pictures.deletes();
-        if !deletes.is_empty() {
-            let _ = self
-                .session
-                .screen()
-                .backend_mut()
-                .write_all(deletes.as_bytes());
-        }
+        self.write_out(&deletes);
     }
 
-    /// Send the Kitty deletes owed and up to `budget` bytes of transmits. A
-    /// failed write leaves the images to the terminal's own quota.
+    /// Send the Kitty deletes owed and up to `budget` bytes of transmits.
     fn write_pictures(&mut self, budget: usize) {
-        use std::io::Write;
         let out = self.pictures.output(budget);
+        self.write_out(&out);
+    }
+
+    /// Write `out` past the cells. A failed write leaves the images to the
+    /// terminal's own quota.
+    fn write_out(&mut self, out: &str) {
+        use std::io::Write;
         if !out.is_empty() {
             let _ = self
                 .session

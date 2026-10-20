@@ -953,13 +953,13 @@ impl Pictures {
     /// Drop each picture `doomed` names, and owe the deletes of its Kitty images.
     fn retire_where(&mut self, doomed: impl Fn(&Arc<Key>, &Built) -> bool) {
         let (retired, seen) = (&mut self.retired, &mut self.seen);
-        let mut dropped_keys = Vec::new();
+        let mut dropped_keys = HashSet::new();
         self.built.retain(|key, ready| {
             let dropped = doomed(key, &ready.0);
             if dropped {
                 retired.extend(&ready.0.kitty);
                 seen.remove(key);
-                dropped_keys.push(Arc::clone(key));
+                dropped_keys.insert(Arc::clone(key));
             }
             !dropped
         });
@@ -1052,6 +1052,9 @@ impl Pictures {
     /// at least one.
     pub fn output(&mut self, budget: usize) -> String {
         use ratatui_image::picker::cap_parser::Parser;
+        if self.outbox.is_empty() {
+            return self.retired();
+        }
         let (_, escape, end) = Parser::tmux_start_escape_end(self.tmux);
         let close = format!("{escape}\\{end}");
         let mut out = String::new();
@@ -1200,7 +1203,7 @@ impl Pictures {
 
 /// The most of the Kitty transmits waiting that one frame writes. `SPEC.md`
 /// §11.1 sets it against the terminal's read rate.
-pub const TRANSMIT_FRAME: usize = 64 * 1024;
+pub const TRANSMIT_FRAME: usize = 32 * 1024;
 
 /// The most a pane's kept Kitty pictures may hold, by [`Built::stored`].
 /// kitty and Ghostty each store 320 MB of image data per screen and evict the
@@ -1765,7 +1768,7 @@ fn taken(protocol: &SlicedProtocol, slot: Slot) -> String {
 }
 
 /// What kitty draws a placed image's cells as.
-const PLACEHOLDER: char = '\u{10EEEE}';
+pub const PLACEHOLDER: char = '\u{10EEEE}';
 
 /// A slot's half-block grid: two pixels to a cell's height.
 fn grid_of(slot: Slot) -> (u32, u32) {
@@ -2121,6 +2124,42 @@ mod tests {
             pictures.get(&edited).is_none(),
             "the picture staging replaced was kept"
         );
+    }
+
+    #[test]
+    fn transmit_taken() {
+        #[allow(deprecated)]
+        let mut picker = Picker::from_fontsize((10, 20).into());
+        picker.set_protocol_type(ProtocolType::Kitty);
+        let inks = Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        };
+        let slot = Slot {
+            x: 0,
+            width: 4,
+            rows: 2,
+        };
+        let (protocol, _) = panel(
+            RgbImage::new(40, 40),
+            None,
+            slot,
+            Paint::Plain,
+            inks,
+            &picker,
+            false,
+        )
+        .expect("a panel");
+        let transmit = taken(&protocol, slot);
+        assert!(
+            transmit.starts_with("\x1b_G") && transmit.contains("a=T"),
+            "the transmit was not where the crate draws it: {transmit:?}"
+        );
+        assert!(
+            !transmit.contains(PLACEHOLDER),
+            "the placement came out with it"
+        );
+        assert_eq!(taken(&protocol, slot), "", "the crate sent the image twice");
     }
 
     #[test]

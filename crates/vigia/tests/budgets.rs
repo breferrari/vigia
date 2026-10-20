@@ -3848,6 +3848,10 @@ fn held_kitty(scratch: &Scratch, rate: u64) -> Held {
     let reads: Arc<Mutex<Reads>> = Arc::default();
     let into = Arc::clone(&reads);
     std::thread::spawn(move || {
+        // Paced against the total read, since a sleep per read rounds up to the
+        // scheduler's tick and would read slower than `rate`.
+        let begun = Instant::now();
+        let mut total = 0u64;
         let mut buffer = [0u8; 4096];
         while let Ok(read) = master.read(&mut buffer) {
             if read == 0 {
@@ -3856,7 +3860,11 @@ fn held_kitty(scratch: &Scratch, rate: u64) -> Held {
             into.lock()
                 .expect("reads")
                 .push((Instant::now(), buffer[..read].to_vec()));
-            std::thread::sleep(Duration::from_secs_f64(read as f64 / rate as f64));
+            total += read as u64;
+            let due = begun + Duration::from_secs_f64(total as f64 / rate as f64);
+            if let Some(wait) = due.checked_duration_since(Instant::now()) {
+                std::thread::sleep(wait);
+            }
         }
     });
 
@@ -3913,7 +3921,7 @@ fn held_kitty(scratch: &Scratch, rate: u64) -> Held {
 
     let text = String::from_utf8_lossy(&wire);
     let (mut frame_transmit, mut begun, mut finished) = (0, 0, 0);
-    for frame in text.split("\x1b[?25l") {
+    for frame in text.split(std::str::from_utf8(END).expect("ASCII")) {
         let mut carried = 0;
         for apc in frame.split("\x1b_G").skip(1) {
             let apc = apc.split("\x1b\\").next().unwrap_or_default();
