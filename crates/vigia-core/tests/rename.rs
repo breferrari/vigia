@@ -210,7 +210,8 @@ fn binary_rename_smallest_first() {
     // Two small pairs and one large one, more than a frame together: the
     // small ones are scored first.
     let small: Vec<Vec<u8>> = (0..2).map(|n| noise(30 + n, 20_000)).collect();
-    let large = noise(40, 450_000);
+    // The large pair fits a frame alone, and not beside the small ones.
+    let large = noise(40, 100_000);
     let scratch = moved(
         "rename-smallest",
         &[
@@ -329,10 +330,11 @@ fn binary_rename_small_before_text() {
     // Two large text pairs come first in the walk, and the small binary pair
     // is still paid for first.
     let text = |n: u8| -> Vec<u8> {
-        (0..500_000u32)
+        (0..100_000u32)
             .map(|at| b'a' + ((at + u32::from(n)) % 26) as u8)
             .collect()
     };
+    // The text removals' reads, 200 KB, would leave too little for it.
     let small = noise(80, 30_000);
     let scratch = moved(
         "rename-small-first",

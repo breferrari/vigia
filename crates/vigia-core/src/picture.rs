@@ -440,6 +440,12 @@ pub(crate) fn path_stamp(path: &str, meta: &std::fs::Metadata) -> u64 {
     stamp_of(path, meta.len(), meta.modified().ok(), inode)
 }
 
+/// The stamp of a worktree file `stat` could not describe: its path alone, so
+/// two such files never share one.
+pub(crate) fn unread_stamp(path: &str) -> u64 {
+    stamp_of(path, 0, None, 0)
+}
+
 /// The stamp of a file at `path` that `stat` describes. With the path:
 /// without an inode, as on Windows, two files of one size written in one
 /// tick share the rest.

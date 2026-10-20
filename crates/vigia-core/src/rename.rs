@@ -38,21 +38,82 @@ pub(crate) fn sizes_fit(a: u64, b: u64) -> bool {
 /// line feed or after 64 bytes. Zero when neither side is binary, a pair
 /// `gix` scored itself.
 pub fn pair_score(old: &[u8], new: &[u8]) -> u64 {
-    let (old_text, new_text) = (!crate::hunk::is_binary(old), !crate::hunk::is_binary(new));
-    if old_text && new_text {
-        return 0;
+    Spans::of(old).score(&Spans::of(new))
+}
+
+/// One side cut into git's chunks: how many bytes each chunk hash covers,
+/// sorted by hash, as git's `hash_chars` leaves them.
+pub(crate) struct Spans {
+    binary: bool,
+    len: u64,
+    counts: Vec<(u32, u64)>,
+}
+
+impl Spans {
+    /// `data`'s chunks. A text side drops the CR of a CRLF.
+    pub(crate) fn of(data: &[u8]) -> Self {
+        let binary = crate::hunk::is_binary(data);
+        let mut hashes = Vec::new();
+        let (mut first, mut second, mut length) = (0u32, 0u32, 0u64);
+        for (at, &byte) in data.iter().enumerate() {
+            if !binary && byte == b'\r' && data.get(at + 1) == Some(&b'\n') {
+                continue;
+            }
+            let old = first;
+            first = (first << 7) ^ (second >> 25);
+            second = (second << 7) ^ (old >> 25);
+            first = first.wrapping_add(u32::from(byte));
+            length += 1;
+            if length < 64 && byte != b'\n' {
+                continue;
+            }
+            hashes.push((hash(first, second), length));
+            (first, second, length) = (0, 0, 0);
+        }
+        if length > 0 {
+            hashes.push((hash(first, second), length));
+        }
+        hashes.sort_unstable_by_key(|&(hash, _)| hash);
+        let mut counts: Vec<(u32, u64)> = Vec::with_capacity(hashes.len());
+        for (hash, length) in hashes {
+            match counts.last_mut() {
+                Some(last) if last.0 == hash => last.1 += length,
+                _ => counts.push((hash, length)),
+            }
+        }
+        Self {
+            binary,
+            len: data.len() as u64,
+            counts,
+        }
     }
-    let max = old.len().max(new.len()) as u64;
-    if !sizes_fit(old.len() as u64, new.len() as u64) {
-        return 0;
+
+    /// Git's score of this side, the old one, against `new`.
+    pub(crate) fn score(&self, new: &Self) -> u64 {
+        if !self.binary && !new.binary {
+            return 0;
+        }
+        let max = self.len.max(new.len);
+        if !sizes_fit(self.len, new.len) {
+            return 0;
+        }
+        let (mut copied, mut theirs) = (0, new.counts.iter().peekable());
+        for &(hash, count) in &self.counts {
+            while theirs.next_if(|&&(other, _)| other < hash).is_some() {}
+            if let Some(&&(other, kept)) = theirs.peek()
+                && other == hash
+            {
+                copied += count.min(kept);
+            }
+        }
+        copied * MAX_SCORE / max
     }
-    let (old_spans, new_spans) = (spans(old, old_text), spans(new, new_text));
-    let copied: u64 = old_spans
-        .iter()
-        .zip(&new_spans)
-        .map(|(&old, &new)| old.min(new))
-        .sum();
-    copied * MAX_SCORE / max
+}
+
+/// A chunk's hash, under git's prime.
+fn hash(first: u32, second: u32) -> u32 {
+    const HASHBASE: u32 = 107_927;
+    first.wrapping_add(second.wrapping_mul(0x61)) % HASHBASE
 }
 
 /// [`pair_score`] of a candidate's two sides, read on the calling thread; 0
@@ -68,37 +129,4 @@ pub fn candidate_score(candidate: &Candidate) -> u64 {
 /// Whether a score pairs.
 pub fn pairs(score: u64) -> bool {
     score >= MINIMUM_SCORE
-}
-
-/// Git's chunk hashes fall under this prime.
-const HASHBASE: u32 = 107_927;
-
-/// Bytes per chunk hash, as git's `hash_chars` counts them, indexed by the
-/// hash. A text side drops the CR of a CRLF.
-fn spans(data: &[u8], text: bool) -> Vec<u64> {
-    let mut out = vec![0; HASHBASE as usize];
-    let (mut first, mut second, mut length) = (0u32, 0u32, 0u64);
-    let mut add = |first: u32, second: u32, length: u64| {
-        let hash = first.wrapping_add(second.wrapping_mul(0x61)) % HASHBASE;
-        out[hash as usize] += length;
-    };
-    for (at, &byte) in data.iter().enumerate() {
-        if text && byte == b'\r' && data.get(at + 1) == Some(&b'\n') {
-            continue;
-        }
-        let old = first;
-        first = (first << 7) ^ (second >> 25);
-        second = (second << 7) ^ (old >> 25);
-        first = first.wrapping_add(u32::from(byte));
-        length += 1;
-        if length < 64 && byte != b'\n' {
-            continue;
-        }
-        add(first, second, length);
-        (first, second, length) = (0, 0, 0);
-    }
-    if length > 0 {
-        add(first, second, length);
-    }
-    out
 }

@@ -514,6 +514,16 @@ impl Worktree {
                 })
                 .clone()
         };
+        // Each side cut into chunks once in this walk, however many pairs it is in.
+        let cut: RefCell<HashMap<usize, Option<std::rc::Rc<rename::Spans>>>> = RefCell::default();
+        let spans_of = |at: usize| {
+            if let Some(spans) = cut.borrow().get(&at) {
+                return spans.clone();
+            }
+            let spans = bytes_of(at).map(|bytes| std::rc::Rc::new(rename::Spans::of(&bytes)));
+            cut.borrow_mut().insert(at, spans.clone());
+            spans
+        };
         // Each side the budget paid for in this walk, which is read at most once.
         let charged: RefCell<std::collections::HashSet<usize>> = RefCell::default();
         let charge = |at: usize, size: u64| -> bool {
@@ -607,8 +617,8 @@ impl Worktree {
                 None if cost <= self.pair_budget.get() => {
                     charge(pair.from, pair.sizes.0);
                     charge(pair.to, pair.sizes.1);
-                    let score = match (bytes_of(pair.from), bytes_of(pair.to)) {
-                        (Some(old), Some(new)) => rename::pair_score(&old, &new),
+                    let score = match (spans_of(pair.from), spans_of(pair.to)) {
+                        (Some(old), Some(new)) => old.score(&new),
                         _ => 0,
                     };
                     self.keep_score(pair.key, score);
@@ -1307,8 +1317,10 @@ impl Worktree {
         if let Some(side) = picture.after.as_mut() {
             side.stamp = match change.after {
                 Some(Side::Blob(id)) => picture::blob_stamp(&id),
-                _ => std::fs::metadata(self.workdir.join(&change.path))
-                    .map_or(0, |meta| picture::path_stamp(&change.path, &meta)),
+                _ => std::fs::metadata(self.workdir.join(&change.path)).map_or_else(
+                    |_| picture::unread_stamp(&change.path),
+                    |meta| picture::path_stamp(&change.path, &meta),
+                ),
             };
         }
     }
