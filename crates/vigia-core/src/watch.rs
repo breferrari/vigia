@@ -1230,6 +1230,100 @@ mod tests {
         );
     }
 
+    /// A store watch that ticks is not counted as filtered; one that does not is.
+    #[test]
+    fn armed_filter_counts() {
+        let (base, tree, store) = outside_store("store-filtered");
+        let repo = gix::open(&tree).expect("open");
+        let mut watcher = watch_with(&tree, &repo, |_, _, _| Ok(()));
+        let before = watcher.stats.filtered;
+        let ancestor = Message::Armed {
+            path: base.0.clone(),
+            mode: RecursiveMode::NonRecursive,
+            result: Ok(()),
+        };
+        let accepted = watcher.accept(ancestor).expect("not a stop");
+        assert!(!accepted.relevant, "an ancestor's arm ticked");
+        assert_eq!(
+            watcher.stats.filtered,
+            before + 1,
+            "an ancestor's arm was not filtered"
+        );
+        let objects = Message::Armed {
+            path: store.join("objects"),
+            mode: RecursiveMode::Recursive,
+            result: Ok(()),
+        };
+        let accepted = watcher.accept(objects).expect("not a stop");
+        assert!(accepted.relevant, "the store's arm did not tick");
+        assert_eq!(
+            watcher.stats.filtered,
+            before + 1,
+            "a ticking arm was filtered"
+        );
+    }
+
+    /// An I/O failure says its kind, not its message.
+    #[test]
+    fn store_notice_reason() {
+        let error = notify::Error::io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "EACCES on the store",
+        ));
+        let notice = store_notice(&error);
+        assert!(notice.ends_with(": permission denied"), "{notice}");
+    }
+
+    /// A path not made yet is spelled through its nearest real ancestor.
+    #[cfg(unix)]
+    #[test]
+    fn ancestor_spelled_canonically() {
+        let (base, _tree, _store) = outside_store("store-spelling");
+        let real = base.0.join("real");
+        std::fs::create_dir_all(&real).expect("real");
+        let link = base.0.join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("link");
+        let spelled = ancestor_spelling(&link.join("lfs").join("objects"));
+        let expected = real
+            .canonicalize()
+            .expect("canonical")
+            .join("lfs")
+            .join("objects");
+        assert_eq!(spelled, Some(expected));
+    }
+
+    /// A store named through a symlink is matched by its real spelling too, which
+    /// is the one an event reports.
+    #[cfg(unix)]
+    #[test]
+    fn store_canonical_spelling() {
+        let (base, tree, _store) = outside_store("store-linked");
+        let real = base.0.join("real");
+        std::fs::create_dir_all(&real).expect("real");
+        let link = base.0.join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("link");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&tree)
+            .args(["config", "lfs.storage"])
+            .arg(link.join("store"))
+            .output()
+            .expect("git config");
+        assert!(out.status.success(), "git config");
+        let repo = gix::open(&tree).expect("open");
+        let watcher = watch_with(&tree, &repo, |_, _, _| Ok(()));
+        let canonical = real
+            .canonicalize()
+            .expect("canonical")
+            .join("store")
+            .join("objects");
+        assert!(
+            watcher.store.contains(&canonical),
+            "{canonical:?} is not among {:?}",
+            watcher.store
+        );
+    }
+
     /// Build a path the way the host spells one, so the Windows run and the
     /// Unix run are testing their own separator rather than a literal.
     fn native(components: &[&str]) -> PathBuf {

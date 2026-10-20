@@ -1346,6 +1346,9 @@ fn no_lfs_no_store_watch() {
     let store = holder.path().join("store");
     std::fs::create_dir_all(store.join("objects")).expect("store");
     let scratch = committed_scratch("watch-lfs-none-repo");
+    // Attributes that name no LFS filter are not LFS.
+    scratch.write(".gitattributes", "*.txt text eol=lf\n");
+    scratch.commit_all("attributes");
     scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
     let scratch = scratch.settled();
     let worktree = scratch.worktree();
@@ -1433,5 +1436,45 @@ fn user_attributes_arm() {
     assert!(
         watcher.store_wanted(),
         "LFS named in core.attributesFile left the store unwatched"
+    );
+}
+
+#[test]
+fn info_attributes_adopted_arms() {
+    let holder = support::TempDir::new("watch-lfs-info");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = committed_scratch("watch-lfs-info-repo");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.write(".git/info/attributes", LFS_LINE);
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
+}
+
+/// Once armed, the store is not armed again by the events that follow.
+#[test]
+fn store_armed_once() {
+    let holder = support::TempDir::new("watch-lfs-once");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = lfs_scratch("watch-lfs-once-repo", ".gitattributes", LFS_LINE, &store);
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    for round in 0..3 {
+        scratch.write("a.txt", format!("{round}\n"));
+        assert!(tick_within(&mut watcher, SETTLE).is_some(), "the write did not tick");
+        while tick_within(&mut watcher, IDLE).is_some() {}
+    }
+    assert_eq!(
+        watcher.store_watched().len(),
+        1,
+        "the store was armed again: {:?}",
+        watcher.store_watched()
     );
 }

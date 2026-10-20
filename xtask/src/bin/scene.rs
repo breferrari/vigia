@@ -230,6 +230,8 @@ fn lfs_object() -> Vec<u8> {
 }
 
 const MISSING_SEED: u8 = 0x22;
+/// The worktree's picture for the missing object, unlike the committed one.
+const MISSING_NEW_SEED: u8 = 0x23;
 
 /// The LFS object `lfs/missing.png`'s pointer names, which only `replay` lands.
 fn missing_object() -> Vec<u8> {
@@ -423,7 +425,7 @@ impl Scene {
         self.git(&["add", ".gitattributes"]);
         self.git(&["commit", "-q", "-m", "lfs attribute"]);
         self.write(&object_path(&oid), object);
-        self.write("lfs/missing.png", assets::png(96, 64, MISSING_SEED + 1));
+        self.write("lfs/missing.png", assets::png(96, 64, MISSING_NEW_SEED));
         self.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
         self.racy("lfs/unchanged.png");
     }
@@ -636,6 +638,7 @@ mod tests {
     fn scene_static_states() {
         let dir = built();
         let found = listed(&dir);
+        assert!(states().len() > 20, "the scene lists almost no states");
         for (path, _) in states() {
             assert!(
                 found.contains_key(&path),
