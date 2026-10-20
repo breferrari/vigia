@@ -71,6 +71,9 @@ pub struct Worktree {
     /// Whether each LFS file's bytes equal its object, by its fingerprint and its
     /// stored blob, kept only once the fingerprint has settled.
     lfs_verdicts: RefCell<HashMap<String, (LfsKey, bool)>>,
+    /// LFS objects the last diff found missing, which [`Frame`] keeps so the diff
+    /// is read again once one arrives.
+    lfs_missing: RefCell<Vec<PathBuf>>,
     /// What each stored blob the walk flagged is as an LFS pointer, if one.
     lfs_pointers: RefCell<HashMap<gix::ObjectId, Option<(String, u64)>>>,
     /// Bytes the current walk may still compare.
@@ -131,6 +134,7 @@ impl Worktree {
             lfs_compares: Cell::new(0),
             lfs_blob_reads: Cell::new(0),
             lfs_verdicts: RefCell::new(HashMap::new()),
+            lfs_missing: RefCell::new(Vec::new()),
             lfs_pointers: RefCell::new(HashMap::new()),
             lfs_budget: Cell::new(LFS_COMPARE_MAX),
             lfs_wait: Cell::new(None),
@@ -307,7 +311,7 @@ impl Worktree {
             self.lfs_wait_until(std::time::SystemTime::now());
             return None;
         }
-        let object = self.lfs_path(oid)?;
+        let object = self.lfs_path(oid).ok()?;
         self.lfs_budget.set(self.lfs_budget.get() - size);
         self.lfs_compares.set(self.lfs_compares.get() + 1);
         same_bytes(path, &object, size)
@@ -1170,6 +1174,7 @@ impl Worktree {
         svg: bool,
         probes: &mut u64,
     ) -> Result<FileDiff> {
+        self.lfs_missing.borrow_mut().clear();
         if !change.is_diffable() {
             // A conflict and a type change are states rather than diffs, and this
             // method deliberately reads nothing for them.
@@ -1380,28 +1385,35 @@ impl Worktree {
 
     /// The object an LFS pointer names, from this repository's local store.
     fn lfs_side(&self, oid: &str, named: Option<Format>, cost: &mut u64) -> Option<ImageSide> {
-        let path = self.lfs_path(oid)?;
+        let path = match self.lfs_path(oid) {
+            Ok(path) => path,
+            Err(missing) => {
+                self.lfs_missing.borrow_mut().push(missing);
+                return None;
+            }
+        };
         self.file_side(&path, false, named, cost)
     }
 
-    /// Where the LFS object `oid` is stored, when it is a file there. Followed, so
-    /// a store reached through a link reads, and a fifo is never opened.
-    fn lfs_path(&self, oid: &str) -> Option<PathBuf> {
-        let path = picture::lfs_object(&self.lfs_store(), oid);
-        std::fs::metadata(&path)
-            .is_ok_and(|meta| meta.is_file())
-            .then_some(path)
+    /// The LFS objects the last [`Self::diff_counted`] found missing.
+    pub(crate) fn take_lfs_missing(&self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.lfs_missing.borrow_mut())
     }
 
-    /// This repository's LFS store: `lfs.storage`, or `lfs` under the common
-    /// git directory.
-    fn lfs_store(&self) -> PathBuf {
-        let repo = self.repo();
-        let common = repo.common_dir();
-        match repo.config_snapshot().trusted_path("lfs.storage") {
-            Ok(Some(path)) => common.join(path),
-            _ => common.join("lfs"),
+    /// Where the LFS object `oid` is stored, when it is a file there, and where it
+    /// would be otherwise. Followed, so a store reached through a link reads, and
+    /// a fifo is never opened.
+    fn lfs_path(&self, oid: &str) -> std::result::Result<PathBuf, PathBuf> {
+        let path = picture::lfs_object(&self.lfs_store(), oid);
+        if std::fs::metadata(&path).is_ok_and(|meta| meta.is_file()) {
+            Ok(path)
+        } else {
+            Err(path)
         }
+    }
+
+    fn lfs_store(&self) -> PathBuf {
+        lfs_store_of(&self.repo())
     }
 
     /// Where both sides of a changed image can be read from on another thread.
@@ -1420,7 +1432,9 @@ impl Worktree {
                     .ok()
                     .filter(|meta| meta.len() < picture::POINTER_MAX as u64)
                     .and_then(|_| std::fs::read(&path).ok())
-                    .and_then(|head| picture::lfs_oid(&head).and_then(|oid| self.lfs_path(oid)));
+                    .and_then(|head| {
+                        picture::lfs_oid(&head).and_then(|oid| self.lfs_path(oid).ok())
+                    });
                 Some(Source::File(pointer.unwrap_or(path)))
             }
             None => None,
@@ -2551,4 +2565,13 @@ fn same_bytes(a: &Path, b: &Path, len: u64) -> Option<bool> {
         remaining -= chunk as u64;
     }
     Some(true)
+}
+
+/// `repo`'s LFS store: `lfs.storage`, or `lfs` under the common git directory.
+pub(crate) fn lfs_store_of(repo: &gix::Repository) -> PathBuf {
+    let common = repo.common_dir();
+    match repo.config_snapshot().trusted_path("lfs.storage") {
+        Ok(Some(path)) => common.join(path),
+        _ => common.join("lfs"),
+    }
 }

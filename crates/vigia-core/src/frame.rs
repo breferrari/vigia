@@ -2,7 +2,7 @@
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::change::{ChangeKind, FileChange, Origin, Side};
@@ -106,18 +106,29 @@ struct Taken {
     /// this artefact has no working-tree side, or when it could not be
     /// fingerprinted.
     worktree: Option<Observed>,
+    /// LFS objects a side was missing, any of which arriving changes the diff.
+    awaiting: Vec<PathBuf>,
 }
 
 impl Taken {
     /// The evidence a change carries, plus what a read observed of its
     /// working-tree side.
-    fn of(change: &FileChange, worktree: Option<Observed>) -> Self {
+    fn of(change: &FileChange, worktree: Option<Observed>, awaiting: Vec<PathBuf>) -> Self {
         Self {
             kind: change.kind.clone(),
             before: change.before,
             after: change.after,
             worktree,
+            awaiting,
         }
+    }
+
+    /// Whether an object a side was missing is there now, counting each `stat`.
+    fn arrived(&self, probes: &mut u64) -> bool {
+        self.awaiting.iter().any(|object| {
+            *probes += 1;
+            object.is_file()
+        })
     }
 }
 
@@ -843,6 +854,8 @@ impl<'w> Frame<'w> {
         let what = if let Some(measured) = self.spans.get_mut(change)
             && let Some(taken) = measured.taken.as_ref()
         {
+            // An arriving object fills only an image side, whose span is `binary`
+            // either way; `diff` reads the picture again.
             let what = verdict(taken, change, now, &mut fresh);
             if what != Verdict::Remeasure {
                 measured.answered = true;
@@ -889,7 +902,7 @@ impl<'w> Frame<'w> {
                 } else {
                     None
                 };
-                (span, Some(Taken::of(change, worktree)))
+                (span, Some(Taken::of(change, worktree, Vec::new())))
             }
             // A failed read describes nothing, so it is recorded with no evidence at
             // all and [`Measured::taken`] carries why that matters. The flag keeps
@@ -949,15 +962,17 @@ impl<'w> Frame<'w> {
         // Lazily, for the reason [`reusable`] gives: a `stat` this answer will
         // not read is a syscall bought for nothing, and `probes` should count
         // the ones actually taken.
-        let mut probed = false;
+        let (mut probed, mut awaited) = (false, 0);
         let reuse = match self.cached.get(change) {
             None => false,
-            Some(cached) => reusable(&cached.taken, change, || {
-                probed = true;
-                fingerprint(&path)
-            }),
+            Some(cached) => {
+                reusable(&cached.taken, change, || {
+                    probed = true;
+                    fingerprint(&path)
+                }) && !cached.taken.arrived(&mut awaited)
+            }
         };
-        self.stats.probes += u64::from(probed);
+        self.stats.probes += u64::from(probed) + awaited;
 
         if reuse {
             self.stats.reused += 1;
@@ -1021,7 +1036,7 @@ impl<'w> Frame<'w> {
         // The height goes with the diff it was taken from: this read proved both, and
         // a walk that asked the file again would spend a second stat on every drawn
         // file every tick.
-        let taken = Taken::of(change, worktree);
+        let taken = Taken::of(change, worktree, self.worktree.take_lfs_missing());
         self.spans.put(
             change,
             Measured {
@@ -1148,6 +1163,7 @@ mod tests {
             before: index_blob,
             after,
             worktree,
+            awaiting: Vec::new(),
         }
     }
 
@@ -1158,6 +1174,7 @@ mod tests {
             before,
             after: after.map(Side::Blob),
             worktree: None,
+            awaiting: Vec::new(),
         }
     }
 

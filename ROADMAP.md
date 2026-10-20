@@ -345,10 +345,10 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in
 | ✅ | Build fails on new stable. **Found by CI on #636; blocks Phase 9** | [#640](https://github.com/breferrari/vigia/issues/640) |
 | ✅ | Scroll steps past hung rows. **Found while building #634** | [#644](https://github.com/breferrari/vigia/issues/644) |
 | ✅ | Run no filter driver during status **Found while building #655** | [#659](https://github.com/breferrari/vigia/issues/659) |
-| ⬜ | Redraw an LFS image when its object arrives **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
+| ✅ | Redraw an LFS image when its object arrives **Found by review on #636** | [#639](https://github.com/breferrari/vigia/issues/639) |
 | ⬜ | Leave picture rows out of the scrollbar's count **Found by review on #657** | [#660](https://github.com/breferrari/vigia/issues/660) |
-| ⬜ | Resend Kitty images after a tmux reattach **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
-| ⬜ | Follow cell size changes after startup **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
+| ✅ | Resend Kitty images after a tmux reattach **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
+| ✅ | Follow cell size changes after startup **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
 | ✅ | Pair a renamed and changed image as a rename **Found while building #655** | [#658](https://github.com/breferrari/vigia/issues/658) |
 | ⬜ | Check dependencies for advisories, licences and banned crates in CI **Found by the standards review, 2026-10-20** | [#678](https://github.com/breferrari/vigia/issues/678) |
 | ⬜ | Pin every workflow action to a commit and audit the workflows **Found by the standards review, 2026-10-20** | [#679](https://github.com/breferrari/vigia/issues/679) |
@@ -437,6 +437,7 @@ Milestone: [Phase 14](https://github.com/breferrari/vigia/milestone/15). Interna
 | ⬜ | Read the take-order from ROADMAP.md, not milestone titles | [#108](https://github.com/breferrari/vigia/issues/108) |
 | ⬜ | Harden the bump.yml gates against reindents, echoes and env values | [#145](https://github.com/breferrari/vigia/issues/145) |
 | ⬜ | Fail the build when the README calls a released version unreleased. **Found by review on #670** | [#671](https://github.com/breferrari/vigia/issues/671) |
+| ⬜ | Fail the flake-rate workflow when its filter matches no test. **Found on #673** | [#674](https://github.com/breferrari/vigia/issues/674) |
 | ⬜ | Publish to crates.io by trusted publishing and delete the registry token | [#141](https://github.com/breferrari/vigia/issues/141) |
 | ✅ | Decide whether vigia-core's public API is stable **Ruled C by the reader, 2026-10-20** | [#684](https://github.com/breferrari/vigia/issues/684) |
 

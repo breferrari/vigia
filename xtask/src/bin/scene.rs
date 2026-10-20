@@ -158,6 +158,10 @@ fn states() -> Vec<(String, &'static str)> {
                 "claims 20000×20000: could not be decoded",
             ),
             ("lfs/pointer.png", "an LFS pointer, drawn from its object"),
+            (
+                "lfs/missing.png",
+                "an LFS pointer whose object is missing: binary",
+            ),
             ("bin/blob.dat", "binary"),
             ("svg/icon.svg", "SVG, shapes changed"),
             ("svg/label.svg", "SVG, only its text changed"),
@@ -224,6 +228,20 @@ const LFS_SEED: u8 = 0xab;
 /// The LFS object the committed pointer names.
 fn lfs_object() -> Vec<u8> {
     assets::png(96, 64, LFS_SEED)
+}
+
+const MISSING_SEED: u8 = 0x22;
+/// The worktree's picture for the missing object, unlike the committed one.
+const MISSING_NEW_SEED: u8 = 0x23;
+
+/// The LFS object `lfs/missing.png`'s pointer names, which only `replay` lands.
+fn missing_object() -> Vec<u8> {
+    assets::png(96, 64, MISSING_SEED)
+}
+
+/// Where the store keeps the object `oid`.
+fn object_path(oid: &str) -> String {
+    format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4])
 }
 
 /// A two-frame GIF whose first frame comes from `seed`.
@@ -398,6 +416,8 @@ impl Scene {
         self.write("lfs/pointer.png", pointer);
         let (_, unchanged) = assets::lfs_pointer(&assets::png(32, 32, 0x11), 0x11);
         self.write("lfs/unchanged.png", unchanged);
+        let (_, missing) = assets::lfs_pointer(&missing_object(), MISSING_SEED);
+        self.write("lfs/missing.png", missing);
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "-m", "baseline"]);
         self.write(
@@ -406,10 +426,8 @@ impl Scene {
         );
         self.git(&["add", ".gitattributes"]);
         self.git(&["commit", "-q", "-m", "lfs attribute"]);
-        self.write(
-            &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
-            object,
-        );
+        self.write(&object_path(&oid), object);
+        self.write("lfs/missing.png", assets::png(96, 64, MISSING_NEW_SEED));
         self.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
         self.racy("lfs/unchanged.png");
     }
@@ -517,6 +535,10 @@ impl Scene {
         pause(3.0);
         say("gif/animated.gif changed");
         self.write("gif/animated.gif", two_frame_gif(90));
+        pause(3.0);
+        say("lfs/missing.png's object arrives, as git lfs fetch leaves it");
+        let (oid, _) = assets::lfs_pointer(&missing_object(), MISSING_SEED);
+        self.write(&object_path(&oid), missing_object());
         say("done");
     }
 }
@@ -622,6 +644,7 @@ mod tests {
     fn scene_static_states() {
         let dir = built();
         let found = listed(&dir);
+        assert!(states().len() > 20, "the scene lists almost no states");
         for (path, _) in states() {
             assert!(
                 found.contains_key(&path),
@@ -635,6 +658,11 @@ mod tests {
         };
         assert_eq!(at("src/added.rs").kind, ChangeKind::Added);
         assert_eq!(at("src/deleted.rs").kind, ChangeKind::Removed);
+        let missing = at("lfs/missing.png");
+        assert!(
+            missing.binary && !missing.before,
+            "a pointer whose object is missing drew its old side: {missing:?}"
+        );
         for (path, count) in [
             ("src/small.rs", 1),
             ("src/medium.rs", 8),
@@ -1094,6 +1122,11 @@ mod tests {
         assert_eq!(at("src/deleted.rs").kind, ChangeKind::Removed);
         let flaky = at("broken/flaky.png");
         assert!(flaky.after, "the fixed image does not size: {flaky:?}");
+        let arrived = at("lfs/missing.png");
+        assert!(
+            arrived.before,
+            "the landed object does not size: {arrived:?}"
+        );
         assert_eq!(at("gif/animated.gif").kind, ChangeKind::Modified);
     }
 

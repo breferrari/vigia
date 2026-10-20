@@ -1091,6 +1091,17 @@ impl Scratch {
         self.git(&["commit", "-q", "-m", message]);
     }
 
+    /// Move `rela`'s modification time well behind the settle margin, which a
+    /// write a moment ago has not reached.
+    pub fn backdate(&self, rela: &str) {
+        let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(self.path_of(rela))
+            .and_then(|file| file.set_modified(past))
+            .expect("back-date the file");
+    }
+
     /// Wait until nothing under the fixture is still moving.
     #[must_use]
     pub fn settled(self) -> Self {

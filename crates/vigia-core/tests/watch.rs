@@ -1141,6 +1141,367 @@ fn gitignore_renamed_away() {
     );
 }
 
+/// Where an object lands in an LFS store, under `objects`.
+const OBJECT: &str =
+    "objects/ab/cd/abcd0000000000000000000000000000000000000000000000000000000000ef";
+
+/// Write one object into the LFS store at `store`, as `git lfs fetch` leaves it.
+fn land_object(store: &std::path::Path) {
+    let object = store.join(OBJECT);
+    std::fs::create_dir_all(object.parent().expect("a fan-out dir")).expect("fan-out dirs");
+    std::fs::write(object, "image bytes\n").expect("write the object");
+}
+
+#[test]
+fn lfs_store_write_ticks() {
+    let scratch = committed_scratch("watch-lfs-store");
+    std::fs::create_dir_all(scratch.path_of(".git/lfs/objects")).expect("store");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    land_object(&scratch.path_of(".git/lfs"));
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an object landing in the LFS store produced no tick"
+    );
+}
+
+#[test]
+fn lfs_tmp_wakes_nothing() {
+    let scratch = committed_scratch("watch-lfs-tmp");
+    std::fs::create_dir_all(scratch.path_of(".git/lfs/tmp")).expect("tmp");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    std::fs::write(scratch.path_of(".git/lfs/tmp/download"), "part\n").expect("write tmp");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a download in progress woke the pane"
+    );
+}
+
+/// A committed repository whose `rela` attributes file holds `line`, with its
+/// `lfs.storage` at `store`.
+fn lfs_scratch(name: &str, rela: &str, line: &str, store: &std::path::Path) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write("a.txt", "x\n");
+    scratch.write(rela, line);
+    scratch.commit_all("initial");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    scratch.settled()
+}
+
+const LFS_LINE: &str = "*.png filter=lfs diff=lfs merge=lfs -text\n";
+
+/// Only a guard against a hang: a passing wait returns when the arm does. Each
+/// arm restarts a macOS event stream, which took tens of seconds with six
+/// watch suites running at once. `VIGIA_TEST_CEILING` (seconds) shortens it for
+/// a mutation run, where the hang is the kill.
+fn arming() -> Duration {
+    support::ceiling(Duration::from_secs(180))
+}
+
+/// Drive `watcher` until its store's own watch covers exactly `paths`, since a
+/// finished arm is only taken while it waits for a tick.
+fn store_covers(watcher: &mut Watcher<'_>, paths: &[&std::path::Path], within: Duration) {
+    let canonical = |path: &std::path::Path| path.canonicalize().ok();
+    let deadline = Instant::now() + within;
+    loop {
+        let watched = watcher.store_watched();
+        if watched.len() == paths.len()
+            && paths.iter().all(|path| {
+                watched
+                    .iter()
+                    .any(|held| canonical(held) == canonical(path))
+            })
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the store watched {watched:?}, not {paths:?}"
+        );
+        let _ = tick_within(watcher, Duration::from_millis(50));
+    }
+}
+
+/// An `lfs.storage` outside the worktree that does not exist when the watch arms.
+#[test]
+fn lfs_storage_write_ticks() {
+    let holder = support::TempDir::new("watch-lfs-storage");
+    let store = holder.path().join("store");
+    let scratch = lfs_scratch("watch-lfs-storage-repo", ".gitattributes", LFS_LINE, &store);
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    store_covers(&mut watcher, &[holder.path()], arming());
+
+    land_object(&store);
+    // Waited on directly: a stop mid-burst, as `store_covers` sends, drops the tick.
+    assert!(
+        tick_within(&mut watcher, arming()).is_some(),
+        "the first object, landing as its store armed, produced no tick"
+    );
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    std::fs::write(store.join(OBJECT).with_extension("next"), "more\n").expect("second");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an object landing in the armed store produced no tick"
+    );
+}
+
+/// Once the missing store appears and is watched, its ancestor's watch goes.
+#[test]
+fn lfs_ancestor_released() {
+    let holder = support::TempDir::new("watch-lfs-released");
+    let store = holder.path().join("store");
+    let scratch = lfs_scratch(
+        "watch-lfs-released-repo",
+        ".gitattributes",
+        LFS_LINE,
+        &store,
+    );
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    store_covers(&mut watcher, &[holder.path()], arming());
+
+    std::fs::create_dir_all(store.join("objects")).expect("the store");
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
+}
+
+#[test]
+fn linked_lfs_store_ticks() {
+    let scratch = linked_scratch("watch-linked-lfs");
+    std::fs::create_dir_all(scratch.path_of(".git/lfs/objects")).expect("store");
+    scratch.write(".git/info/attributes", "*.png filter=lfs\n");
+    let scratch = scratch.settled();
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    store_covers(
+        &mut watcher,
+        &[&scratch.path_of(".git/lfs/objects")],
+        arming(),
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    land_object(&scratch.path_of(".git/lfs"));
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an object landing in the common dir's LFS store produced no tick"
+    );
+}
+
+#[test]
+fn nested_lfs_attributes_arm() {
+    let holder = support::TempDir::new("watch-lfs-nested");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = lfs_scratch(
+        "watch-lfs-nested-repo",
+        "assets/.gitattributes",
+        LFS_LINE,
+        &store,
+    );
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    land_object(&store);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "LFS named only in a nested .gitattributes left the store unwatched"
+    );
+}
+
+#[test]
+fn lfs_comment_does_not_arm() {
+    let holder = support::TempDir::new("watch-lfs-comment");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = lfs_scratch(
+        "watch-lfs-comment-repo",
+        ".gitattributes",
+        "# *.png filter=lfs\n",
+        &store,
+    );
+    let worktree = scratch.worktree();
+    let watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    assert!(
+        !watcher.store_wanted(),
+        "a commented-out LFS line armed the store"
+    );
+}
+
+/// A repository that names no LFS filter, with a store set as a shared cache
+/// would be.
+#[test]
+fn no_lfs_no_store_watch() {
+    let holder = support::TempDir::new("watch-lfs-none");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = committed_scratch("watch-lfs-none-repo");
+    // Attributes that name no LFS filter are not LFS.
+    scratch.write(".gitattributes", "*.txt text eol=lf\n");
+    scratch.commit_all("attributes");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    assert!(
+        !watcher.store_wanted(),
+        "a repository without LFS armed the store"
+    );
+
+    land_object(&store);
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a repository without LFS watched the store"
+    );
+    assert_eq!(
+        watcher.take_store_notice(),
+        None,
+        "a repository without LFS was told"
+    );
+}
+
+#[test]
+fn lfs_adopted_mid_session_arms() {
+    let holder = support::TempDir::new("watch-lfs-adopted");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = committed_scratch("watch-lfs-adopted-repo");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.write(".gitattributes", LFS_LINE);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the attributes write produced no tick"
+    );
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    land_object(&store);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "adopting LFS mid-session left the store unwatched"
+    );
+}
+
+#[test]
+fn ignored_attributes_do_not_arm() {
+    let holder = support::TempDir::new("watch-lfs-ignored");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = committed_scratch("watch-lfs-ignored-repo");
+    scratch.write(".gitignore", "vendor/\n");
+    scratch.commit_all("ignore vendor");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.write("vendor/pkg/.gitattributes", LFS_LINE);
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    assert!(
+        !watcher.store_wanted(),
+        "an ignored .gitattributes armed the store"
+    );
+}
+
+#[test]
+fn user_attributes_arm() {
+    let holder = support::TempDir::new("watch-lfs-user");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let attributes = holder.path().join("attributes");
+    std::fs::write(&attributes, LFS_LINE).expect("user attributes");
+    let scratch = committed_scratch("watch-lfs-user-repo");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    scratch.git(&[
+        "config",
+        "core.attributesFile",
+        &attributes.to_string_lossy(),
+    ]);
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    assert!(
+        watcher.store_wanted(),
+        "LFS named in core.attributesFile left the store unwatched"
+    );
+}
+
+#[test]
+fn info_attributes_adopted_arms() {
+    let holder = support::TempDir::new("watch-lfs-info");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = committed_scratch("watch-lfs-info-repo");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    scratch.write(".git/info/attributes", LFS_LINE);
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
+}
+
+/// Once armed, the store is not armed again by the events that follow.
+#[test]
+fn store_armed_once() {
+    let holder = support::TempDir::new("watch-lfs-once");
+    let store = holder.path().join("store");
+    std::fs::create_dir_all(store.join("objects")).expect("store");
+    let scratch = lfs_scratch("watch-lfs-once-repo", ".gitattributes", LFS_LINE, &store);
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    store_covers(&mut watcher, &[&store.join("objects")], arming());
+    while tick_within(&mut watcher, IDLE).is_some() {}
+
+    for round in 0..3 {
+        scratch.write("a.txt", format!("{round}\n"));
+        assert!(
+            tick_within(&mut watcher, SETTLE).is_some(),
+            "the write did not tick"
+        );
+        while tick_within(&mut watcher, IDLE).is_some() {}
+    }
+    assert_eq!(
+        watcher.store_watched().len(),
+        1,
+        "the store was armed again: {:?}",
+        watcher.store_watched()
+    );
+}
+
+/// A store inside the worktree is under the tree's watch, and its directories
+/// appearing never arm one of its own.
+#[test]
+fn inside_store_never_armed() {
+    let scratch = Scratch::new("watch-lfs-inside");
+    scratch.write("a.txt", "x\n");
+    scratch.write(".gitattributes", LFS_LINE);
+    scratch.commit_all("initial");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    land_object(&scratch.path_of(".git/lfs"));
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the object did not tick"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    assert!(
+        !watcher.store_wanted(),
+        "a store inside the tree armed a watch of its own"
+    );
+}
+
 /// `VIGIA_TEST_CEILING` lowers a wait and never raises one.
 #[test]
 fn ceiling_lowers_only() {

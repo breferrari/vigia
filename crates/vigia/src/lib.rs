@@ -132,6 +132,8 @@ enum Wake {
     Pictured,
     /// A newer version exists, so the footer can name it.
     Update(String),
+    /// The watch is live but misses something, which the footer says once.
+    Notice(String),
     /// The notes store changed under another process's hand.
     Notes,
     /// Enter's post to the registered agent sessions came back.
@@ -511,6 +513,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     shell.app.draw_pictures(drawn);
     frame.draw_svg(drawn);
     shell.pictures.pick(picker);
+    // The window the cell was measured in, which a later resize is scaled from.
+    shell.follow_window();
     if ask {
         // On Windows the query drops a resize that came in during it, and it is
         // sent blind there, so it may have printed.
@@ -871,6 +875,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         began,
                     );
                 }
+                Wake::Notice(message) => shell.say(message, Voice::Arrived, began),
                 // Marked rather than read here, so a burst of writes in one batch
                 // is one listing.
                 Wake::Notes => shell.notes_stale = true,
@@ -1179,6 +1184,15 @@ impl Drop for Shell {
 }
 
 impl Shell {
+    /// Tell the pictures the window's size now, which the cell follows.
+    fn follow_window(&mut self) {
+        if self.pictures.follows_cell()
+            && let Ok(window) = ratatui::crossterm::terminal::window_size()
+        {
+            self.pictures.window_sized(window);
+        }
+    }
+
     /// Send the Kitty deletes owed. A failed write leaves the images to the
     /// terminal's own quota.
     fn write_retired(&mut self) {
@@ -1382,6 +1396,9 @@ impl Shell {
             if let Err(e) = self.session.screen().clear() {
                 self.app.warn(format!("redraw: {e}"));
             }
+        }
+        if matches!(action, Action::Redraw | Action::Refresh) {
+            self.follow_window();
         }
         if !matches!(action, Action::Redraw | Action::Refresh) {
             self.deselect();
@@ -2349,12 +2366,20 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>
             }
         };
         watcher.hide(hide);
+        // Whether the shell is still there to be told.
+        let told = |watcher: &mut vigia_core::Watcher<'_>| match watcher.take_store_notice() {
+            Some(message) => tx.send(Wake::Notice(message)).is_ok(),
+            None => true,
+        };
+        if !told(&mut watcher) {
+            return;
+        }
 
         // The tick says only that something changed, which is all the shell needs:
         // every tick triggers one status walk, and a walk finds whatever the events
         // missed.
         while let Some(tick) = watcher.next_tick() {
-            if tx.send(Wake::Tick(tick.paths)).is_err() {
+            if tx.send(Wake::Tick(tick.paths)).is_err() || !told(&mut watcher) {
                 return;
             }
         }
@@ -2397,6 +2422,53 @@ mod tests {
     //! The one rule in this file that is arithmetic rather than plumbing.
 
     use super::*;
+
+    /// The watch thread forwards every tick, not only the first.
+    #[test]
+    fn watch_forwards_ticks() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let dir =
+            std::env::temp_dir().join(format!("vigia-forward-{}-{stamp}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(out.status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "x\n").expect("write");
+        git(&["add", "a.txt"]);
+        git(&["commit", "-q", "-m", "initial"]);
+        let (tx, rx) = mpsc::channel();
+        spawn_watch(dir.clone(), tx, None);
+        // Written until it ticks, since the watch arms on its own thread.
+        let ticked = |round: usize| {
+            for attempt in 0..10 {
+                std::fs::write(dir.join("a.txt"), format!("{round} {attempt}\n")).expect("write");
+                let deadline = Instant::now() + std::time::Duration::from_secs(1);
+                while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+                    match rx.recv_timeout(left) {
+                        Ok(Wake::Tick(_)) => return true,
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+            }
+            false
+        };
+        let first = ticked(0);
+        let second = first && ticked(1);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(first, "the watch never ticked");
+        assert!(second, "the watch stopped after its first tick");
+    }
 
     #[test]
     fn a_relative_worktree_root_still_names_the_folder() {
@@ -2583,6 +2655,24 @@ mod tests {
             ),
             "`Ctrl+L` no longer retires the Kitty pictures and clears the screen"
         );
+    }
+
+    #[test]
+    fn resize_follows_cell() {
+        // `Shell` holds a terminal, so the route is read rather than driven.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        for route in [
+            "    shell.pictures.pick(picker);\n",
+            "    shell.follow_window();\n",
+            "if matches!(action, Action::Redraw | Action::Refresh) {\n            self.follow_window();",
+            "self.pictures.window_sized(window);",
+        ] {
+            assert!(
+                shipped.contains(route),
+                "the cell no longer follows the window: {route}"
+            );
+        }
     }
 
     #[test]

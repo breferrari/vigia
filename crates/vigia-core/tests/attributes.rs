@@ -365,7 +365,7 @@ fn racy_lfs_size_first() {
 fn racy_lfs_compare_cached() {
     let object = b"real image bytes\n".repeat(10);
     let scratch = lfs_content("attr-lfs-cached", &object, &object, true);
-    settle(&scratch, "a.png");
+    scratch.backdate("a.png");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
@@ -404,17 +404,6 @@ fn driver_after_reload() {
         !marker.exists(),
         "a driver named after the walk opened ran on the reloaded walk"
     );
-}
-
-/// Move `rela`'s modification time well behind the settle margin, which a write
-/// a moment ago has not reached.
-fn settle(scratch: &Scratch, rela: &str) {
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .open(scratch.path_of(rela))
-        .expect("open to settle");
-    let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
-    file.set_modified(past).expect("set the modification time");
 }
 
 #[test]
@@ -458,7 +447,7 @@ fn lfs_mode_change() {
 fn lfs_attribute_removed() {
     let object = b"real image bytes\n".repeat(10);
     let scratch = lfs_content("attr-lfs-unfiltered", &object, &object, true);
-    settle(&scratch, "a.png");
+    scratch.backdate("a.png");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
@@ -497,7 +486,7 @@ fn lfs_walk_budget() {
             object,
         );
         scratch.write(rela, object);
-        settle(&scratch, rela);
+        scratch.backdate(rela);
     }
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
@@ -524,7 +513,7 @@ fn lfs_walk_budget() {
 fn lfs_verdicts_pruned() {
     let object = b"real image bytes\n".repeat(10);
     let scratch = lfs_content("attr-lfs-pruned", &object, &object, true);
-    settle(&scratch, "a.png");
+    scratch.backdate("a.png");
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
@@ -589,7 +578,7 @@ fn lfs_wakes_stop_when_decided() {
             object,
         );
         scratch.write(rela, object);
-        settle(&scratch, rela);
+        scratch.backdate(rela);
     }
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
