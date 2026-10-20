@@ -96,7 +96,7 @@ Then query `vigil` for the three things that the repo does not hold:
 - Lessons from other projects, for example a `gix` limitation or a measurement trap.
 - History from before the code, for example why the product is monitor-class.
 
-Know which of the three you need. Use `search` for the decision that you will change. `recall` is often empty, and an empty result means nothing. Strategic context can leak into public text that you write with it in mind. The commit guard does not find that leak.
+Use `search` for the decision you will change. `recall` is often empty, and an empty result means nothing. Strategic context can leak into public text that you write with it in mind. The commit guard misses it.
 
 ## 3. Plan, and wait for approval
 
@@ -108,8 +108,8 @@ The plan contains these parts:
 
 - **What it rests on.** List the decisions by title, from `SPEC.md` and `vigil`. List each fact that argues against the approach, and why you continue. If the record is empty, write "nothing recorded". That empty result is a finding.
 - **Prior art.** Before you design what another tool, library or platform has already met (scheduling, caching, a protocol, a test method, a CI pattern), search the web: its docs, its source, its issues and PRs. Name what you read, with links, and what it changes in the plan. "Searched, found nothing" is a finding. Not searching is not allowed: a search is cheaper than a wrong design defended later. Read documentation at its latest: the current docs, and the docs for the exact version the repo uses (docs.rs at that version, the repository at its tag). Never memory or an older page. A difference between the two is a finding.
-- **Premises.** For each premise, write what must be true, how it can be false, and the answer with its source. The source is one of: *measured*, *read in the dependency's source*, *checked against the world*, *recorded in `SPEC.md`*, or *assumed*. A premise that the plan depends on must not stay *assumed*. Settle it before you present the plan. Read the source in `~/.cargo/registry`, write a probe, measure, or search the web. Settle premises in dependency order. Finding facts is your job, not the reader's job. Only product decisions go to the reader, in the plan. A decline is the exception, because it is stop 4.
-- **Checks on the record.** Quote the words of each invariant that you cite. Make sure that they apply to this case. Quote each refusal that you cite, with its date, and mark it checked or not checked. Make sure that its reason is still true. A reason about something missing ("no API for this") becomes false fastest. If the reason is false, the question is open again. Do not find a new reason for the same conclusion. Give each budget with its current headroom ("2.4ms of 16ms"), not alone.
+- **Premises.** For each premise, write what must be true, how it can be false, and the answer with its source. The source is one of: *measured*, *read in the dependency's source*, *checked against the world*, *recorded in `SPEC.md`*, or *assumed*. A premise that the plan depends on must not stay *assumed*. Settle it before you present the plan. Read the source in `~/.cargo/registry`, write a probe, measure, or search the web. For facts about other libraries and terminals, use the world as the source, not memory. Settle premises in dependency order. Finding facts is your job, not the reader's job. Only product decisions go to the reader, in the plan. A decline is the exception, because it is stop 4.
+- **Checks on the record.** Quote the words of each invariant that you cite. Make sure that they apply to this case: I1's budget is *0 wakeups while idle*, and a reader who uses the pane is not idle. Quote each refusal that you cite, with its date, and mark it checked or not checked. Make sure that its reason is still true. A reason about something missing ("no API for this") becomes false fastest. If the reason is false, the question is open again. Do not find a new reason for the same conclusion. Give each budget with its current headroom ("2.4ms of 16ms"), not alone.
 - **Promises you can diff.** List the files, signatures and error codes. List the tests by name, with what each test asserts. List each deviation from `SPEC.md` with its reason, and list what is out of scope. "Fix the thing" promises nothing and passes every check. Size the list to the diff.
 
 Measure to learn the answer. Do not run a measurement that can only support a no.
@@ -123,10 +123,10 @@ Before you write code, post the approved plan as a comment on the issue. When yo
 ## 4. Build
 
 - **Runners: CONTRIBUTING.md, Running things.** A suite runs under `cargo nextest run --profile ci`, installed if missing, not `cargo test`, which stops at the first red binary.
-- **One issue, one branch, one worktree, one PR.** Work in a worktree, not in the main checkout. The main checkout stays on `main`, so `origin/main` and the tree agree. First, find a free `../vigia.*` worktree, because its `target/` is warm. Make sure that no other session uses it. Then run `git -C <dir> checkout -B issue-<n>-<slug> origin/main`. If no worktree is free, add one with `git worktree add ../vigia.<n> -b issue-<n>-<slug> origin/main`. After the merge, remove the worktree that you added.
+- **One issue, one branch, one worktree, one PR.** Work in a worktree, not in the main checkout. The main checkout stays on `main`, so `origin/main` and the tree agree. First take a free `../vigia.*` worktree no other session uses (its `target/` is warm), and run `git -C <dir> checkout -B issue-<n>-<slug> origin/main`. If no worktree is free, add one with `git worktree add ../vigia.<n> -b issue-<n>-<slug> origin/main`. After the merge, remove the worktree that you added.
 - **If the reader is present,** run `vigia` in a side pane on the worktree.
 - **A run that lasts longer than the pass** needs a comment on its issue. When the run starts, write what runs, where the output goes, and when it ends.
-- **Open a draft PR early** with `gh pr create --draft`. CI skips drafts, so a push costs nothing.
+- **Open a draft PR early** with `gh pr create --draft`. CI skips drafts, so a push is free.
 - **Write the failing test first** for each invariant. Watch it fail, then make it pass.
 - **A change to the frame path runs the budget gate.**
 - **Add no dependency that `SPEC.md` does not name.** First, propose it in the spec, in its own commit.
@@ -156,7 +156,7 @@ The full sequence, in order. Apply what each step finds:
 
 Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `/two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. Run `/harden` only when the reader asks. A PR opened beside the pass, such as a rule change asked for mid-run, runs this step for its class too. One exception to running once: a code change committed after `/code-review` gets one `/code-review` of that change.
 
-Give each agent a brief. Add every measurement that the reviewer needs to the brief. The brief also says: *Read the code. Do not run builds, benchmarks or tests. If a measurement is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Review agents run on Sonnet.
+Give each agent a brief with every measurement it needs. The brief also says: *Read the code. Do not run builds, benchmarks or tests. If a measurement is missing, name it and I will run it. Judge comments by the comment rule in `CLAUDE.md`.* Review agents run on Sonnet.
 
 Then prove the result:
 
@@ -176,11 +176,11 @@ gh run watch <id> --exit-status
 gh run view <id> --json conclusion --jq .conclusion
 ```
 
-Watch the run, not `gh pr checks`. List only the runs that started after the ready call. The run of the draft has the same `headSha`, a green conclusion and no jobs run. An empty list means the ready run is not queued yet. The `headSha` of the run must be the head of the PR. Use `conclusion` as the gate, because `gh run watch` can exit 0 on a failed run. After each fix push, watch the new run the same way.
+Watch the run, not `gh pr checks`, and list only runs started after the ready call: the draft's run has the same `headSha`, a green conclusion and no jobs. An empty list means the ready run is not queued yet. The `headSha` of the run must be the head of the PR. Use `conclusion` as the gate, because `gh run watch` can exit 0 on a failed run. After each fix push, watch the new run the same way.
 
 **After a rebase that changed only `ROADMAP.md` or `CHANGELOG.md`, with `git range-diff` showing the PR's own commits otherwise unchanged: no re-review and no local suites.** Merge as soon as `ci complete` is green on the new head. Ruled 2026-10-19, reader. User-facing: none.
 
-No external review is configured: read and answer any review comment a person left, then, once the post-ready run is green on the head, merge with `gh pr merge <n> --squash --delete-branch`. Ruled 2026-10-19, PO for the reader: Copilot review is off on his account. User-facing: none. Under a worktree, the local branch delete fails after the merge. Thus read the PR state before you try again.
+No external review is configured: read and answer any review comment a person left, then, once the post-ready run is green on the head, merge with `gh pr merge <n> --squash --delete-branch`. Ruled 2026-10-19, PO for the reader: Copilot review is off on his account. User-facing: none. Under a worktree the local branch delete fails after the merge, so read the PR state before retrying.
 
 ## 8. Close the loop
 
