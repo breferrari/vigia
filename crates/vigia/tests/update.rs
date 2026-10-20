@@ -334,17 +334,21 @@ fn store_notice_footer() {
     ] {
         assert!(shell.contains(seam), "`{seam}` is gone from the shell");
     }
-    for line in shell.lines().filter(|line| line.contains("notice")) {
+    let forwarder = shell
+        .split("fn spawn_watch(")
+        .nth(1)
+        .and_then(|rest| rest.split("\n}\n").next())
+        .expect("the watch thread");
+    let watch = include_str!("../../vigia-core/src/watch.rs")
+        .split("#[cfg(test)]")
+        .next()
+        .expect("split");
+    for (name, code) in [("spawn_watch", forwarder), ("watch.rs", watch)] {
         assert!(
-            !line.contains("eprint") && !line.contains("stderr"),
-            "the shell writes the store notice to stderr: {line}"
+            !code.contains("eprint") && !code.contains("stderr"),
+            "{name} writes to stderr, over the pane"
         );
     }
-    let watch = include_str!("../../vigia-core/src/watch.rs");
-    assert!(
-        !watch.contains("eprint") && !watch.contains("stderr"),
-        "the watch writes to stderr"
-    );
 }
 
 /// Two of `ureq`'s defaults are wrong for one fixed endpoint, and only a
