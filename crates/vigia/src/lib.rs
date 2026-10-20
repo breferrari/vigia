@@ -1311,7 +1311,12 @@ impl Shell {
                 // frame only while one is running and goes untimed the moment none is.
                 arriving: self.effects_running().then(|| now + ARRIVING_FRAME),
                 // A frame's share of the transmits waiting goes out with each paint.
-                sending: self.pictures.sending().then(|| now + ARRIVING_FRAME),
+                // From the last paint, so a run of wakes that paint nothing still
+                // comes due.
+                sending: self
+                    .pictures
+                    .sending()
+                    .then(|| self.painted + ARRIVING_FRAME),
                 // The frame after a departure ends is the one that drops its rows.
                 departing: self.ledger.ends_in(),
                 // And the frame after the box has left is the one that drops its.
@@ -2166,6 +2171,13 @@ impl Shell {
         if self.app.owes_repaint() {
             self.paint(frame, worktree, aside, now)?;
         }
+        // After the cells, so a key's frame waits only on the share already on its
+        // way, and once a turn however many paints it took.
+        self.write_pictures(pictures::TRANSMIT_FRAME);
+        {
+            use std::io::Write;
+            let _ = self.session.screen().backend_mut().flush();
+        }
         Ok(())
     }
 
@@ -2335,13 +2347,6 @@ impl Shell {
                 notice_effects.process_effects(since.into(), f.buffer_mut(), notice);
             }
         })?;
-        // After the cells, so a key's frame waits only on the share already on its
-        // way. A picture is placed on a frame after its last chunk.
-        self.write_pictures(pictures::TRANSMIT_FRAME);
-        {
-            use std::io::Write;
-            let _ = self.session.screen().backend_mut().flush();
-        }
         self.painted = now;
         self.effects_ran = self.effects_running();
         self.hovered = chrome.hovered;

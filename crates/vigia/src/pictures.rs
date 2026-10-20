@@ -568,7 +568,7 @@ pub struct Pictures {
     tick: u64,
     /// The frame's walk that kept pictures were last checked against.
     walked: u64,
-    /// Transmits not yet written, oldest first, each with how much of it is.
+    /// Transmits not yet written, oldest first. The first may be part written.
     outbox: VecDeque<(Arc<Key>, String)>,
     /// How much of the first transmit is written.
     written: usize,
@@ -1052,6 +1052,8 @@ impl Pictures {
     /// at least one.
     pub fn output(&mut self, budget: usize) -> String {
         use ratatui_image::picker::cap_parser::Parser;
+        // The frame this writes after has placed what the last one finished.
+        self.unplaced = false;
         if self.outbox.is_empty() {
             return self.retired();
         }
@@ -1763,7 +1765,7 @@ fn taken(protocol: &SlicedProtocol, slot: Slot) -> String {
     let first = scratch.content().first().map_or("", |cell| cell.symbol());
     first
         .find(PLACEHOLDER)
-        .map_or(first, |at| &first[..at])
+        .map_or("", |at| &first[..at])
         .to_owned()
 }
 
@@ -2215,6 +2217,7 @@ mod tests {
         // Retired part way out: it finishes, and only then is its delete written.
         pictures.retire_where(|key, _| key.path == "0.png");
         pictures.retire_where(|key, _| key.path == "1.png");
+        assert_eq!(pictures.deletes(), "", "a delete was owed inside an image");
         let mut wire = first;
         while !pictures.outbox.is_empty() {
             let frame = pictures.output(TRANSMIT_FRAME);
@@ -2229,6 +2232,10 @@ mod tests {
         let delete = wire
             .find("\x1b_Ga=d")
             .expect("the delete was never written");
+        assert!(
+            !wire[delete..].contains("m=1;"),
+            "the image retired before it began was sent after the delete"
+        );
         // Exactly the first image, whole, then its delete: the second never began.
         assert_eq!(
             delete,

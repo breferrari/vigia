@@ -3995,6 +3995,12 @@ fn held_scroll_kitty() {
         );
         if held.max > 4 * I9_FRAME {
             let again = held_kitty(&scratch, rate);
+            eprintln!(
+                "note: {claim}: the longest was {:?} and then {:?}, against {:?}",
+                held.max,
+                again.max,
+                4 * I9_FRAME
+            );
             assert!(
                 again.max <= 4 * I9_FRAME,
                 "{claim}: the longest was {:?} and then {:?}, past {:?} both times",
