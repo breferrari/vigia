@@ -394,9 +394,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
+          tool: cargo-deny@0.20.2
       - run: cargo deny check advisories licenses sources
       - run: cargo deny --exclude-dev check bans
 

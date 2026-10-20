@@ -3336,7 +3336,7 @@ fn nextest_runs_the_suite() {
 #[test]
 fn cache_saved_from_main_only() {
     let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    let uses: Vec<&str> = ci.split("- uses: Swatinem/rust-cache@v2").skip(1).collect();
+    let uses: Vec<&str> = ci.split("- uses: Swatinem/rust-cache@").skip(1).collect();
     assert!(
         uses.len() >= 6,
         "ci.yml uses rust-cache {} time(s), so this gate reads too little",
@@ -3690,16 +3690,22 @@ fn nextest_time_bound() {
     );
 }
 
-/// The crates `deny.toml` bans, by name.
+/// The crates `deny.toml`'s `bans.deny` list bans outright, by name. An entry
+/// with `wrappers` is let through those crates, so it does not count.
 fn denied_crates(config: &str) -> Vec<String> {
     let config = format!("\n{}", without_comments(config));
     let Some((_, bans)) = config.split_once("\n[bans]") else {
         return Vec::new();
     };
     let bans = bans.split("\n[").next().unwrap_or_default();
-    bans.split("crate = \"")
-        .skip(1)
-        .filter_map(|rest| rest.split_once('"').map(|(name, _)| name.to_owned()))
+    let Some((_, deny)) = bans.split_once("\ndeny = [") else {
+        return Vec::new();
+    };
+    let deny = deny.split("\n]").next().unwrap_or_default();
+    deny.lines()
+        .filter(|entry| !entry.contains("wrappers"))
+        .filter_map(|entry| entry.split_once("crate = \""))
+        .filter_map(|(_, rest)| rest.split_once('"').map(|(name, _)| name.to_owned()))
         .collect()
 }
 
@@ -3724,7 +3730,7 @@ fn missing_bans(config: &str) -> Vec<&'static str> {
 /// every crate that brings a C toolchain.
 #[test]
 fn deny_policy() {
-    let fixture = "[bans]\ndeny = [\n    { crate = \"cc\", reason = \"x\" },\n]\n[sources]\n";
+    let fixture = "[bans]\nskip = [\n    { crate = \"ring\" },\n]\ndeny = [\n    { crate = \"cc\", reason = \"x\" },\n    { crate = \"cmake\", wrappers = [\"x\"] },\n]\n[sources]\n";
     assert_eq!(
         missing_bans(fixture),
         [
@@ -3769,7 +3775,15 @@ fn deny_policy() {
         "ci.yml does not run the full dependency check"
     );
     assert!(
-        ci.contains("'deny=${{ needs.deny.result }}'") && ci.contains("pure-rust, deny, musl"),
+        ci.contains("'deny=${{ needs.deny.result }}'")
+            && jobs_of(&ci)
+                .iter()
+                .any(|(job, block)| job == "ci-complete" && block.contains(" deny,")),
         "ci complete does not wait for and judge the dependency check"
+    );
+    let weekly = without_comments(&repo_file(".github/workflows/deny.yml"));
+    assert!(
+        weekly.contains("cargo deny check advisories") && weekly.contains("schedule:"),
+        "main is not checked for new advisories on a schedule"
     );
 }
