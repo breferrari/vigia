@@ -4306,20 +4306,29 @@ fn frame_svgs_match() {
             );
         }
     }
-    for entry in std::fs::read_dir(repo_root().join("docs"))
+    let mut pages: Vec<std::path::PathBuf> = std::fs::read_dir(repo_root().join("docs"))
         .expect("read docs/")
         .flatten()
-    {
-        let page = std::fs::read_to_string(entry.path()).unwrap_or_default();
+        .map(|entry| entry.path())
+        .collect();
+    pages.push(repo_root().join("README.md"));
+    for path in pages {
+        let page = std::fs::read_to_string(&path).unwrap_or_default();
+        // The README links by absolute URL, so crates.io can load it.
+        let prefix = if path.ends_with("README.md") {
+            "https://raw.githubusercontent.com/breferrari/vigia/main/assets/"
+        } else {
+            "../assets/"
+        };
         for frame in frames::FRAMES {
-            let image = format!("(../assets/{})", frame.file);
+            let image = format!("({prefix}{})", frame.file);
             if let Some(at) = page.find(&image) {
                 let alt = page[..at].rsplit("![").next().unwrap_or_default();
                 assert_eq!(
                     alt.trim_end_matches(']'),
                     frame.label,
                     "{} shows {} with alt text that is not its label",
-                    entry.path().display(),
+                    path.display(),
                     frame.file
                 );
             }
