@@ -2570,9 +2570,10 @@ const KEYBOARD: [Gesture; 19] = [
         keys: ["m  Esc", "m  Esc"],
         verb: ["the config menu", "config menu"],
     },
+    // `Ctrl+L` shares this row to keep 80 by 24 one page; tight drops it.
     Gesture {
-        keys: ["?  Esc", "?  Esc"],
-        verb: ["this sheet", "this sheet"],
+        keys: ["?  Esc  Ctrl+L", "?  Esc"],
+        verb: ["this sheet · redraw the pane", "this sheet"],
     },
     // `Esc` sits a row up, where it leaves the frontmost thing rather than quitting
     // outright.
@@ -2789,7 +2790,7 @@ const ROOMY_GAP: usize = 8;
 
 /// The keyboard rows the width ladder never drops, by their first key. The
 /// last entries of [`DROP_ORDER`] are these, in this order.
-const SHEET_KEEP: [&str; 3] = ["a", "f", "?  Esc"];
+const SHEET_KEEP: [&str; 3] = ["a", "f", "?  Esc  Ctrl+L"];
 
 /// The fewest body rows a sheet page is worth drawing.
 const SHEET_FLOOR: usize = 3;

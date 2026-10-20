@@ -1286,3 +1286,156 @@ fn lfs_compare_frame() {
         || cold(&compared, 1),
     );
 }
+
+/// A repository whose `a.bin` of 119 KiB is moved and edited, unstaged, so a
+/// cold frame reads its header, the new side's first bytes and both sides
+/// whole, and scores the pair: 255 KiB of the frame's 256. Without `moved`,
+/// the same addition beside the file left in place.
+fn rename_repo(name: &str, moved: bool) -> Scratch {
+    let old = support::noise(1, 119 * 1024);
+    let new = support::tail_changed(&old, 0.1);
+    let scratch = Scratch::new(name);
+    scratch.write("a.bin", &old);
+    scratch.commit_all("initial");
+    if moved {
+        std::fs::remove_file(scratch.path_of("a.bin")).expect("remove");
+    }
+    scratch.write("b.bin", &new);
+    scratch
+}
+
+/// I9 over a cold frame that scores a binary rename with the frame's whole
+/// budget, interleaved with the same frame where nothing is scored.
+#[test]
+fn rename_frame_score() {
+    let moved = rename_repo("budget-rename", true);
+    let plain = rename_repo("budget-rename-plain", false);
+    let cold = |scratch: &Scratch, scored: bool| {
+        let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
+        let mut frame = worktree.frame();
+        let took = time_cpu(|| frame.advance().expect("advance"));
+        assert_eq!(
+            frame.stats().pairs_scored,
+            u64::from(scored),
+            "the frame did not score as the fixture intends"
+        );
+        took
+    };
+    cold(&moved, true);
+    cold(&plain, false);
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
+    for _ in 0..LFS_FRAMES {
+        with.push(cold(&moved, true).0);
+        without.push(cold(&plain, false).0);
+    }
+    let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
+    eprintln!(
+        "rename score: cold frame p50 {:?} p99 {:?}, without one p50 {:?} p99 {:?}",
+        at(&with, 0.5),
+        at(&with, 0.99),
+        at(&without, 0.5),
+        at(&without, 0.99)
+    );
+    holds_p99(
+        "I9: a cold frame scoring a binary rename of 256 KiB",
+        budget(I9_FRAME),
+        &with,
+        String::new,
+        || cold(&moved, true),
+    );
+}
+
+/// A repository whose forty small binaries are each moved and edited,
+/// unstaged: every removal weighed against every addition, 1,600 pairs, and
+/// all their sides inside one frame's budget. Without `moved`, the same
+/// additions beside the files left in place.
+fn many_small_repo(name: &str, moved: bool) -> Scratch {
+    let scratch = Scratch::new(name);
+    let olds: Vec<Vec<u8>> = (0..40).map(|n| support::noise(100 + n, 2_000)).collect();
+    for (n, old) in olds.iter().enumerate() {
+        scratch.write(&format!("old/{n:02}.bin"), old);
+    }
+    scratch.commit_all("initial");
+    for (n, old) in olds.iter().enumerate() {
+        if moved {
+            std::fs::remove_file(scratch.path_of(&format!("old/{n:02}.bin"))).expect("remove");
+        }
+        scratch.write(&format!("new/{n:02}.bin"), support::tail_changed(old, 0.1));
+    }
+    scratch
+}
+
+/// I9 over each frame a burst of 1,600 small pairs brings, from a cold
+/// worktree until no side is left to weigh, timed by its slowest frame and
+/// interleaved with the same burst where nothing is weighed.
+#[test]
+fn rename_frame_many_small() {
+    let moved = many_small_repo("budget-rename-many", true);
+    let plain = many_small_repo("budget-rename-many-plain", false);
+    let cold = |scratch: &Scratch, scored: bool| {
+        let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
+        let mut frame = worktree.frame();
+        let mut slowest = (Duration::ZERO, Duration::ZERO);
+        for frames in 1.. {
+            let before = frame.stats();
+            let took = time_cpu(|| frame.advance().expect("advance"));
+            if took.0 > slowest.0 {
+                slowest = took;
+            }
+            let one = support::delta(before, frame.stats());
+            assert!(
+                one.pairs_scored <= 256,
+                "a frame scored {} pairs",
+                one.pairs_scored
+            );
+            assert!(
+                one.side_reads <= 32,
+                "a frame read {} sides",
+                one.side_reads
+            );
+            assert!(
+                frame.unscored_pairs().len() <= 256,
+                "a frame listed {} pairs",
+                frame.unscored_pairs().len()
+            );
+            if frame.settles_in(std::time::SystemTime::now()).is_none() {
+                break;
+            }
+            assert!(frames < 20, "the burst still wakes after {frames} frames");
+        }
+        assert_eq!(
+            frame.stats().paired_bytes > 0,
+            scored,
+            "the burst did not score as the fixture intends"
+        );
+        slowest
+    };
+    cold(&moved, true);
+    cold(&plain, false);
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
+    for _ in 0..LFS_FRAMES {
+        with.push(cold(&moved, true).0);
+        without.push(cold(&plain, false).0);
+    }
+    let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
+    eprintln!(
+        "rename many small: slowest frame p50 {:?} p99 {:?}, without p50 {:?} p99 {:?}",
+        at(&with, 0.5),
+        at(&with, 0.99),
+        at(&without, 0.5),
+        at(&without, 0.99)
+    );
+    holds_p99(
+        "I9: each frame of a burst weighing 1,600 small binary renames",
+        budget(I9_FRAME),
+        &with,
+        String::new,
+        || cold(&moved, true),
+    );
+}

@@ -103,6 +103,8 @@ Know which of the three you need. Use `search` for the decision that you will ch
 
 Enter plan mode. Do not write code before a person approves the plan. Step 6 compares the shipped work with this plan.
 
+**A pass is time-boxed.** Plan to merge within 3 hours of approval. Mutation gets at most 30 minutes, on the behaviour the PR adds or changes. If the pass is not converging at 2 hours, send the coordinator a status with what is left. *Ruled 2026-10-20, reader.* User-facing: none.
+
 The plan contains these parts:
 
 - **What it rests on.** List the decisions by title, from `SPEC.md` and `vigil`. List each fact that argues against the approach, and why you continue. If the record is empty, write "nothing recorded". That empty result is a finding.
@@ -148,7 +150,7 @@ The full sequence, in order. Apply what each step finds:
 1. `/simplify`.
 2. `/two-axis-review` against `origin/main`. The Spec axis compares the diff with the issue and the plan comment. The Standards axis mostly repeats `/simplify`. Act only on what `/simplify` did not find.
 3. `/code-review high`.
-4. **Mutation check.** Remove each new gate's fix and see the gate fail. Commit, then use `.claude/scripts/mutate.mjs`.
+4. **Mutation check.** Remove each new gate's fix and see the gate fail. Commit, then use `.claude/scripts/mutate.mjs` with `VIGIA_TEST_CEILING=15`, a narrow command per entry, and its `--limit`. On a PR that risks the engine (watch, status, renames, decode limits), the PO may ask for the `mutants` workflow before the proof packet: `gh workflow run mutants -f ref=<branch>`. It is not run by default.
 
 Run each tool once. A new review always finds something new, so a loop until clean never ends. Docs-only diffs run `/simplify` and `/two-axis-review`, at any size. A small code diff runs `/simplify` and the mutation check. Small means under ~200 lines in 3 files or fewer, outside the core areas. If the reader asks for `/harden`, run it. Do not run it otherwise. A PR opened beside the pass, such as a rule change asked for mid-run, runs this step for its class too. One exception to running once: a code change committed after `/code-review` gets one `/code-review` of that change.
 

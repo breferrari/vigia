@@ -241,7 +241,7 @@ pub fn place_of(action: &Action) -> Place {
             "a move, and where the pane sits is I5's to decide rather than a \
              setting's",
         ),
-        Action::Quit | Action::Escape | Action::Redraw => {
+        Action::Quit | Action::Escape | Action::Redraw | Action::Refresh => {
             Place::Neither("nothing they leave behind is a state a launch could hold")
         }
     }

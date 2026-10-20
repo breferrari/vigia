@@ -35,7 +35,7 @@ fn tick_within(watcher: &mut Watcher<'_>, timeout: Duration) -> Option<Tick> {
     let guard = std::thread::spawn(move || {
         // Wakes early once the tick has arrived, so a passing test does not
         // pay the whole timeout.
-        if finished.recv_timeout(timeout).is_err() {
+        if finished.recv_timeout(support::ceiling(timeout)).is_err() {
             stop.stop();
         }
     });
@@ -1200,10 +1200,7 @@ const LFS_LINE: &str = "*.png filter=lfs diff=lfs merge=lfs -text\n";
 /// watch suites running at once. `VIGIA_TEST_CEILING` (seconds) shortens it for
 /// a mutation run, where the hang is the kill.
 fn arming() -> Duration {
-    std::env::var("VIGIA_TEST_CEILING")
-        .ok()
-        .and_then(|secs| secs.parse().ok())
-        .map_or(Duration::from_secs(180), Duration::from_secs)
+    support::ceiling(Duration::from_secs(180))
 }
 
 /// Drive `watcher` until its store's own watch covers exactly `paths`, since a
@@ -1502,5 +1499,31 @@ fn inside_store_never_armed() {
     assert!(
         !watcher.store_wanted(),
         "a store inside the tree armed a watch of its own"
+    );
+}
+
+/// `VIGIA_TEST_CEILING` lowers a wait and never raises one.
+#[test]
+fn ceiling_lowers_only() {
+    let wait = Duration::from_secs(10);
+    assert_eq!(
+        support::ceiling_of(wait, None),
+        wait,
+        "unset changed the wait"
+    );
+    assert_eq!(
+        support::ceiling_of(wait, Some("3")),
+        Duration::from_secs(3),
+        "a lower ceiling did not apply"
+    );
+    assert_eq!(
+        support::ceiling_of(wait, Some("60")),
+        wait,
+        "a higher ceiling raised the wait"
+    );
+    assert_eq!(
+        support::ceiling_of(wait, Some("soon")),
+        wait,
+        "garbage changed the wait"
     );
 }

@@ -77,7 +77,7 @@ fn drawn(name: &str, old: Option<&str>, new: &str) -> Drawn {
     view_of(&mut app, &mut pictures, &mut frame);
     let began = Instant::now();
     assert!(
-        pictures.settle(Duration::from_secs(60)),
+        pictures.settle(support::ceiling(Duration::from_secs(60))),
         "the pictures were not built"
     );
     let took = began.elapsed();

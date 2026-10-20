@@ -498,6 +498,18 @@ pub struct Pictures {
     decoded: Arc<AtomicU64>,
     /// Sizes the worker found since [`Pictures::found_sizes`] last took them.
     found: Vec<(u64, u32, u32)>,
+    /// Pairs sent to be scored as renames, each once while the frame's scores
+    /// last.
+    asked: HashSet<vigia_core::PairKey>,
+    /// The frame's [`vigia_core::Frame::pair_epoch`] when `asked` was begun.
+    epoch: u64,
+    /// Where they go: a thread beside the picture worker, which needs no picker
+    /// and skips nothing scrolled away.
+    pairs: mpsc::Sender<vigia_core::Candidate>,
+    /// Each pair's score, as it lands.
+    scores: mpsc::Receiver<(vigia_core::PairKey, u64)>,
+    /// Pairs sent whose score has not landed.
+    waiting: usize,
 }
 
 /// A Kitty image id no other picture, nor another pane on the same terminal,
@@ -527,6 +539,10 @@ std::thread_local! {
 static OFF_WORKER: AtomicU64 = AtomicU64::new(0);
 /// The worker thread's name, which is how a decode knows where it runs.
 const WORKER: &str = "vigia-pictures";
+/// The thread that scores renames.
+const PAIRS: &str = "vigia-pairs";
+/// The most pairs remembered as sent before the record starts again.
+const ASKED_KEPT: usize = 4096;
 
 pub use vigia_core::{Stage, panic_next};
 
@@ -560,6 +576,28 @@ impl Pictures {
     /// A cache whose worker holds every job until [`Pictures::pick`] says how
     /// to encode, so nothing is built twice.
     pub fn unpicked(inks: Inks, wake: Box<dyn Fn() + Send>) -> Self {
+        let wake: Arc<Mutex<Box<dyn Fn() + Send>>> = Arc::new(Mutex::new(wake));
+        let (pairs, asked) = mpsc::channel::<vigia_core::Candidate>();
+        let (scored, scores) = mpsc::channel();
+        let woken = Arc::clone(&wake);
+        let _ = std::thread::Builder::new()
+            .name(PAIRS.to_owned())
+            .spawn(move || {
+                while let Ok(first) = asked.recv() {
+                    // Everything queued, then one wake: each wake walks again.
+                    for candidate in std::iter::once(first).chain(asked.try_iter()) {
+                        let score = vigia_core::caught(|| vigia_core::candidate_score(&candidate))
+                            .unwrap_or(0);
+                        vigia_core::armed(Stage::Pairs);
+                        if scored.send((candidate.key, score)).is_err() {
+                            return;
+                        }
+                    }
+                    if let Ok(wake) = woken.lock() {
+                        wake();
+                    }
+                }
+            });
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel();
         let (picked, picker) = mpsc::channel::<Picker>();
@@ -593,7 +631,9 @@ impl Pictures {
                     if outbox.send((job.key, built)).is_err() {
                         break;
                     }
-                    wake();
+                    if let Ok(wake) = wake.lock() {
+                        wake();
+                    }
                 }
             });
         Self {
@@ -607,7 +647,64 @@ impl Pictures {
             picker: Some(picked),
             decoded,
             found: Vec::new(),
+            asked: HashSet::new(),
+            epoch: 0,
+            pairs,
+            scores,
+            waiting: 0,
         }
+    }
+
+    /// Send the pairs `frame` could not afford to score to be scored, each
+    /// once.
+    pub fn score_pairs(&mut self, frame: &vigia_core::Frame<'_>) {
+        // Begun again with the frame's scores, or a score it dropped is
+        // never asked for again.
+        if self.epoch != frame.pair_epoch() || self.asked.len() >= ASKED_KEPT {
+            self.epoch = frame.pair_epoch();
+            self.asked.clear();
+        }
+        for candidate in frame.unscored_pairs() {
+            if self.asked.insert(candidate.key) {
+                if self.pairs.send(candidate).is_err() {
+                    return;
+                }
+                self.waiting += 1;
+            }
+        }
+    }
+
+    /// The rename scores found since the last call, for
+    /// [`vigia_core::Frame::learn_pair`].
+    pub fn found_pairs(&mut self) -> Vec<(vigia_core::PairKey, u64)> {
+        let found: Vec<_> = self.scores.try_iter().collect();
+        self.waiting = self.waiting.saturating_sub(found.len());
+        found
+    }
+
+    /// File `found` with `frame`, and walk once more when one of them pairs, or
+    /// when the last of those sent landed and the frame has more to list;
+    /// whether it walked.
+    ///
+    /// # Errors
+    ///
+    /// The walk fails.
+    pub fn pair(
+        &mut self,
+        frame: &mut vigia_core::Frame<'_>,
+        found: Vec<(vigia_core::PairKey, u64)>,
+    ) -> vigia_core::Result<bool> {
+        let pairs = found.iter().any(|&(_, score)| vigia_core::pairs(score));
+        let drained = !found.is_empty() && self.waiting == 0;
+        for (key, score) in found {
+            frame.learn_pair(key, score);
+        }
+        // A score that pairs nothing changes nothing a walk would show.
+        let walk = pairs || (drained && frame.pairs_unlisted());
+        if walk {
+            frame.advance()?;
+        }
+        Ok(walk)
     }
 
     /// The sizes the worker found for sides the frame path left unsized, by
@@ -633,19 +730,31 @@ impl Pictures {
 
     /// Keep the pictures in `shown`, and retire the Kitty images of the rest.
     fn keep(&mut self, shown: &HashSet<Arc<Key>>) {
+        self.retire_where(|key, _| !shown.contains(key));
+    }
+
+    /// Drop each picture `doomed` names, and owe the deletes of its Kitty images.
+    fn retire_where(&mut self, doomed: impl Fn(&Arc<Key>, &Built) -> bool) {
         let retired = &mut self.retired;
         self.built.retain(|key, ready| {
-            let kept = shown.contains(key);
-            if !kept {
+            let dropped = doomed(key, &ready.0);
+            if dropped {
                 retired.extend(&ready.0.kitty);
             }
-            kept
+            !dropped
         });
     }
 
     /// Retire every kept picture, for a pane about to leave the terminal.
     pub fn retire_all(&mut self) {
         self.keep(&HashSet::new());
+    }
+
+    /// Retire every kept Kitty picture, so it is built again and sent under a
+    /// new id: a terminal attached since it was sent never received it. Each
+    /// call decodes every such picture again.
+    pub fn refresh(&mut self) {
+        self.retire_where(|_, built| !built.kitty.is_empty());
     }
 
     /// The Kitty deletes owed since the last call, to write before the next

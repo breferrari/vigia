@@ -9,6 +9,9 @@ use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+mod ceiling;
+use ceiling::ceiling;
+
 /// What the terminal does while the child runs.
 #[derive(Default)]
 pub struct Script<'a> {
@@ -138,7 +141,7 @@ impl Reaped {
         seen: &mut Vec<u8>,
         limit: Duration,
     ) -> Option<std::process::ExitStatus> {
-        let until = Instant::now() + limit;
+        let until = Instant::now() + ceiling(limit);
         while Instant::now() < until {
             let exited = self.0.try_wait().ok().flatten();
             // Read until the terminal is quiet, and after an exit to its end:
@@ -176,7 +179,7 @@ impl Drop for Reaped {
 
 /// Read the terminal into `seen` until it holds `needle`, failing after `limit`.
 pub fn read_until(master: &mut File, seen: &mut Vec<u8>, needle: &str, limit: Duration) {
-    let deadline = Instant::now() + limit;
+    let deadline = Instant::now() + ceiling(limit);
     while !String::from_utf8_lossy(seen).contains(needle) {
         let left = deadline.saturating_duration_since(Instant::now());
         assert!(

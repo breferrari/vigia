@@ -1149,10 +1149,11 @@ mod tests {
     /// Only a guard against a hang: a passing wait returns when the arm does.
     /// `VIGIA_TEST_CEILING` (seconds) shortens it for a mutation run.
     fn arming() -> Duration {
+        let guard = Duration::from_secs(60);
         std::env::var("VIGIA_TEST_CEILING")
             .ok()
             .and_then(|secs| secs.parse().ok())
-            .map_or(Duration::from_secs(60), Duration::from_secs)
+            .map_or(guard, |secs| guard.min(Duration::from_secs(secs)))
     }
 
     /// A store arm that fails as a full inotify table does.

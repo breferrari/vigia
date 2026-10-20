@@ -1,3 +1,8 @@
+# A hung test is killed rather than holding the run until GitHub's six-hour job
+# limit. 120s is 2.5x the slowest test measured on any CI runner (47.7s).
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 4 }
+
 # The profile CI runs the debug suite under. `cargo test` stops at the first
 # failing binary and hides whether the rest ran; nextest runs every test and
 # reports every failure in one pass, which is what a red run on one platform
@@ -5,3 +10,10 @@
 # a gate about nothing.
 [profile.ci]
 fail-fast = false
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+# For mutation runs, where a hang is the kill: 90s, 1.9x the slowest test, so a
+# correct test on a loaded runner is not cut short.
+[profile.mutants]
+fail-fast = true
+slow-timeout = { period = "30s", terminate-after = 3 }

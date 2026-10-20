@@ -2390,3 +2390,32 @@ fn the_note_edge_is_one_column_at_the_content_origin_and_the_sheet_swallows_it()
     };
     assert_eq!(covered.note_edge_at(origin, 9), None);
 }
+
+#[test]
+fn ctrl_l_maps_refresh() {
+    assert_eq!(
+        action_for(
+            &with(KeyModifiers::CONTROL, KeyCode::Char('l')),
+            Regions::default()
+        ),
+        Some(Action::Refresh)
+    );
+    assert_ne!(
+        action_for(&press(KeyCode::Char('l')), Regions::default()),
+        Some(Action::Refresh),
+        "plain `l` maps to the redraw"
+    );
+}
+
+#[test]
+fn ctrl_l_through_box() {
+    // The box takes every key but the redraw, which passes to the pane.
+    assert_eq!(
+        box_route(&with(KeyModifiers::CONTROL, KeyCode::Char('l')), None),
+        BoxRoute::Through
+    );
+    assert!(matches!(
+        box_route(&press(KeyCode::Char('l')), None),
+        BoxRoute::Edit(_)
+    ));
+}

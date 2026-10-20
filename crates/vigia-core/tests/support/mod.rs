@@ -5,9 +5,12 @@
 //! A disposable git repository, built by real `git`.
 
 mod assets;
+mod ceiling;
 // Each test binary takes the few generators it needs.
 #[allow(unused_imports)]
 pub use assets::*;
+#[allow(unused_imports)]
+pub use ceiling::{ceiling, ceiling_of};
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -232,6 +235,8 @@ pub fn holds_p99_ticked(
 ) {
     let one = Shape::of(first);
     if one.p99 <= budget {
+        // Printed so a passing gate still says its margin.
+        eprintln!("budget: {claim}: {one}, against {budget:?}");
         return;
     }
 
@@ -679,6 +684,10 @@ pub fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
         evicted: after.evicted - before.evicted,
         deferred: after.deferred - before.deferred,
         derived: after.derived - before.derived,
+        paired_bytes: after.paired_bytes - before.paired_bytes,
+        walks: after.walks - before.walks,
+        pairs_scored: after.pairs_scored - before.pairs_scored,
+        side_reads: after.side_reads - before.side_reads,
     }
 }
 
@@ -692,7 +701,7 @@ pub fn settle_tree(root: &Path) {
     const STILL_FOR: Duration = Duration::from_millis(40);
     const GIVE_UP_AFTER: Duration = Duration::from_secs(10);
 
-    let deadline = Instant::now() + GIVE_UP_AFTER;
+    let deadline = Instant::now() + ceiling(GIVE_UP_AFTER);
     let mut last = tree_fingerprint(root);
     loop {
         std::thread::sleep(STILL_FOR);

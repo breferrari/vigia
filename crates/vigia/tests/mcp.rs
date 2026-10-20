@@ -1020,7 +1020,7 @@ impl Client {
     fn message(&self) -> Value {
         let line = self
             .lines
-            .recv_timeout(budget(Duration::from_secs(10)))
+            .recv_timeout(support::ceiling(budget(Duration::from_secs(10))))
             .expect("the server answered in time");
         serde_json::from_str(&line).unwrap_or_else(|e| {
             panic!("stdout carried something that is not a message: {line:?}: {e}")

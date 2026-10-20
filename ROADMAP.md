@@ -349,7 +349,11 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in
 | ⬜ | Leave picture rows out of the scrollbar's count **Found by review on #657** | [#660](https://github.com/breferrari/vigia/issues/660) |
 | ⬜ | Resend Kitty images after a tmux reattach **Found by review on #647** | [#648](https://github.com/breferrari/vigia/issues/648) |
 | ⬜ | Follow cell size changes after startup **Found by review on #647** | [#649](https://github.com/breferrari/vigia/issues/649) |
-| ⬜ | Pair a renamed and changed image as a rename **Found while building #655** | [#658](https://github.com/breferrari/vigia/issues/658) |
+| ✅ | Pair a renamed and changed image as a rename **Found while building #655** | [#658](https://github.com/breferrari/vigia/issues/658) |
+| ⬜ | Check dependencies for advisories, licences and banned crates in CI **Found by the standards review, 2026-10-20** | [#678](https://github.com/breferrari/vigia/issues/678) |
+| ⬜ | Pin every workflow action to a commit and audit the workflows **Found by the standards review, 2026-10-20** | [#679](https://github.com/breferrari/vigia/issues/679) |
+| ⬜ | Attest the release binaries and embed their dependency list **Found by the standards review, 2026-10-20** | [#680](https://github.com/breferrari/vigia/issues/680) |
+| ⬜ | Bound every test, CI job and mutation run in time. **Moved to Phase 9 by the reader, 2026-10-20** | [#676](https://github.com/breferrari/vigia/issues/676) |
 
 ## Phase 10 — current Rust
 
@@ -388,6 +392,7 @@ Milestone: [Phase 12](https://github.com/breferrari/vigia/milestone/13). Ships i
 
 | | Task | Issue |
 |---|---|---|
+| ⬜ | Fuzz every decoder and parser that reads repository content **Found by the standards review, 2026-10-20; first in this phase** | [#677](https://github.com/breferrari/vigia/issues/677) |
 | ⬜ | Choose the default view: unstaged only, or staged beside it **Decision: the reader rules this, and nothing is taken from it until he does** | [#50](https://github.com/breferrari/vigia/issues/50) |
 | ⬜ | Choose how the header draws a worktree name with invisible characters **Decision: the reader rules this, and nothing is taken from it until he does** | [#89](https://github.com/breferrari/vigia/issues/89) |
 | ⬜ | Rule on a CP437 fallback for the caret, pulse and elision marks **Decision: the reader rules this, and nothing is taken from it until he does** | [#237](https://github.com/breferrari/vigia/issues/237) |
@@ -397,6 +402,8 @@ Milestone: [Phase 12](https://github.com/breferrari/vigia/milestone/13). Ships i
 | ⬜ | Follow a mid-session theme flip once crossterm can deliver it | [#332](https://github.com/breferrari/vigia/issues/332) |
 | ⬜ | Cap wrapped breaks the same way in the short check and the layout | [#661](https://github.com/breferrari/vigia/issues/661) |
 | ⬜ | Observe what a prompting session does with a posted note | [#444](https://github.com/breferrari/vigia/issues/444) |
+| ⬜ | Wake the staged count until every staged side is weighed **Found by review on #675** | [#686](https://github.com/breferrari/vigia/issues/686) |
+| ⬜ | Weigh pending rename sides without a fresh status walk **Found by review on #675** | [#687](https://github.com/breferrari/vigia/issues/687) |
 
 ## Phase 13 — testable by construction
 
@@ -413,6 +420,10 @@ Milestone: [Phase 13](https://github.com/breferrari/vigia/milestone/14). Interna
 | ⬜ | Gate each sheet key against its row and derive the wide keys cell | [#312](https://github.com/breferrari/vigia/issues/312) |
 | ⬜ | Make the rail's arrival width depend on the glyph rung | [#284](https://github.com/breferrari/vigia/issues/284) |
 | ⬜ | Classify every tracked markdown file under one written-layer rule | [#504](https://github.com/breferrari/vigia/issues/504) |
+| ⬜ | Test the diff engine against git with generated changes **Found by the standards review, 2026-10-20** | [#681](https://github.com/breferrari/vigia/issues/681) |
+| ⬜ | Enforce the core's unsafe-free and output-free claims with lints **Found by the standards review, 2026-10-20** | [#682](https://github.com/breferrari/vigia/issues/682) |
+| ⬜ | State that vigia-core has no stable API, and narrow its public items **Follows #684** | [#685](https://github.com/breferrari/vigia/issues/685) |
+| ⬜ | Split render.rs, view.rs and lib.rs into modules **Found by the standards review, 2026-10-20** | [#683](https://github.com/breferrari/vigia/issues/683) |
 
 ## Phase 14 — the instruments
 
@@ -428,6 +439,7 @@ Milestone: [Phase 14](https://github.com/breferrari/vigia/milestone/15). Interna
 | ⬜ | Fail the build when the README calls a released version unreleased. **Found by review on #670** | [#671](https://github.com/breferrari/vigia/issues/671) |
 | ⬜ | Fail the flake-rate workflow when its filter matches no test. **Found on #673** | [#674](https://github.com/breferrari/vigia/issues/674) |
 | ⬜ | Publish to crates.io by trusted publishing and delete the registry token | [#141](https://github.com/breferrari/vigia/issues/141) |
+| ✅ | Decide whether vigia-core's public API is stable **Ruled C by the reader, 2026-10-20** | [#684](https://github.com/breferrari/vigia/issues/684) |
 
 ## Shelf (retired 2026-10-19)
 
@@ -694,6 +706,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | A note's rows are built whole before the clamp trims them ([#530](https://github.com/breferrari/vigia/issues/530)) | Off the Shelf, 2026-09-30 | Taken by the reader's approval of the plan when `next.sh` ran dry. The row's reason was a cost statement, not a blocker: the arrival frame of a fenced answer scaled with the answer's length and was paid once. A note is now counted whole and built only where the clamp keeps it, and a quoted block is parsed as far as the last line the frame draws, so an arrival costs a screenful |
 | All 25 open Shelf items ([#16](https://github.com/breferrari/vigia/issues/16), [#17](https://github.com/breferrari/vigia/issues/17), [#19](https://github.com/breferrari/vigia/issues/19), [#48](https://github.com/breferrari/vigia/issues/48), [#50](https://github.com/breferrari/vigia/issues/50), [#72](https://github.com/breferrari/vigia/issues/72), [#73](https://github.com/breferrari/vigia/issues/73), [#74](https://github.com/breferrari/vigia/issues/74), [#89](https://github.com/breferrari/vigia/issues/89), [#108](https://github.com/breferrari/vigia/issues/108), [#141](https://github.com/breferrari/vigia/issues/141), [#145](https://github.com/breferrari/vigia/issues/145), [#188](https://github.com/breferrari/vigia/issues/188), [#237](https://github.com/breferrari/vigia/issues/237), [#264](https://github.com/breferrari/vigia/issues/264), [#265](https://github.com/breferrari/vigia/issues/265), [#284](https://github.com/breferrari/vigia/issues/284), [#312](https://github.com/breferrari/vigia/issues/312), [#332](https://github.com/breferrari/vigia/issues/332), [#393](https://github.com/breferrari/vigia/issues/393), [#441](https://github.com/breferrari/vigia/issues/441), [#444](https://github.com/breferrari/vigia/issues/444), [#504](https://github.com/breferrari/vigia/issues/504), [#515](https://github.com/breferrari/vigia/issues/515), [#661](https://github.com/breferrari/vigia/issues/661)) | Shelf → Phases 11 to 14, 2026-10-19 | Reader, 2026-10-19: the shelf is retired and every open issue sits in a phase. #524 closed the same day, resolved by #611. |
 | Class every prose path as docs ([#667](https://github.com/breferrari/vigia/issues/667)) | Phase 14, 2026-10-19 | Reader, 2026-10-19: taken before #659. |
+| Bound every test, CI job and mutation run in time ([#676](https://github.com/breferrari/vigia/issues/676)) | Phase 14, 2026-10-20 | Reader, 2026-10-20: "This must be fixed within this milestone." Moved to Phase 9, where it gates 1.2.0, and taken before #639 finishes. |
 
 ---
 

@@ -100,7 +100,7 @@ fn drawn(name: &str, old: Option<&[u8]>, new: &[u8]) -> Drawn {
     let mut learned = false;
     let view = loop {
         assert!(
-            pictures.settle(Duration::from_secs(120)),
+            pictures.settle(support::ceiling(Duration::from_secs(120))),
             "the pictures were not built"
         );
         let view = view_of(&mut app, &mut pictures, &mut frame);

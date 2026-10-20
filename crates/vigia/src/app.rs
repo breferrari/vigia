@@ -512,7 +512,7 @@ impl App {
 
     /// Open the box under `anchor`, holding `existing`'s text when the line
     /// already carries a note. From here until Enter, Esc or a press elsewhere,
-    /// every key is the box's.
+    /// every key but `Ctrl+L` is the box's.
     pub fn open_box(&mut self, anchor: Anchor, existing: Option<&Note>) {
         self.note_box = Some(NoteBox::open(anchor, existing));
     }
@@ -887,7 +887,7 @@ impl App {
             Action::Escape if self.menu.is_some() => self.menu = None,
             Action::Escape if self.sheet.is_some() => self.sheet = None,
             Action::Escape => return Ok(false),
-            Action::Redraw => {}
+            Action::Redraw | Action::Refresh => {}
             // Re-engaging jumps rather than arming: `less +F` goes to the end when you
             // ask it to follow, and a reader who presses `f` is asking to see what
             // changed, not to wait for the next thing that does.

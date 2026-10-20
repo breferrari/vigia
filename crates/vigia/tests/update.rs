@@ -4,6 +4,10 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+#[path = "pty/ceiling.rs"]
+mod ceiling;
+use ceiling::ceiling;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::update::{UPDATE_VAR, newer, version_in, wanted, watch};
@@ -190,7 +194,7 @@ fn the_check_never_delays_the_caller() {
     // The answer first, so what follows cannot be satisfied by a check that
     // never ran: an absence is free until the work is counted.
     let answered = rx
-        .recv_timeout(Duration::from_secs(10))
+        .recv_timeout(ceiling(Duration::from_secs(10)))
         .expect("the check never answered, so this proves nothing about its cost");
     assert_eq!(answered, "9.9.9");
     assert!(
@@ -217,7 +221,7 @@ fn a_check_that_answers_nothing_says_nothing() {
     // sender only drops once the thread has finished, so this says the check ran
     // and stayed quiet rather than that it is merely slow.
     assert_eq!(
-        rx.recv_timeout(Duration::from_secs(10)),
+        rx.recv_timeout(ceiling(Duration::from_secs(10))),
         Err(mpsc::RecvTimeoutError::Disconnected),
         "a check with no answer still told the footer something"
     );

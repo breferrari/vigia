@@ -61,6 +61,44 @@ pub fn encoded(format: image::ImageFormat, width: u32, height: u32, seed: u8) ->
     encode_image(&gradient(width, height, seed), format)
 }
 
+/// `length` bytes of noise from `seed`, a NUL first, so each reads as
+/// binary and two seeds share no chunk.
+pub fn noise(seed: u64, length: usize) -> Vec<u8> {
+    let mut state = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+    let mut out: Vec<u8> = (0..length)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as u8
+        })
+        .collect();
+    out[0] = 0;
+    out
+}
+
+/// `bytes` with its last `share` of them changed.
+pub fn tail_changed(bytes: &[u8], share: f64) -> Vec<u8> {
+    let mut out = bytes.to_vec();
+    let from = out.len() - (out.len() as f64 * share) as usize;
+    for byte in &mut out[from..] {
+        *byte ^= 0x5a;
+    }
+    out
+}
+
+/// A PNG of `width` by `height`, and the same with its last pixel changed,
+/// as an edit that leaves most of the file's bytes alone.
+pub fn edited_png(width: u32, height: u32) -> (Vec<u8>, Vec<u8>) {
+    let image = gradient(width, height, 1);
+    let mut edited = image.clone();
+    edited.put_pixel(width - 1, height - 1, image::Rgba([255, 0, 0, 255]));
+    (
+        encode_image(&image, image::ImageFormat::Png),
+        encode_image(&edited, image::ImageFormat::Png),
+    )
+}
+
 /// A phone-sized screenshot as a PNG, its colours from `accent`.
 pub fn screen_png(accent: u8) -> Vec<u8> {
     let image = image::RgbaImage::from_fn(1170, 2532, |x, y| {

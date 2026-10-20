@@ -636,7 +636,7 @@ fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
         },
     );
     assert_eq!(
-        rx.recv_timeout(ANSWERED)
+        rx.recv_timeout(support::ceiling(ANSWERED))
             .expect("an answer without a thread"),
         Posted::Failed,
         "a post with no slot to take reached the registry instead of being refused"
@@ -658,7 +658,7 @@ fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
             },
         );
         assert_eq!(
-            rx.recv_timeout(ANSWERED)
+            rx.recv_timeout(support::ceiling(ANSWERED))
                 .unwrap_or_else(|_| panic!("post {round} never answered")),
             Posted::Failed
         );
