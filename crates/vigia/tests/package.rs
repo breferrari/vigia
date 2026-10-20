@@ -2081,9 +2081,6 @@ fn version_parts(version: &str) -> Option<(u32, u32, u32)> {
 
 /// No public page calls the manifest's version, or an older one, unreleased,
 /// and none pins the Rust or crate version an install needs.
-///
-/// The bump runs this after it raises the version, so a release that still
-/// carries its own marks is refused before anything is pushed.
 #[test]
 fn unreleased_marks() {
     let manifest = repo_file("Cargo.toml");
