@@ -2,7 +2,7 @@
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::change::{ChangeKind, FileChange, Origin, Side};
@@ -98,17 +98,20 @@ struct Taken {
     /// this artefact has no working-tree side, or when it could not be
     /// fingerprinted.
     worktree: Option<Observed>,
+    /// LFS objects a side was missing, any of which arriving changes the diff.
+    awaiting: Vec<PathBuf>,
 }
 
 impl Taken {
     /// The evidence a change carries, plus what a read observed of its
     /// working-tree side.
-    fn of(change: &FileChange, worktree: Option<Observed>) -> Self {
+    fn of(change: &FileChange, worktree: Option<Observed>, awaiting: Vec<PathBuf>) -> Self {
         Self {
             kind: change.kind.clone(),
             before: change.before,
             after: change.after,
             worktree,
+            awaiting,
         }
     }
 }
@@ -239,6 +242,9 @@ fn provenance(taken: &Taken, current: &FileChange) -> Provenance {
     // moved, and a new kind is a different diff outright.
     if taken.kind != current.kind || taken.before != current.before || taken.after != current.after
     {
+        return Provenance::Moved;
+    }
+    if taken.awaiting.iter().any(|object| object.is_file()) {
         return Provenance::Moved;
     }
     // A removal, a conflict and a type change are computed from the left side
@@ -798,7 +804,7 @@ impl<'w> Frame<'w> {
                 } else {
                     None
                 };
-                (span, Some(Taken::of(change, worktree)))
+                (span, Some(Taken::of(change, worktree, Vec::new())))
             }
             // A failed read describes nothing, so it is recorded with no evidence at
             // all and [`Measured::taken`] carries why that matters. The flag keeps
@@ -925,7 +931,7 @@ impl<'w> Frame<'w> {
         // The height goes with the diff it was taken from: this read proved both, and
         // a walk that asked the file again would spend a second stat on every drawn
         // file every tick.
-        let taken = Taken::of(change, worktree);
+        let taken = Taken::of(change, worktree, self.worktree.take_lfs_missing());
         self.spans.put(
             change,
             Measured {
@@ -1052,6 +1058,7 @@ mod tests {
             before: index_blob,
             after,
             worktree,
+            awaiting: Vec::new(),
         }
     }
 
@@ -1062,6 +1069,7 @@ mod tests {
             before,
             after: after.map(Side::Blob),
             worktree: None,
+            awaiting: Vec::new(),
         }
     }
 

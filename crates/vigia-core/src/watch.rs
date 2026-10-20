@@ -17,6 +17,10 @@ use crate::Hidden;
 use crate::error::{Error, Result};
 use crate::frame::{Fingerprint, config_moved, followed_print};
 use crate::history::HISTORY_PATHS;
+use crate::worktree::lfs_store_of;
+
+/// Arms one OS watch. A parameter only so a test can make it fail.
+type Arm = fn(&mut notify::RecommendedWatcher, &Path, RecursiveMode) -> notify::Result<()>;
 
 /// How the watch loop folds a burst of events into one refresh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,7 +147,8 @@ pub struct Watcher<'repo> {
     rx: Receiver<Message>,
     tx: Sender<Message>,
     /// Dropping this stops the OS watch, so it must outlive the receiver.
-    _backend: notify::RecommendedWatcher,
+    backend: notify::RecommendedWatcher,
+    arm: Arm,
     /// Owned rather than borrowed, so a config write can reload it.
     repo: gix::Repository,
     excludes: gix::worktree::Stack,
@@ -174,6 +179,14 @@ pub struct Watcher<'repo> {
     /// The common dir, when it is not the git dir. Empty otherwise. It holds the
     /// branch refs, and also other worktrees' `HEAD` and index.
     common_dir: Vec<PathBuf>,
+    /// The LFS store's `objects`, in every spelling as for `roots`. An object
+    /// landing there can turn a `binary` side into a picture.
+    store: Vec<PathBuf>,
+    /// `objects` outside the worktree that does not exist yet, and the deepest
+    /// existing ancestor watched until it appears.
+    store_pending: Option<(PathBuf, PathBuf)>,
+    /// Why the store could not be watched, until [`Self::take_store_notice`].
+    store_notice: Option<String>,
     index: IndexWatch,
     options: WatchOptions,
     stats: WatchStats,
@@ -191,6 +204,24 @@ impl<'repo> Watcher<'repo> {
         loaded_config: Option<Fingerprint>,
         workdir: &Path,
         options: WatchOptions,
+    ) -> Result<Self> {
+        Self::armed_by(
+            repo,
+            config,
+            loaded_config,
+            workdir,
+            options,
+            |backend, path, mode| backend.watch(path, mode),
+        )
+    }
+
+    fn armed_by(
+        repo: &gix::Repository,
+        config: &Path,
+        loaded_config: Option<Fingerprint>,
+        workdir: &Path,
+        options: WatchOptions,
+        arm: Arm,
     ) -> Result<Self> {
         // Everything that reads the repository happens before the watch is armed, so
         // the watcher never observes its own construction.
@@ -214,6 +245,20 @@ impl<'repo> Watcher<'repo> {
         } else {
             spellings_of(&common, &roots)
         };
+        let objects = tidy(&lfs_store_of(repo)).join("objects");
+        let mut store = spellings_of(&objects, &roots);
+        // A store not made yet has no canonical spelling of its own, so its
+        // nearest existing ancestor lends one.
+        if let Some(spelling) = objects.ancestors().find_map(|dir| {
+            Some(
+                dir.canonicalize()
+                    .ok()?
+                    .join(objects.strip_prefix(dir).ok()?),
+            )
+        }) && !store.contains(&spelling)
+        {
+            store.push(spelling);
+        }
         let index = IndexWatch::new(repo);
 
         let (tx, rx) = mpsc::channel();
@@ -260,10 +305,12 @@ impl<'repo> Watcher<'repo> {
             }
         }
 
-        Ok(Self {
+        let outside = !inside(&objects);
+        let mut watcher = Self {
             rx,
             tx,
-            _backend: backend,
+            backend,
+            arm,
             repo: repo.clone(),
             excludes,
             config: config.to_path_buf(),
@@ -277,12 +324,61 @@ impl<'repo> Watcher<'repo> {
             roots,
             git_dir,
             common_dir,
+            store,
+            store_pending: None,
+            store_notice: None,
             index,
             options,
             stats: WatchStats::default(),
             delivered,
             hidden: None,
-        })
+        };
+        // Inside the worktree, the recursive watch above already covers it.
+        if outside {
+            watcher.arm_store(objects);
+        }
+        Ok(watcher)
+    }
+
+    /// Watch `objects`, or its deepest existing ancestor until it appears. A
+    /// failure keeps every other watch and is reported once.
+    fn arm_store(&mut self, objects: PathBuf) -> bool {
+        let mut last = self.store_pending.take().map(|(_, ancestor)| ancestor);
+        loop {
+            let (path, mode) = if objects.is_dir() {
+                (objects.as_path(), RecursiveMode::Recursive)
+            } else {
+                let Some(ancestor) = objects.ancestors().skip(1).find(|dir| dir.is_dir()) else {
+                    return false;
+                };
+                // Already watched, and its child is still missing.
+                if last.as_deref() == Some(ancestor) {
+                    let ancestor = ancestor.to_path_buf();
+                    self.store_pending = Some((objects, ancestor));
+                    return false;
+                }
+                (ancestor, RecursiveMode::NonRecursive)
+            };
+            if let Err(error) = (self.arm)(&mut self.backend, path, mode) {
+                // A recursive watch that stopped partway holds what it added.
+                // Only that one: an ancestor may be a watch of the main set.
+                if mode == RecursiveMode::Recursive {
+                    let _ = self.backend.unwatch(path);
+                }
+                self.store_notice = Some(store_notice(&error));
+                return false;
+            }
+            if mode == RecursiveMode::Recursive {
+                return true;
+            }
+            last = Some(path.to_path_buf());
+        }
+    }
+
+    /// Once, why an LFS object landing will not redraw its file until the next
+    /// change.
+    pub fn take_store_notice(&mut self) -> Option<String> {
+        self.store_notice.take()
     }
 
     /// Keep every path `hide` covers from waking the watch.
@@ -402,6 +498,16 @@ impl<'repo> Watcher<'repo> {
     /// This event's path relative to the worktree, and whether it is a
     /// directory, or `None` when nothing the display depends on is behind it.
     fn relative<'p>(&mut self, path: &'p Path) -> Option<(&'p Path, bool)> {
+        // A directory on the way to a store that does not exist yet.
+        if let Some((objects, _)) = &self.store_pending
+            && self.store.iter().any(|spelling| spelling.starts_with(path))
+            && self.arm_store(objects.clone())
+        {
+            return Some((Path::new(".git"), false));
+        }
+        if within(&self.store, path).is_some() {
+            return Some((Path::new(".git"), false));
+        }
         // A git-dir event comes back as `.git`, which `followable` never follows.
         if let Some(inside) = within(&self.git_dir, path) {
             let watched = if inside == Path::new("index") {
@@ -653,6 +759,16 @@ impl IndexPrint {
     }
 }
 
+/// The reader's words for a store watch that could not be armed.
+fn store_notice(error: &notify::Error) -> String {
+    let reason = match &error.kind {
+        notify::ErrorKind::MaxFilesWatch => "watch limit reached".to_owned(),
+        notify::ErrorKind::Io(io) => io.kind().to_string(),
+        _ => error.to_string(),
+    };
+    format!("LFS images redraw on the next change, not when their objects arrive: {reason}")
+}
+
 /// `path` relative to the first of `roots` it is under.
 fn within<'p>(roots: &[PathBuf], path: &'p Path) -> Option<&'p Path> {
     roots.iter().find_map(|root| path.strip_prefix(root).ok())
@@ -774,6 +890,62 @@ mod tests {
     //! The follow-target rule, tested as the pure function it is.
 
     use super::*;
+
+    /// A repository whose LFS store sits outside it, with a watch whose store
+    /// arm fails as a full inotify table does.
+    #[test]
+    fn store_arm_fails_soft() {
+        let base = std::env::temp_dir().join(format!(
+            "vigia-store-arm-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+        ));
+        let (tree, store) = (base.join("tree"), base.join("store"));
+        std::fs::create_dir_all(store.join("objects")).expect("store");
+        std::fs::create_dir_all(&tree).expect("tree");
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&tree)
+                .args(args)
+                .output()
+                .expect("run git");
+            assert!(out.status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "lfs.storage", &store.to_string_lossy()]);
+        let repo = gix::open(&tree).expect("open");
+        let config = repo.common_dir().join("config");
+        let mut watcher = Watcher::armed_by(
+            &repo,
+            &config,
+            None,
+            &tree,
+            WatchOptions::default(),
+            |_, _, _| Err(notify::Error::new(notify::ErrorKind::MaxFilesWatch)),
+        )
+        .expect("the main watch still arms");
+        let notice = watcher.take_store_notice().expect("no notice");
+        assert!(
+            notice.starts_with("LFS images redraw on the next change")
+                && notice.ends_with("watch limit reached"),
+            "{notice}"
+        );
+        assert_eq!(watcher.take_store_notice(), None, "the notice came twice");
+
+        let stop = watcher.stopper();
+        let guard = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            std::fs::write(tree.join("a.txt"), "x\n").expect("write");
+            std::thread::sleep(Duration::from_secs(10));
+            stop.stop();
+        });
+        assert!(watcher.next_tick().is_some(), "a tree write did not tick");
+        assert_eq!(watcher.take_store_notice(), None, "the notice came again");
+        drop(watcher);
+        drop(guard);
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     /// Build a path the way the host spells one, so the Windows run and the
     /// Unix run are testing their own separator rather than a literal.

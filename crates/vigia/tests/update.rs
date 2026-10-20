@@ -315,6 +315,40 @@ fn the_shell_still_arms_the_check() {
     }
 }
 
+/// The store watch's notice reaches the footer and never stderr, which would
+/// draw over the pane.
+#[test]
+fn store_notice_footer() {
+    let shell: String = include_str!("../src/lib.rs")
+        .split("#[cfg(test)]")
+        .next()
+        .expect("split")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for seam in [
+        ".take_store_notice()",
+        "tx.send(Wake::Notice(message))",
+        "Wake::Notice(message) => shell.say(",
+    ] {
+        assert!(shell.contains(seam), "`{seam}` is gone from the shell");
+    }
+    let watch = include_str!("../../vigia-core/src/watch.rs");
+    for (name, code) in [("lib.rs", shell.as_str()), ("watch.rs", watch)] {
+        for line in code.lines().filter(|line| line.contains("notice")) {
+            assert!(
+                !line.contains("eprint") && !line.contains("stderr"),
+                "{name} writes the store notice to stderr: {line}"
+            );
+        }
+    }
+    assert!(
+        !watch.contains("eprint") && !watch.contains("stderr"),
+        "the watch writes to stderr"
+    );
+}
+
 /// Two of `ureq`'s defaults are wrong for one fixed endpoint, and only a
 /// hostile network could show either being restored.
 ///

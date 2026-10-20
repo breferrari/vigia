@@ -776,3 +776,96 @@ fn image_sources() {
         "the plain pair read back wrong"
     );
 }
+
+/// Back-date `rela`, so a frame's diff of it is settled and reused.
+fn backdate(scratch: &Scratch, rela: &str) {
+    let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+    std::fs::File::options()
+        .write(true)
+        .open(scratch.path_of(rela))
+        .and_then(|file| file.set_modified(past))
+        .expect("back-date the file");
+}
+
+/// The frame's diff of its only file, after one advance.
+fn framed(frame: &mut vigia_core::Frame<'_>) -> FileDiff {
+    frame.advance().expect("advance");
+    frame.diff(0).expect("diff").1.clone()
+}
+
+/// A diff drawn without its old side's object is read again once it lands.
+#[test]
+fn lfs_object_arrives() {
+    let old = png(24, 40, 1);
+    let (scratch, oid) = lfs_repo("picture-lfs-arrives", &old, &png(30, 50, 2));
+    backdate(&scratch, "a.png");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    assert!(
+        framed(&mut frame).picture.is_none(),
+        "the missing object drew"
+    );
+    let missing = framed(&mut frame);
+    assert_eq!(
+        frame.stats().reused,
+        1,
+        "a diff awaiting its object was not reused"
+    );
+    assert!(missing.binary && missing.picture.is_none());
+
+    store(&scratch.root().join(".git").join("lfs"), &oid, &old);
+    let before = framed(&mut frame)
+        .picture
+        .and_then(|picture| picture.before);
+    assert_eq!(
+        before.map(|side| (side.width, side.height)),
+        Some((24, 40)),
+        "the object landed and the old side still drew nothing"
+    );
+}
+
+/// The same for the new side, a worktree pointer whose object lands later.
+#[test]
+fn lfs_new_object_arrives() {
+    let old = png(24, 40, 1);
+    let new = png(30, 50, 2);
+    let (new_oid, pointer) = lfs_pointer(&new, 0xcd);
+    let (scratch, old_oid) = lfs_repo("picture-lfs-new-arrives", &old, pointer.as_bytes());
+    let lfs = scratch.root().join(".git").join("lfs");
+    store(&lfs, &old_oid, &old);
+    backdate(&scratch, "a.png");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let after = |diff: FileDiff| diff.picture.and_then(|picture| picture.after);
+    assert!(
+        after(framed(&mut frame)).is_none(),
+        "the missing object drew"
+    );
+
+    store(&lfs, &new_oid, &new);
+    assert_eq!(
+        after(framed(&mut frame)).map(|side| (side.width, side.height)),
+        Some((30, 50)),
+        "the object landed and the new side still drew nothing"
+    );
+}
+
+/// Waiting on an object costs the other files nothing: both diffs are reused,
+/// at one fingerprint each.
+#[test]
+fn lfs_wait_reuses() {
+    let (scratch, _) = lfs_repo("picture-lfs-wait", &png(24, 40, 1), &png(30, 50, 2));
+    scratch.write("b.txt", "one\n");
+    scratch.git(&["add", "b.txt"]);
+    scratch.git(&["commit", "-q", "-m", "text"]);
+    scratch.write("b.txt", "two\n");
+    backdate(&scratch, "a.png");
+    backdate(&scratch, "b.txt");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    support::materialise(&mut frame);
+    let (reused, probes) = (frame.stats().reused, frame.stats().probes);
+    support::materialise(&mut frame);
+    assert_eq!(frame.stats().reused - reused, 2, "a diff was read again");
+    assert_eq!(frame.stats().probes - probes, 2, "the wait cost a probe");
+}

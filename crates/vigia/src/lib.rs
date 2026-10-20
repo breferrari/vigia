@@ -132,6 +132,8 @@ enum Wake {
     Pictured,
     /// A newer version exists, so the footer can name it.
     Update(String),
+    /// The watch is live but misses something, which the footer says once.
+    Notice(String),
     /// The notes store changed under another process's hand.
     Notes,
     /// Enter's post to the registered agent sessions came back.
@@ -870,6 +872,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         began,
                     );
                 }
+                Wake::Notice(message) => shell.say(message, Voice::Arrived, began),
                 // Marked rather than read here, so a burst of writes in one batch
                 // is one listing.
                 Wake::Notes => shell.notes_stale = true,
@@ -2315,12 +2318,20 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>
             }
         };
         watcher.hide(hide);
+        let notice = |watcher: &mut vigia_core::Watcher<'_>| {
+            watcher
+                .take_store_notice()
+                .is_none_or(|message| tx.send(Wake::Notice(message)).is_ok())
+        };
+        if !notice(&mut watcher) {
+            return;
+        }
 
         // The tick says only that something changed, which is all the shell needs:
         // every tick triggers one status walk, and a walk finds whatever the events
         // missed.
         while let Some(tick) = watcher.next_tick() {
-            if tx.send(Wake::Tick(tick.paths)).is_err() {
+            if tx.send(Wake::Tick(tick.paths)).is_err() || !notice(&mut watcher) {
                 return;
             }
         }

@@ -1140,3 +1140,160 @@ fn gitignore_renamed_away() {
         "a path a renamed-away .gitignore ignored never woke the watch"
     );
 }
+
+/// Where an object lands in an LFS store, under `objects`.
+const OBJECT: &str =
+    "objects/ab/cd/abcd0000000000000000000000000000000000000000000000000000000000ef";
+
+/// Write one object into the LFS store at `store`, as `git lfs fetch` leaves it.
+fn land_object(store: &std::path::Path) {
+    let object = store.join(OBJECT);
+    std::fs::create_dir_all(object.parent().expect("a fan-out dir")).expect("fan-out dirs");
+    std::fs::write(object, "image bytes\n").expect("write the object");
+}
+
+#[test]
+fn lfs_store_write_ticks() {
+    let scratch = committed_scratch("watch-lfs-store");
+    std::fs::create_dir_all(scratch.path_of(".git/lfs/objects")).expect("store");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    land_object(&scratch.path_of(".git/lfs"));
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an object landing in the LFS store produced no tick"
+    );
+}
+
+#[test]
+fn lfs_tmp_wakes_nothing() {
+    let scratch = committed_scratch("watch-lfs-tmp");
+    std::fs::create_dir_all(scratch.path_of(".git/lfs/tmp")).expect("tmp");
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    std::fs::write(scratch.path_of(".git/lfs/tmp/download"), "part\n").expect("write tmp");
+    assert!(
+        tick_within(&mut watcher, IDLE).is_none(),
+        "a download in progress woke the pane"
+    );
+}
+
+/// An `lfs.storage` outside the worktree that does not exist when the watch arms.
+#[test]
+fn lfs_storage_write_ticks() {
+    let holder = support::TempDir::new("watch-lfs-storage");
+    let store = holder.path().join("store");
+    let scratch = committed_scratch("watch-lfs-storage-repo");
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    assert_eq!(
+        watcher.take_store_notice(),
+        None,
+        "the store's watch failed to arm"
+    );
+
+    land_object(&store);
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "the store appearing produced no tick"
+    );
+    while tick_within(&mut watcher, IDLE).is_some() {}
+    std::fs::write(store.join(OBJECT).with_extension("next"), "more\n").expect("second");
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an object landing in the armed store produced no tick"
+    );
+}
+
+#[test]
+fn linked_lfs_store_ticks() {
+    let scratch = linked_scratch("watch-linked-lfs");
+    std::fs::create_dir_all(scratch.path_of(".git/lfs/objects")).expect("store");
+    let scratch = scratch.settled();
+    let worktree = linked_watch(&scratch);
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+
+    land_object(&scratch.path_of(".git/lfs"));
+    assert!(
+        tick_within(&mut watcher, SETTLE).is_some(),
+        "an object landing in the common dir's LFS store produced no tick"
+    );
+}
+
+/// inotify watches this process holds, from `/proc/self/fdinfo`.
+#[cfg(target_os = "linux")]
+fn inotify_watches() -> usize {
+    std::fs::read_dir("/proc/self/fdinfo")
+        .expect("fdinfo")
+        .flatten()
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .map(|info| {
+            info.lines()
+                .filter(|line| line.starts_with("inotify wd:"))
+                .count()
+        })
+        .sum()
+}
+
+/// What an out-of-tree store of 5,000 objects costs to watch: one inotify watch
+/// per directory in it, and the time to arm them. CI's numbers go to the job
+/// summary.
+#[cfg(target_os = "linux")]
+#[test]
+fn lfs_store_watch_cost() {
+    use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+    let holder = support::TempDir::new("watch-lfs-cost");
+    let store = holder.path().join("store");
+    let hash =
+        |n: u64, seed: u64| BuildHasherDefault::<DefaultHasher>::default().hash_one((n, seed));
+    let mut dirs = std::collections::BTreeSet::new();
+    for n in 0..5_000 {
+        let oid: String = (0..4)
+            .map(|seed| format!("{:016x}", hash(n, seed)))
+            .collect();
+        let dir = store.join("objects").join(&oid[0..2]).join(&oid[2..4]);
+        std::fs::create_dir_all(&dir).expect("fan-out");
+        std::fs::write(dir.join(&oid), "x").expect("object");
+        dirs.insert(dir.clone());
+        dirs.insert(dir.parent().expect("first level").to_path_buf());
+    }
+    let directories = dirs.len() + 1;
+    let scratch = committed_scratch("watch-lfs-cost-repo");
+    let worktree = scratch.worktree();
+    let started = Instant::now();
+    let control = worktree.watch(WatchOptions::default()).expect("watch");
+    let control_time = started.elapsed();
+    let control_watches = inotify_watches();
+    drop(control);
+
+    scratch.git(&["config", "lfs.storage", &store.to_string_lossy()]);
+    let worktree = scratch.worktree();
+    let started = Instant::now();
+    let mut watcher = worktree.watch(WatchOptions::default()).expect("watch");
+    let time = started.elapsed();
+    assert_eq!(
+        watcher.take_store_notice(),
+        None,
+        "the store's watch failed to arm"
+    );
+    let watches = inotify_watches() - control_watches;
+    let line = format!(
+        "lfs_store_watch_cost: 5000 objects, {directories} directories, {watches} store watches, \
+         arm {:?} against {control_time:?} without the store\n",
+        time.saturating_sub(control_time)
+    );
+    if let Ok(summary) = std::env::var("GITHUB_STEP_SUMMARY") {
+        use std::io::Write;
+        let _ = std::fs::OpenOptions::new()
+            .append(true)
+            .open(summary)
+            .and_then(|mut file| file.write_all(line.as_bytes()));
+    }
+    assert_eq!(watches, directories, "{line}");
+}
