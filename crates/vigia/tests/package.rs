@@ -3676,7 +3676,7 @@ fn jobs_time_bound() {
 /// nextest kills a hung test in every profile a run uses.
 #[test]
 fn nextest_time_bound() {
-    let slow_only = "[profile.a]\nslow-timeout = \"30s\"\n[profile.b]\nslow-timeout = { period = \"30s\", terminate-after = 4 }\n";
+    let slow_only = "[profile.a]\nslow-timeout = { period = \"30s\" }\n[profile.b]\nslow-timeout = { period = \"30s\", terminate-after = 4 }\n";
     assert_eq!(
         unbounded_profiles(slow_only, &["a", "b"]),
         ["a"],
