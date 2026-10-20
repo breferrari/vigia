@@ -558,9 +558,8 @@ pub struct Pictures {
     seen: HashMap<Arc<Key>, u64>,
     /// How many times [`Pictures::keep`] has run.
     tick: u64,
-    /// Where the frame's list of files was, and its length, when kept pictures
-    /// were last checked against it.
-    listing: (usize, usize),
+    /// The frame's walk that kept pictures were last checked against.
+    walked: u64,
     /// Whether a delete has to pass through tmux.
     tmux: bool,
     /// Where the picker goes, until it has been given.
@@ -739,7 +738,7 @@ impl Pictures {
             retired: Vec::new(),
             seen: HashMap::new(),
             tick: 0,
-            listing: (0, 0),
+            walked: 0,
             tmux: false,
             picker: Some(picked),
             cell: None,
@@ -875,13 +874,17 @@ impl Pictures {
                 self.seen.insert(Arc::clone(key), self.tick);
             }
         }
-        // The staged and unstaged pictures of one path differ in their old side,
-        // and an edit keeps it.
-        let sides: HashSet<(&str, Option<u64>)> = shown
+        // A file's staged and unstaged pictures share neither side. An edit
+        // keeps the old side, and staging keeps the new.
+        let olds: HashSet<(&str, Option<u64>)> = shown
             .iter()
             .map(|key| (key.path.as_str(), key.before))
             .collect();
-        let doomed: Vec<Arc<Key>> = self
+        let news: HashSet<(&str, Option<u64>)> = shown
+            .iter()
+            .map(|key| (key.path.as_str(), key.after))
+            .collect();
+        let doomed: HashSet<Arc<Key>> = self
             .built
             .iter()
             .filter(|(key, ready)| {
@@ -889,7 +892,8 @@ impl Pictures {
                     && (ready.0.kitty.is_empty()
                         // Never on screen, so nothing of it is in the terminal.
                         || !self.seen.contains_key(*key)
-                        || sides.contains(&(key.path.as_str(), key.before)))
+                        || olds.contains(&(key.path.as_str(), key.before))
+                        || news.contains(&(key.path.as_str(), key.after)))
             })
             .map(|(key, _)| Arc::clone(key))
             .collect();
@@ -1016,14 +1020,23 @@ impl Pictures {
             }
         }
         let shown: HashSet<Arc<Key>> = hung.iter().map(|(key, _, _)| Arc::clone(key)).collect();
-        // Once per new list of files, since the walk hashes every path. A list
-        // rebuilt in place is missed until the next, which only delays a delete.
-        let files = frame.files();
-        let listing = (files.as_ptr() as usize, files.len());
-        if listing != self.listing && self.built.keys().any(|key| !shown.contains(key)) {
-            self.listing = listing;
-            let listed: HashSet<&str> = files.iter().map(|file| file.path.as_str()).collect();
-            self.retire_where(|key, _| !shown.contains(key) && !listed.contains(key.path.as_str()));
+        // Once per walk, since this reads every file in the diff.
+        let walks = frame.stats().walks;
+        if walks != self.walked {
+            self.walked = walks;
+            let mut away: HashSet<&str> = self
+                .built
+                .keys()
+                .filter(|key| !shown.contains(*key))
+                .map(|key| key.path.as_str())
+                .collect();
+            if !away.is_empty() {
+                for file in frame.files() {
+                    away.remove(file.path.as_str());
+                }
+                let gone: HashSet<String> = away.into_iter().map(str::to_owned).collect();
+                self.retire_where(|key, _| gone.contains(&key.path));
+            }
         }
         self.keep(&shown);
         // Before any job is sent, or the worker can skip one as not on screen.
@@ -1964,6 +1977,22 @@ mod tests {
         assert!(
             pictures.get(&staged).is_some(),
             "an edit to the worktree dropped the staged picture"
+        );
+        // Staged: the edit's new side is now the staged picture's.
+        let added = key(1, 4);
+        pictures.built.insert(
+            Arc::clone(&added),
+            Ready(Arc::new(Built {
+                kitty: vec![4],
+                stored: 1,
+                ..undecoded()
+            })),
+        );
+        pictures.keep(&HashSet::from([Arc::clone(&edited), Arc::clone(&added)]));
+        pictures.keep(&HashSet::from([Arc::clone(&added)]));
+        assert!(
+            pictures.get(&edited).is_none(),
+            "the picture staging replaced was kept"
         );
     }
 
