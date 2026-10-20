@@ -444,6 +444,10 @@ jobs:
       - name: the changelog names the version being released
         run: cargo test -p vigia --test package the_changelog_names_the_version_the_manifest_carries
 
+      # And no page still calls the version being released unreleased.
+      - name: the pages call nothing released unreleased
+        run: cargo test -p vigia --test package unreleased_marks
+
       # And the binary reports the new number, which is the claim a user checks.
       - name: the binary reports the new version
         env:
