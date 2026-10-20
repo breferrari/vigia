@@ -9,8 +9,8 @@ use std::time::Duration;
 use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
 use support::{
-    Scratch, ccitt_white, icon_ops, icon_pdf, label_pdf, lzw_zeros, open_locked_pdf, pdf, pdf_doc,
-    pdf_with, run_length_zeros, zlib_filled, zlib_zeros, zlib_zeros_lenient,
+    Scratch, ccitt_white, icon_ops, icon_pdf, label_pdf, lzw_repeats, lzw_zeros, open_locked_pdf,
+    pdf, pdf_doc, pdf_with, run_length_zeros, zlib_filled, zlib_zeros, zlib_zeros_lenient,
 };
 use vigia::pictures::{Inks, Kind, Pictures, Verdict};
 use vigia::{App, Pointing, Row, View, body_layout};
@@ -632,6 +632,15 @@ fn pdf_lzw_bomb() {
     let data = lzw_zeros(1 << 30);
     bounded(
         "pdf-lzw",
+        &image_page(&format!("{GREY} /Filter /LZWDecode"), &data),
+    );
+}
+
+#[test]
+fn pdf_lzw_repeat_bomb() {
+    let data = lzw_repeats(1 << 30);
+    bounded(
+        "pdf-lzw-repeat",
         &image_page(&format!("{GREY} /Filter /LZWDecode"), &data),
     );
 }

@@ -479,8 +479,9 @@ pub fn zlib_zeros_lenient(length: u64) -> Vec<u8> {
 
 /// `length` zeros, rounded up to whole runs, as LZW with the early change:
 /// each code after the first repeats the last one and one zero more, until
-/// the table is full, and then its longest entry repeats.
-pub fn lzw_zeros(length: u64) -> Vec<u8> {
+/// the table is full, and then, with `repeat`, its longest entry repeats, or
+/// without, the table clears and fills again.
+fn lzw_built(length: u64, repeat: bool) -> Vec<u8> {
     let (mut out, mut held, mut count) = (Vec::new(), 0u64, 0u32);
     let mut push = |code: u64, bits: u32| {
         held = (held << bits) | code;
@@ -496,24 +497,39 @@ pub fn lzw_zeros(length: u64) -> Vec<u8> {
         1024..2048 => 11,
         _ => 12,
     };
-    push(256, 9);
-    push(0, 9);
-    let mut written = 1;
-    let mut size = 258;
-    while size < 4096 && written < length {
-        push(size, width(size));
-        written += size - 256;
-        size += 1;
-    }
-    // The table is full: code 4095 holds 3839 zeros.
+    let mut written = 0;
+    let mut last = 9;
     while written < length {
-        push(4095, 12);
-        written += 3839;
+        push(256, last);
+        push(0, 9);
+        written += 1;
+        let mut size = 258;
+        while size < 4096 && written < length {
+            push(size, width(size));
+            written += size - 256;
+            size += 1;
+        }
+        last = width(size);
+        // The table is full: code 4095 holds 3839 zeros.
+        while repeat && written < length {
+            push(4095, 12);
+            written += 3839;
+        }
     }
-    push(257, 12);
+    push(257, last);
     // Enough padding to flush what is left of the end code.
     push(0, 7);
     out
+}
+
+/// [`lzw_built`], the table filled again and again.
+pub fn lzw_zeros(length: u64) -> Vec<u8> {
+    lzw_built(length, false)
+}
+
+/// [`lzw_built`], one full table's longest entry repeated.
+pub fn lzw_repeats(length: u64) -> Vec<u8> {
+    lzw_built(length, true)
 }
 
 /// `length` zeros, rounded up to whole runs, as `RunLength`: 128 a run.
