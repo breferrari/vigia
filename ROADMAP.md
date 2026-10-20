@@ -41,7 +41,7 @@ Each release ships one or more phases. A phase marked internal changes no binary
 
 - 1.2.0 finishes the work in flight and takes nothing new: #706 and #707, #701, #705, #699, the README rework, and the release rehearsal.
 - Right after 1.2.0 comes the foundation below, before Phase 11. Phase 11 starts once #683 is done, and measures first.
-- Waiting on the reader: #89, #237, #264, #74 (which gates #700, gix 0.89), and the crates.io registration #141 needs.
+- Waiting on the reader: #237, #264, #74 (which gates #700, gix 0.89), and the crates.io registration #141 needs.
 
 ---
 
@@ -422,7 +422,7 @@ Milestone: [Phase 12](https://github.com/breferrari/vigia/milestone/13). Ships i
 | | Task | Issue |
 |---|---|---|
 | ✅ | Choose the default view: unstaged only, or staged beside it **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: unstaged only** | [#50](https://github.com/breferrari/vigia/issues/50) |
-| ⬜ | Choose how the header draws a worktree name with invisible characters **Decision: the reader rules this, and nothing is taken from it until he does** | [#89](https://github.com/breferrari/vigia/issues/89) |
+| ⬜ | Choose how the header draws a worktree name with invisible characters **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: content; the build is still to do** | [#89](https://github.com/breferrari/vigia/issues/89) |
 | ⬜ | Rule on a CP437 fallback for the caret, pulse and elision marks **Decision: the reader rules this, and nothing is taken from it until he does** | [#237](https://github.com/breferrari/vigia/issues/237) |
 | ⬜ | Catch a write that restores the modification time | [#16](https://github.com/breferrari/vigia/issues/16) |
 | ⬜ | Key the frame cache on raw path bytes, not a lossy string | [#17](https://github.com/breferrari/vigia/issues/17) |
