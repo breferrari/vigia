@@ -22,12 +22,9 @@ concurrency:
   # `ready_for_review` event after it land in different groups, so the ready
   # run, the only one whose legs run, is never cancelled by a skipped one.
   #
-  # A pull request keeps only its newest run. On main the running one
-  # finishes and one more waits: a newer push replaces the waiting run before
-  # it starts. A run replaced while waiting leaves no check on its commit, and
-  # one cancelled while running leaves a red cross with nothing failed. Every
-  # pull request's head is tested before it merges, so a skipped run on main
-  # loses only the check of that exact squash.
+  # A pull request keeps only its newest run. On main the running one finishes
+  # and a newer push replaces the waiting one before it starts, since a run
+  # cancelled mid-run draws its commit red with nothing failed.
   #
   # The event is in the key so a manual dispatch on main is not cancelled by
   # the next push, nor cancels it.
