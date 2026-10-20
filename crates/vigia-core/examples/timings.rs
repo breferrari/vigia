@@ -288,6 +288,7 @@ fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
         paired_bytes: after.paired_bytes - before.paired_bytes,
         walks: after.walks - before.walks,
         pairs_scored: after.pairs_scored - before.pairs_scored,
+        side_reads: after.side_reads - before.side_reads,
     }
 }
 

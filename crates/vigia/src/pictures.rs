@@ -508,6 +508,8 @@ pub struct Pictures {
     pairs: mpsc::Sender<vigia_core::Candidate>,
     /// Each pair's score, as it lands.
     scores: mpsc::Receiver<(vigia_core::PairKey, u64)>,
+    /// Pairs sent whose score has not landed.
+    waiting: usize,
 }
 
 /// A Kitty image id no other picture, nor another pane on the same terminal,
@@ -649,6 +651,7 @@ impl Pictures {
             epoch: 0,
             pairs,
             scores,
+            waiting: 0,
         }
     }
 
@@ -662,8 +665,11 @@ impl Pictures {
             self.asked.clear();
         }
         for candidate in frame.unscored_pairs() {
-            if self.asked.insert(candidate.key) && self.pairs.send(candidate).is_err() {
-                return;
+            if self.asked.insert(candidate.key) {
+                if self.pairs.send(candidate).is_err() {
+                    return;
+                }
+                self.waiting += 1;
             }
         }
     }
@@ -671,11 +677,14 @@ impl Pictures {
     /// The rename scores found since the last call, for
     /// [`vigia_core::Frame::learn_pair`].
     pub fn found_pairs(&mut self) -> Vec<(vigia_core::PairKey, u64)> {
-        self.scores.try_iter().collect()
+        let found: Vec<_> = self.scores.try_iter().collect();
+        self.waiting = self.waiting.saturating_sub(found.len());
+        found
     }
 
-    /// File `found` with `frame`, and walk once more when one of them pairs;
-    /// whether one did.
+    /// File `found` with `frame`, and walk once more when one of them pairs, or
+    /// when the last of those sent landed and the frame has more to list;
+    /// whether it walked.
     ///
     /// # Errors
     ///
@@ -686,14 +695,16 @@ impl Pictures {
         found: Vec<(vigia_core::PairKey, u64)>,
     ) -> vigia_core::Result<bool> {
         let pairs = found.iter().any(|&(_, score)| vigia_core::pairs(score));
+        let drained = !found.is_empty() && self.waiting == 0;
         for (key, score) in found {
             frame.learn_pair(key, score);
         }
         // A score that pairs nothing changes nothing a walk would show.
-        if pairs {
+        let walk = pairs || (drained && frame.pairs_unlisted());
+        if walk {
             frame.advance()?;
         }
-        Ok(pairs)
+        Ok(walk)
     }
 
     /// The sizes the worker found for sides the frame path left unsized, by

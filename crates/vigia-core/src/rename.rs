@@ -10,12 +10,17 @@ const MINIMUM_SCORE: u64 = MAX_SCORE / 2;
 /// The most unpaired removals, and additions, scored against each other:
 /// git's default `diff.renameLimit`.
 pub(crate) const RENAME_LIMIT: usize = 1000;
-/// The most candidate bytes one frame scores. A pair past it is left to the
+/// The most candidate bytes one frame reads. A pair past it is left to the
 /// picture worker.
 pub(crate) const FRAME_BUDGET: u64 = 256 * 1024;
 /// What scoring one pair costs that budget beyond its sides' bytes, so a
 /// frame scores at most 256 pairs however small.
 pub(crate) const PAIR_COST: u64 = 1024;
+/// The least any read of a side costs that budget, a sniff's length, since
+/// what a small read costs is opening the file.
+pub(crate) const READ_COST: u64 = crate::hunk::BINARY_SNIFF_LEN as u64;
+/// The most pairs one frame lists for the worker.
+pub(crate) const LISTED_MAX: usize = (FRAME_BUDGET / PAIR_COST) as usize;
 
 /// One pair of versions: the removal's blob stamp and the addition's stamp.
 pub type PairKey = (u64, u64);

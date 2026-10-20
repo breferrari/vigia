@@ -88,12 +88,18 @@ pub struct Worktree {
     pair_bytes: Cell<u64>,
     /// Pairs scored, for the same.
     pairs_scored: Cell<u64>,
+    /// Sides read to weigh or score them, for the same.
+    side_reads: Cell<u64>,
     /// Whether each side version a walk weighed is binary, by its stamp.
     binaries: RefCell<HashMap<u64, bool>>,
     /// How many times `pair_scores` started again.
     pair_epoch: Cell<u64>,
     /// Each blob's size, as the rename pass found it.
     blob_sizes: RefCell<HashMap<gix::ObjectId, u64>>,
+    /// Whether this frame's budget ran out before every side was weighed.
+    sides_left: Cell<bool>,
+    /// Whether this frame had more pairs for the worker than it listed.
+    pairs_unlisted: Cell<bool>,
 }
 
 impl Worktree {
@@ -134,9 +140,12 @@ impl Worktree {
             unscored: RefCell::new(Vec::new()),
             pair_bytes: Cell::new(0),
             pairs_scored: Cell::new(0),
+            side_reads: Cell::new(0),
             binaries: RefCell::new(HashMap::new()),
             pair_epoch: Cell::new(0),
             blob_sizes: RefCell::new(HashMap::new()),
+            sides_left: Cell::new(false),
+            pairs_unlisted: Cell::new(false),
         })
     }
 
@@ -480,6 +489,15 @@ impl Worktree {
         {
             return changes;
         }
+        // Takes `cost` from the frame's budget, or notes a side left unweighed.
+        let spend = |cost: u64| -> bool {
+            if cost > self.pair_budget.get() {
+                self.sides_left.set(true);
+                return false;
+            }
+            self.pair_budget.set(self.pair_budget.get() - cost);
+            true
+        };
         // Each side's size and stamp, from a header or a `stat`, before a byte.
         let sized = |at: usize| -> Option<(usize, u64, u64)> {
             let change = &changes[at];
@@ -494,6 +512,10 @@ impl Worktree {
                     let size = match known {
                         Some(size) => size,
                         None => {
+                            if !spend(rename::READ_COST) {
+                                return None;
+                            }
+                            self.side_reads.set(self.side_reads.get() + 1);
                             let size = self.repo().find_header(id).ok()?.size();
                             let mut sizes = self.blob_sizes.borrow_mut();
                             if sizes.len() >= PAIRS_KEPT {
@@ -520,6 +542,7 @@ impl Worktree {
             read.borrow_mut()
                 .entry(at)
                 .or_insert_with(|| {
+                    self.side_reads.set(self.side_reads.get() + 1);
                     let change = &changes[at];
                     let side = match change.kind {
                         ChangeKind::Removed => Side::Blob(change.before?),
@@ -557,23 +580,32 @@ impl Worktree {
             charged.borrow_mut().insert(at);
             true
         };
-        // Whether a side is binary, from its first bytes, once per version. A
-        // blob is read whole to learn it, which the budget pays for; one past
-        // what is left counts as binary, and its pair goes to the worker.
-        let binary = |at: usize, stamp: u64, size: u64| -> bool {
+        // Whether a side is binary, from its first bytes, once per version, or
+        // `None` when the budget cannot pay to learn it this frame. A blob is
+        // read whole to learn it; one past a whole budget counts as binary, and
+        // its pair goes to the worker.
+        let binary = |at: usize, stamp: u64, size: u64| -> Option<bool> {
             if let Some(&known) = self.binaries.borrow().get(&stamp) {
-                return known;
+                return Some(known);
             }
             let change = &changes[at];
             let whole =
                 change.kind == ChangeKind::Removed || matches!(change.after, Some(Side::Blob(_)));
             let found = if whole {
-                if !charge(at, size) {
-                    return true;
+                if size > rename::FRAME_BUDGET {
+                    return Some(true);
+                }
+                if !charge(at, size.max(rename::READ_COST)) {
+                    self.sides_left.set(true);
+                    return None;
                 }
                 bytes_of(at).is_some_and(|bytes| hunk::is_binary(&bytes))
             } else {
+                if !spend(rename::READ_COST) {
+                    return None;
+                }
                 use std::io::Read;
+                self.side_reads.set(self.side_reads.get() + 1);
                 let mut head = Vec::new();
                 std::fs::File::open(self.workdir.join(&change.path))
                     .and_then(|file| {
@@ -587,7 +619,7 @@ impl Worktree {
                 binaries.clear();
             }
             binaries.insert(stamp, found);
-            found
+            Some(found)
         };
         let added: Vec<_> = added.into_iter().filter_map(sized).collect();
         let mut weighed: Vec<Weighed> = removed
@@ -615,29 +647,39 @@ impl Worktree {
         let mut scored = Vec::new();
         // Where a candidate's blobs are read, asked once a walk.
         let mut homes: Option<(PathBuf, PathBuf)> = None;
-        for pair in weighed {
-            let known = self.pair_scores.borrow().get(&pair.key).copied();
-            // `gix` scored every pair with no binary side.
-            if known.is_none()
-                && !binary(pair.to, pair.key.1, pair.sizes.1)
-                && !binary(pair.from, pair.key.0, pair.sizes.0)
-            {
-                continue;
-            }
+        // Every side is weighed before a pair is scored, so a burst's sides are
+        // weighed within a few frames, and what they cannot score goes to the
+        // worker.
+        let weighed: Vec<(Weighed, Option<u64>)> = weighed
+            .into_iter()
+            .filter_map(|pair| {
+                let known = self.pair_scores.borrow().get(&pair.key).copied();
+                if known.is_none() {
+                    let to = binary(pair.to, pair.key.1, pair.sizes.1)?;
+                    let from = binary(pair.from, pair.key.0, pair.sizes.0)?;
+                    // `gix` scored every pair with no binary side.
+                    if !to && !from {
+                        return None;
+                    }
+                }
+                Some((pair, known))
+            })
+            .collect();
+        for (pair, known) in weighed {
             // What is left to read of the two sides.
             let unread = |at: usize, size: u64| {
                 if charged.borrow().contains(&at) {
                     0
                 } else {
-                    size
+                    size.max(rename::READ_COST)
                 }
             };
             let cost = unread(pair.from, pair.sizes.0) + unread(pair.to, pair.sizes.1);
             let score = match known {
                 Some(score) => score,
                 None if cost + rename::PAIR_COST <= self.pair_budget.get() => {
-                    charge(pair.from, pair.sizes.0);
-                    charge(pair.to, pair.sizes.1);
+                    charge(pair.from, pair.sizes.0.max(rename::READ_COST));
+                    charge(pair.to, pair.sizes.1.max(rename::READ_COST));
                     self.pair_budget
                         .set(self.pair_budget.get() - rename::PAIR_COST);
                     self.pairs_scored.set(self.pairs_scored.get() + 1);
@@ -649,7 +691,9 @@ impl Worktree {
                     score
                 }
                 None => {
-                    if listed.insert(pair.key) {
+                    if self.unscored.borrow().len() >= rename::LISTED_MAX {
+                        self.pairs_unlisted.set(true);
+                    } else if listed.insert(pair.key) {
                         let homes = homes.get_or_insert_with(|| {
                             (self.repo().git_dir().to_owned(), self.lfs_store())
                         });
@@ -721,6 +765,18 @@ impl Worktree {
     pub(crate) fn renew_pair_budget(&self) {
         self.pair_budget.set(rename::FRAME_BUDGET);
         self.unscored.borrow_mut().clear();
+        self.sides_left.set(false);
+        self.pairs_unlisted.set(false);
+    }
+
+    /// Whether this frame's walks left a side unweighed for want of budget.
+    pub(crate) fn sides_left(&self) -> bool {
+        self.sides_left.get()
+    }
+
+    /// Whether this frame's walks had more pairs for the worker than they listed.
+    pub(crate) fn pairs_unlisted(&self) -> bool {
+        self.pairs_unlisted.get()
     }
 
     /// The pairs the last walks could not afford to score.
@@ -757,6 +813,11 @@ impl Worktree {
     /// Pairs scored so far.
     pub(crate) fn pairs_scored(&self) -> u64 {
         self.pairs_scored.get()
+    }
+
+    /// Rename sides read so far.
+    pub(crate) fn side_reads(&self) -> u64 {
+        self.side_reads.get()
     }
 
     /// The commit this branch left the one it tracks, and what to call it.
