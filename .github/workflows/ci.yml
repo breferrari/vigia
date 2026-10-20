@@ -41,6 +41,8 @@ concurrency:
 # It is a cost rule, not a correctness rule. Nothing merges without these having
 # run: the same jobs fire on `ready_for_review`, and branch protection reads the
 # result of that run rather than of a run that was skipped.
+permissions: {}
+
 jobs:
   # **What a pull request changed decides what runs.** A pull request that
   # touches only documents, skills, templates or images runs the suites that
@@ -56,39 +58,46 @@ jobs:
     name: what changed
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read  # the full-ci label
     timeout-minutes: 5
     outputs:
       class: ${{ steps.class.outputs.class }}
     steps:
       # The pull request's merge commit and its first parent, the base, so the
       # paths come from the commit under test and a rename lists both names.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 2
       - id: class
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
             git diff --name-only --no-renames HEAD^1 HEAD > changed
           else
             : > changed
           fi
-          if gh pr view "${{ github.event.pull_request.number }}" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx 'full-ci'; then
+          if gh pr view "${PR_NUMBER}" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx 'full-ci'; then
             export CI_FULL=true
           fi
           out=$(sh .github/scripts/change-class.sh < changed)
           printf '%s\n' "$out"
           echo "class=$(printf '%s\n' "$out" | tail -1)" >> "$GITHUB_OUTPUT"
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   lint:
     name: fmt and docs
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
 
@@ -109,10 +118,11 @@ jobs:
           BODY: ${{ github.event.pull_request.body }}
           BASE: ${{ github.base_ref }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all -- --check
@@ -167,6 +177,8 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     timeout-minutes: 45
     strategy:
       # Windows and macOS fail for different reasons than Linux does, and
@@ -175,9 +187,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: clippy
       # The cache is written from main only, on every job. A pull request
       # restores main's cache and builds its own delta, which rust-cache would
@@ -185,7 +198,7 @@ jobs:
       # rebuilt on every run. Saving from every branch spends the repository's
       # cache quota on copies of the same dependencies and evicts the one copy
       # every branch reads.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: ${{ matrix.os }}-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -232,7 +245,7 @@ jobs:
       # in a shape this file already records: no step runs `watch.rs` in release,
       # so the assertion would then run NOWHERE. That is I7's hole below, reached
       # through the selector rather than the gate — green, and about nothing.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: nextest
       # PDFs are a feature that `cargo install` builds leave out and the
@@ -263,15 +276,19 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
@@ -320,11 +337,15 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # Not run for timings: a hosted runner cannot produce a number worth
@@ -336,11 +357,15 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # CLAUDE.md calls a C toolchain in the graph a spec change, not an
@@ -389,13 +414,16 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo build --release --target x86_64-unknown-linux-musl --features vigia/pdf
@@ -522,15 +550,19 @@ jobs:
     needs: [changes]
     if: github.event.pull_request.draft != true && needs.changes.outputs.class == 'docs'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: ubuntu-latest-test
           save-if: false
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: nextest
       - name: the suites that read documents
@@ -546,20 +578,32 @@ jobs:
     if: always()
     needs: [changes, lint, test, budgets, benches, pure-rust, musl, docs]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       # The judgement lives in a script so a test can drive it with fabricated
       # results. Inline, the draft case was unreachable from any gate.
       - name: every leg ran and passed
+        env:
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          CHANGES_CLASS: ${{ needs.changes.outputs.class }}
+          NEEDS_LINT_RESULT: ${{ needs.lint.result }}
+          NEEDS_TEST_RESULT: ${{ needs.test.result }}
+          NEEDS_BUDGETS_RESULT: ${{ needs.budgets.result }}
+          NEEDS_BENCHES_RESULT: ${{ needs.benches.result }}
+          NEEDS_PURE_RUST_RESULT: ${{ needs.pure-rust.result }}
+          NEEDS_MUSL_RESULT: ${{ needs.musl.result }}
+          NEEDS_DOCS_RESULT: ${{ needs.docs.result }}
         run: |
           sh .github/scripts/ci-complete.sh \
-            '${{ github.event.pull_request.draft }}' \
-            '${{ needs.changes.outputs.class }}' \
-            'lint=${{ needs.lint.result }}' \
-            'test=${{ needs.test.result }}' \
-            'budgets=${{ needs.budgets.result }}' \
-            'benches=${{ needs.benches.result }}' \
-            'pure-rust=${{ needs.pure-rust.result }}' \
-            'musl=${{ needs.musl.result }}' \
-            'docs=${{ needs.docs.result }}'
+            "$PR_DRAFT" \
+            "$CHANGES_CLASS" \
+            "lint=${NEEDS_LINT_RESULT}" \
+            "test=${NEEDS_TEST_RESULT}" \
+            "budgets=${NEEDS_BUDGETS_RESULT}" \
+            "benches=${NEEDS_BENCHES_RESULT}" \
+            "pure-rust=${NEEDS_PURE_RUST_RESULT}" \
+            "musl=${NEEDS_MUSL_RESULT}" \
+            "docs=${NEEDS_DOCS_RESULT}"

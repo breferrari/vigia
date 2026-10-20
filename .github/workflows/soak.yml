@@ -45,6 +45,8 @@ concurrency:
   group: soak-${{ github.ref }}
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   # The window, the timeout and the platform list, all computed in one place.
   #
@@ -76,6 +78,7 @@ jobs:
   plan:
     name: plan the window
     runs-on: ubuntu-latest
+    permissions: {}
     # Small and literal on purpose: this job runs one shell script and nothing
     # else, so a number here is honest where a number on the soak below is the
     # defect. The gate knows the difference.
@@ -158,6 +161,8 @@ jobs:
     name: soak (${{ matrix.os }})
     needs: plan
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     # Derived from the window by the job above, so the two cannot disagree.
     # Gated by
     # `crates/vigia/tests/soak.rs::the_soak_workflow_cannot_kill_the_window_it_offers`.
@@ -170,9 +175,11 @@ jobs:
         # is terminated at six hours whatever this file asks for.
         os: ${{ fromJSON(needs.plan.outputs.os) }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # Release, because the budgets were set against optimised code and a
       # debug build spends the window somewhere else entirely.

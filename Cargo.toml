@@ -328,6 +328,9 @@ ci = ["github"]
 # way in, and `release.yml`'s own dispatch form is the way to rehearse, since it
 # defaults to the tag `dry-run`, meaning build everything and publish nothing.
 dispatch-releases = true
+# The release workflow's actions, pinned to the commits every other workflow
+# uses, so a moved tag cannot change what the release runs.
+github-action-commits = { "actions/checkout" = "d23441a48e516b6c34aea4fa41551a30e30af803", "actions/upload-artifact" = "cf430e030ddbb5b0abf93d22962f4752f3646cd9", "actions/download-artifact" = "9000827ccba6bdab643e8b6fd33ac0654aef8333" }
 # PDF pictures, which `cargo install` builds leave out (`crates/vigia`).
 features = ["pdf"]
 # The release workflow does not run on pull requests. dist's default runs

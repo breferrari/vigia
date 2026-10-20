@@ -62,14 +62,15 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  actions: write
+permissions: {}
 
 jobs:
   bump:
     name: bump ${{ inputs.bump }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # pushes the version commit and its tag
+      actions: write  # dispatches the release workflow
     timeout-minutes: 15
     steps:
       # **`persist-credentials: false`, and without it this whole change does
@@ -87,12 +88,14 @@ jobs:
       # default fails quietly rather than loudly: a shallow checkout carries no
       # tags, so the range the notes are written from has no previous release to
       # start at and the section comes out holding the whole history or nothing.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       # Refuse anywhere but the default branch. The release is cut from `main`
       # and a bump committed to a branch would be a version nothing ever tags.
@@ -325,6 +328,8 @@ jobs:
 
       - name: work out the next version
         id: version
+        env:
+          IN_BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
           current=$(cargo metadata --no-deps --format-version 1 \
@@ -339,24 +344,26 @@ jobs:
           fi
 
           IFS=. read -r major minor patch <<<"$current"
-          case "${{ inputs.bump }}" in
+          case "${IN_BUMP}" in
             major) next="$((major + 1)).0.0" ;;
             minor) next="${major}.$((minor + 1)).0" ;;
             patch) next="${major}.${minor}.$((patch + 1))" ;;
-            *) echo "::error::unknown bump ${{ inputs.bump }}"; exit 1 ;;
+            *) echo "::error::unknown bump ${IN_BUMP}"; exit 1 ;;
           esac
 
           echo "current=$current" >> "$GITHUB_OUTPUT"
           echo "next=$next" >> "$GITHUB_OUTPUT"
-          echo "::notice::${{ inputs.bump }}: $current -> $next"
+          echo "::notice::${IN_BUMP}: $current -> $next"
 
       # Both strings, in one step, because moving one and not the other is the
       # failure this whole job is arranged around. The edit and its check live
       # in the script so a test can drive them against a manifest.
       - name: raise the version
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
         run: |
           set -euo pipefail
-          sh .github/scripts/raise-version.sh '${{ steps.version.outputs.next }}'
+          sh .github/scripts/raise-version.sh "$NEXT"
           cargo update --workspace
 
       # **What the release tells a user it changed.** `dist` reads CHANGELOG.md,
@@ -421,8 +428,9 @@ jobs:
               printf '%s\t%s\t%s\n' "$who" "$labels" "$subject"
             fi
           done | sh .github/scripts/changelog-entry.sh \
-                '${{ steps.version.outputs.next }}' "$(date -u +%F)"
+                "$NEXT" "$(date -u +%F)"
         env:
+          NEXT: ${{ steps.version.outputs.next }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # The gate that makes the sed above safe, run before anything is pushed.
@@ -438,11 +446,13 @@ jobs:
 
       # And the binary reports the new number, which is the claim a user checks.
       - name: the binary reports the new version
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
         run: |
           set -euo pipefail
           cargo build --release --locked
           got=$(./target/release/vigia --version)
-          want='vigia ${{ steps.version.outputs.next }}'
+          want="vigia ${NEXT}"
           if [ "$got" != "$want" ]; then
             echo "::error::binary says '${got}', expected '${want}'"
             exit 1
@@ -451,8 +461,10 @@ jobs:
 
       - name: rehearsal stops here
         if: ${{ inputs.rehearse }}
+        env:
+          NEXT: ${{ steps.version.outputs.next }}
         run: |
-          echo "::notice::rehearsal: would release ${{ steps.version.outputs.next }}. main untouched."
+          echo "::notice::rehearsal: would release ${NEXT}. main untouched."
 
       - name: commit the bump
         id: commit
@@ -462,7 +474,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock CHANGELOG.md
-          git commit -m "release: ${{ steps.version.outputs.next }}"
+          git commit -m "release: ${NEXT}"
 
           # **Pushed with `RELEASE_TOKEN`, and this only works because the
           # checkout was told to persist no credentials.** Otherwise the bot's
@@ -489,10 +501,12 @@ jobs:
           if [ -z "$now" ] || [ "$now" = "$(git rev-parse HEAD~1)" ]; then
             exit 1
           fi
-          gh workflow run bump.yml --ref "${DEFAULT}" -f bump="${{ inputs.bump }}" -f rehearse=false
+          gh workflow run bump.yml --ref "${DEFAULT}" -f bump="${IN_BUMP}" -f rehearse=false
           echo "::error::${DEFAULT} moved while this ran. Nothing was published; the release was dispatched again."
           exit 1
         env:
+          NEXT: ${{ steps.version.outputs.next }}
+          IN_BUMP: ${{ inputs.bump }}
           # **One fine-grained token fills both roles, and the secret's name is
           # older than the second one.** `HOMEBREW_TAP_TOKEN` carries Contents
           # read and write on *both* `breferrari/vigia` and the tap, and its
@@ -511,11 +525,14 @@ jobs:
       - name: hand off to the release
         run: |
           set -euo pipefail
-          tag='v${{ steps.version.outputs.next }}'
-          if [ "${{ inputs.rehearse }}" = "true" ]; then tag=dry-run; fi
-          gh workflow run release.yml --ref "${{ github.event.repository.default_branch }}" -f tag="$tag"
+          tag="v${NEXT}"
+          if [ "${IN_REHEARSE}" = "true" ]; then tag=dry-run; fi
+          gh workflow run release.yml --ref "${DEFAULT_BRANCH}" -f tag="$tag"
           echo "::notice::dispatched release.yml with tag=${tag}"
         env:
+          NEXT: ${{ steps.version.outputs.next }}
+          IN_REHEARSE: ${{ inputs.rehearse }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # **The one failure that leaves the repository mid-release.** Everything
@@ -540,9 +557,10 @@ jobs:
       - name: say how to finish a release the dispatch did not start
         if: ${{ failure() && steps.commit.outcome == 'success' }}
         run: |
-          echo "::error::${{ steps.version.outputs.next }} is committed to ${DEFAULT} and no release was dispatched for it."
+          echo "::error::${NEXT} is committed to ${DEFAULT} and no release was dispatched for it."
           echo "::error::Re-running this workflow will not finish it: the re-run starts from the pre-bump commit and bumps past this version."
           echo "::error::Finish it with:"
-          echo "::error::  gh workflow run release.yml --ref ${DEFAULT} -f tag=v${{ steps.version.outputs.next }}"
+          echo "::error::  gh workflow run release.yml --ref ${DEFAULT} -f tag=v${NEXT}"
         env:
+          NEXT: ${{ steps.version.outputs.next }}
           DEFAULT: ${{ github.event.repository.default_branch }}

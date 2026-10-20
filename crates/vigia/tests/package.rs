@@ -1858,12 +1858,14 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
     // the shape production actually sends, which is where it broke: on a push
     // the expression below expands to nothing at all.
     assert!(
-        ci.contains("github.event.pull_request.draft }}'"),
+        ci.contains("PR_DRAFT: ${{ github.event.pull_request.draft }}")
+            && ci.contains("\"$PR_DRAFT\" \\"),
         "ci.yml does not pass the draft expression to the script, so the gate's draft \
          cases are testing an argument production never sends"
     );
     assert!(
-        ci.contains("'${{ needs.changes.outputs.class }}'"),
+        ci.contains("CHANGES_CLASS: ${{ needs.changes.outputs.class }}")
+            && ci.contains("\"$CHANGES_CLASS\" \\"),
         "ci.yml does not pass the class to the script, so a docs pull request's skips          and a broken classifier's skips are judged alike"
     );
     for leg in [
@@ -1875,9 +1877,11 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
         "musl",
         "docs",
     ] {
-        let arg = format!("'{leg}=${{{{ needs.{leg}.result }}}}'");
+        let var = format!("NEEDS_{}_RESULT", leg.to_uppercase().replace('-', "_"));
+        let arg = format!("\"{leg}=${{{var}}}\"");
+        let bound = format!("{var}: ${{{{ needs.{leg}.result }}}}");
         assert!(
-            ci.contains(&arg),
+            ci.contains(&arg) && ci.contains(&bound),
             "ci.yml does not pass {arg} to the script, so that leg is judged by nothing"
         );
     }
@@ -1906,7 +1910,8 @@ fn the_bump_workflow_runs_the_script_the_gate_proves() {
     let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
     let step = step_block(&bump, "raise the version");
     assert!(
-        step.contains("sh .github/scripts/raise-version.sh '${{ steps.version.outputs.next }}'"),
+        step.contains("NEXT: ${{ steps.version.outputs.next }}")
+            && step.contains("sh .github/scripts/raise-version.sh \"$NEXT\""),
         "bump.yml's raise step does not run raise-version.sh with the computed version, \
          so the gate over the script proves nothing about the release: {step}"
     );
@@ -3336,7 +3341,7 @@ fn nextest_runs_the_suite() {
 #[test]
 fn cache_saved_from_main_only() {
     let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    let uses: Vec<&str> = ci.split("- uses: Swatinem/rust-cache@v2").skip(1).collect();
+    let uses: Vec<&str> = ci.split("- uses: Swatinem/rust-cache@").skip(1).collect();
     assert!(
         uses.len() >= 6,
         "ci.yml uses rust-cache {} time(s), so this gate reads too little",
