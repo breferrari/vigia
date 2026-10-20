@@ -55,8 +55,9 @@ impl Filter {
     }
 
     /// What `rela_path`'s attributes say about diffing it: `diff` set, unset or
-    /// silent, and whether Git LFS stores it as a pointer.
-    pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<(Option<bool>, bool)> {
+    /// silent, whether it names a driver, and whether Git LFS stores it as a
+    /// pointer.
+    pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<(Option<bool>, bool, bool)> {
         let Filter {
             stack,
             objects,
@@ -73,18 +74,17 @@ impl Filter {
             .at_path(Path::new(rela_path), None, &*objects)
             .map_err(|source| Error::filter(rela_path, source))?;
         entry.matching_attributes(&mut outcome);
-        let (mut diff, mut cleaned) = (None, false);
+        let (mut diff, mut driver, mut cleaned) = (None, false, false);
         for found in outcome.iter_selected() {
             match (found.assignment.name.as_str(), found.assignment.state) {
                 ("filter", gix::attrs::StateRef::Value(name)) => cleaned = name.as_bstr() == "lfs",
                 ("diff", gix::attrs::StateRef::Unset) => diff = Some(false),
-                ("diff", gix::attrs::StateRef::Set | gix::attrs::StateRef::Value(_)) => {
-                    diff = Some(true)
-                }
+                ("diff", gix::attrs::StateRef::Set) => diff = Some(true),
+                ("diff", gix::attrs::StateRef::Value(_)) => (diff, driver) = (Some(true), true),
                 _ => {}
             }
         }
-        Ok((diff, cleaned))
+        Ok((diff, driver, cleaned))
     }
 
     /// `content`, as git would store it for `rela_path`.

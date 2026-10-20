@@ -96,6 +96,19 @@ fn pdf_attribute_keeps_diff() {
 }
 
 #[test]
+fn pdf_named_driver_draws() {
+    // As Git for Windows sets for every PDF: no textconv runs here, so the
+    // text diff would be the file's bytes.
+    let scratch = Scratch::new("pdf-driver");
+    scratch.write(".gitattributes", "*.pdf diff=astextplain\n");
+    scratch.write("icon.pdf", icon_pdf(1));
+    scratch.commit_all("initial");
+    scratch.write("icon.pdf", icon_pdf(2));
+    let side = Some((Format::Pdf, 24, 24));
+    assert_eq!(sizes(&diff_of(&scratch, "icon.pdf")), Some((side, side)));
+}
+
+#[test]
 fn pdf_cut_binary() {
     let whole = icon_pdf(2);
     // Cut before the page tree ends: nothing to size.
