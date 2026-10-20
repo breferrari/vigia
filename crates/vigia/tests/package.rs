@@ -1187,7 +1187,9 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
     // the assertion.
     let dispatch = hand_off_dispatch(&bump);
     assert!(
-        dispatch.contains(r#"= "true" ]; then tag=dry-run"#),
+        dispatch.contains(r#"if [ "${IN_REHEARSE}" = "true" ]; then tag=dry-run"#)
+            && step_block(&bump, "hand off to the release")
+                .contains("IN_REHEARSE: ${{ inputs.rehearse }}"),
         "the rehearsal's tag no longer depends on `rehearse` being true in the \
          way this gate can read. A flipped comparison here publishes for real \
          on every rehearsal: {dispatch}"
@@ -1874,6 +1876,7 @@ fn the_ci_workflow_runs_the_script_the_gate_proves() {
         "budgets",
         "benches",
         "pure-rust",
+        "zizmor",
         "musl",
         "docs",
     ] {

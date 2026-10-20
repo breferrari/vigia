@@ -1,6 +1,6 @@
 # What zizmor may leave unfixed. The release.yml lines are dist's generated
-# output, which no dist setting changes; a line that moves after
-# `dist generate` is reported again rather than hidden.
+# output, which no dist setting changes. Recheck them after `dist generate`:
+# a moved finding is reported again, but a new one on an ignored line is not.
 rules:
   # The workflow-level `contents: write` dist grants for the release.
   excessive-permissions:

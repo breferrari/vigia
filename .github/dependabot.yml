@@ -25,6 +25,12 @@ updates:
     # dist generates release.yml and refuses a release when it was edited.
     exclude-paths:
       - .github/workflows/release.yml
+    # Pinned for release.yml through dist's `github-action-commits` too, which
+    # Dependabot cannot edit; these move together, by hand.
+    ignore:
+      - dependency-name: actions/checkout
+      - dependency-name: actions/upload-artifact
+      - dependency-name: actions/download-artifact
     schedule:
       interval: weekly
     groups:
