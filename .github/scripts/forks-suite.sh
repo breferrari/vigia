@@ -1,11 +1,17 @@
 #!/bin/sh
-# Each fork's upstream suite, run at the tag its PATCHES.md names with the code
+# Each fork's upstream suite, run at the tag its PATCHES.md names with its
 # patches applied: the published crate leaves out the suite's test data. A
-# `*-name-the-fork.patch` changes only the published manifest and is skipped.
+# patch that touches only `Cargo.toml` is the published manifest, written for
+# the crate rather than the repository, and is skipped.
 set -eu
 
 root=$(git rev-parse --show-toplevel)
 work=$(mktemp -d)
+
+# The files a patch changes, one a line.
+touched() {
+  sed -n 's#^diff --git a/\([^ ]*\) b/.*#\1#p' "$1"
+}
 trap 'rm -rf "$work"' EXIT
 
 for dir in "$root"/vendor/*/; do
@@ -23,20 +29,17 @@ for dir in "$root"/vendor/*/; do
   fi
   if [ "$suite" = none ]; then
     for patch in "$dir"/patches/*.patch; do
-      case $patch in
-        *-name-the-fork.patch | *-fork-notice.patch) ;;
-        *)
-          echo "::error::vendor/$name: Suite is none, but $(basename "$patch") changes code"
-          exit 1
-          ;;
-      esac
+      if touched "$patch" | grep -qv -e '^Cargo.toml$' -e '^README.md$' -e '^Readme.md$'; then
+        echo "::error::vendor/$name: Suite is none, but $(basename "$patch") changes code"
+        exit 1
+      fi
     done
     echo "vendor/$name: no code patch, so no suite of its own"
     continue
   fi
   git clone --quiet --depth 1 --branch "$tag" --recurse-submodules --shallow-submodules "$repo" "$work/$name"
   for patch in "$dir"/patches/*.patch; do
-    case $patch in *-name-the-fork.patch) continue ;; esac
+    touched "$patch" | grep -qv '^Cargo.toml$' || continue
     git -C "$work/$name" apply ${within:+--directory="$within"} "$patch"
   done
   echo "vendor/$name: $suite"

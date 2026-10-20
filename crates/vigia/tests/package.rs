@@ -3823,35 +3823,36 @@ fn forks_replace_crates() {
 /// under `vendor/`; the names must be every member.
 #[test]
 fn fmt_names_members() {
-    let manifest = repo_file("Cargo.toml");
-    let members: Vec<&str> = manifest
-        .lines()
-        .find_map(|line| line.strip_prefix("members = ["))
-        .expect("a members list")
-        .trim_end_matches(']')
-        .split(',')
-        .map(|member| member.trim().trim_matches('"'))
-        .filter(|member| !member.is_empty())
-        .collect();
-    let names: String = members
+    let output = Command::new(env!("CARGO"))
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--offline",
+        ])
+        .current_dir(repo_root())
+        .output()
+        .expect("cargo runs");
+    assert!(output.status.success(), "`cargo metadata` failed");
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("cargo metadata answers JSON");
+    let names = metadata["packages"]
+        .as_array()
+        .expect("metadata lists packages")
         .iter()
-        .map(|member| {
-            let path = repo_root().join(member).join("Cargo.toml");
-            let package = std::fs::read_to_string(&path).expect("a member manifest");
-            let name = package
-                .lines()
-                .find_map(|line| line.strip_prefix("name = \""))
-                .and_then(|rest| rest.strip_suffix('"'))
-                .expect("a package name")
-                .to_owned();
-            format!("-p {name}")
-        })
+        .map(|package| format!("-p {}", package["name"].as_str().expect("a name")))
         .collect::<Vec<_>>()
         .join(" ");
     for file in [".github/workflows/ci.yml", "CONTRIBUTING.md"] {
+        let text = repo_file(file);
         assert!(
-            repo_file(file).contains(&format!("cargo fmt {names}")),
+            text.contains(&format!("cargo fmt {names}")),
             "{file} does not format exactly the members, `cargo fmt {names}`"
+        );
+        assert!(
+            !text.contains("cargo fmt --all"),
+            "{file} runs `cargo fmt --all`, which reformats the forks under vendor/"
         );
     }
 }
@@ -3860,13 +3861,18 @@ fn fmt_names_members() {
 /// crates.io build, so a fix carried that way ships to half the installs.
 #[test]
 fn no_patch_section() {
-    let manifest = repo_file("Cargo.toml");
-    assert!(
-        !manifest
-            .lines()
-            .any(|line| line.trim_start().starts_with("[patch")),
-        "Cargo.toml takes a [patch]; publish the fix as a vendor/ fork instead"
-    );
+    for file in ["Cargo.toml", ".cargo/config.toml", ".cargo/config"] {
+        let Ok(text) = std::fs::read_to_string(repo_root().join(file)) else {
+            continue;
+        };
+        assert!(
+            !text
+                .lines()
+                .map(str::trim_start)
+                .any(|line| { line.starts_with("[patch") || line.starts_with("patch.") }),
+            "{file} takes a patch; publish the fix as a vendor/ fork instead"
+        );
+    }
 }
 
 /// A vendored crate built on its own leaves its build output beside it, and

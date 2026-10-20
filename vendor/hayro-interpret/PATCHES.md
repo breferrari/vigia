@@ -18,11 +18,15 @@ The manifest only: the package is named `vigia-hayro-interpret`, its dependency 
 
 ## Licence
 
-The crate is MIT OR Apache-2.0, and this fork is distributed under its MIT terms, with upstream's copyright and both licence files kept.
+Upstream is MIT OR Apache-2.0, and so is this fork, whose code is unchanged; upstream's copyright and both licence files are kept.
 
 ## Left out
 
 The registry's `.cargo-ok`, `.cargo_vcs_info.json` and `Cargo.lock` are not copied. Every other file is as published.
+
+## Versions
+
+The three forks require each other exactly (`=0.8.0`), so a change to any one is published as a new patch version of all three, in the order `vigia-hayro-syntax`, `vigia-hayro-interpret`, `vigia-hayro`.
 
 ## When it goes
 

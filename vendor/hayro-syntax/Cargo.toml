@@ -29,7 +29,7 @@ exclude = [
     "/PATCHES.md",
     "/patches/*",
 ]
-license = "Apache-2.0 OR MIT"
+license = "MIT"
 repository = "https://github.com/breferrari/vigia"
 resolver = "2"
 

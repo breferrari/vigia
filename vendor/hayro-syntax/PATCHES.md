@@ -4,9 +4,9 @@ Base: `hayro-syntax` 0.8.0 from crates.io, sha256 `6cdc818d8d265dcb42081d488f759
 
 Upstream: `https://github.com/LaurenzV/hayro` at tag `hayro-syntax-v0.8.0`, in `hayro-syntax/`.
 
-Suite: `cargo test --locked -p hayro-syntax -- --skip pdf_version_header --skip pdf_version_catalog`.
+Suite: `cargo test --locked -p hayro-syntax -p hayro-interpret -p hayro -- --skip pdf_version_header --skip pdf_version_catalog`.
 
-The two skipped tests read PDFs from `hayro-tests/downloads/`, a corpus upstream downloads separately and does not commit; they fail the same way on upstream's own tag.
+The two skipped tests read PDFs from `hayro-tests/downloads/`, a corpus upstream downloads separately and does not commit; they fail the same way on upstream's own tag. The suite runs `hayro-interpret` and `hayro` too, since both build on the patched crate.
 
 This directory is that crate as published, with the patches in `patches/` applied in order, and nothing else. It is published to crates.io as `vigia-hayro-syntax`, and the workspace and `vigia-hayro-interpret` take it under the name `hayro-syntax`, so a `cargo install vigia` gets the decode limit too. `.github/scripts/forks.sh` rebuilds this directory from the published crate and the patches, and fails on any difference.
 
@@ -40,11 +40,15 @@ The manifest only: the package is named `vigia-hayro-syntax`, with a description
 
 ## Licence
 
-The crate is MIT OR Apache-2.0, and this fork is distributed under its MIT terms, with upstream's copyright and both licence files kept.
+Upstream is MIT OR Apache-2.0. This fork changes its code and is published under the MIT terms alone, with upstream's copyright and both licence files kept, so `license` in its manifest is `MIT`.
 
 ## Left out
 
 The registry's `.cargo-ok`, `.cargo_vcs_info.json` and `Cargo.lock` are not copied. Every other file is as published.
+
+## Versions
+
+The three forks require each other exactly (`=0.8.0`), so a change to any one is published as a new patch version of all three, in the order `vigia-hayro-syntax`, `vigia-hayro-interpret`, `vigia-hayro`.
 
 ## When it goes
 
