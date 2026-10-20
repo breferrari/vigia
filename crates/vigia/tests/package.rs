@@ -3777,6 +3777,10 @@ fn deny_policy() {
         without_comments(&deny).contains("unused-allowed-license = \"deny\""),
         "an allowance the graph no longer needs would pass"
     );
+    assert!(
+        without_comments(&deny).contains("unsound = \"all\""),
+        "an unsound crate deeper than a direct dependency would pass"
+    );
     let manifest = repo_file("Cargo.toml");
     let dist = manifest
         .split_once("[workspace.metadata.dist]")

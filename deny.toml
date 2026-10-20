@@ -13,6 +13,8 @@ all-features = true
 
 [advisories]
 yanked = "deny"
+# A transitive crate ships in the binary as much as a direct one does.
+unsound = "all"
 ignore = [
     { id = "RUSTSEC-2025-0141", reason = "bincode is unmaintained with no successor, and reaches vigia only through syntect: https://rustsec.org/advisories/RUSTSEC-2025-0141" },
     { id = "RUSTSEC-2024-0320", reason = "yaml-rust is unmaintained, and syntect declined the fork: https://github.com/trishume/syntect/pull/526" },
