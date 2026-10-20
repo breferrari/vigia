@@ -379,20 +379,22 @@ vigia's lane:
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | Split render.rs, view.rs and lib.rs into modules **Found by the standards review, 2026-10-20** **Moved from Phase 13; ordered 2026-10-20, reader: render, then view, then lib** | [#683](https://github.com/breferrari/vigia/issues/683) |
-| ⬜ | State that vigia-core has no stable API, and narrow its public items **Follows #684** **Moved from Phase 13; ordered 2026-10-20, reader: with #683** | [#685](https://github.com/breferrari/vigia/issues/685) |
-| ⬜ | Hold the three overlays in one Option<Overlay> **Moved from Phase 13; ordered 2026-10-20, reader** | [#515](https://github.com/breferrari/vigia/issues/515) |
-| ⬜ | Let a test build a Shell and drive a gesture through it **Moved from Phase 13; ordered 2026-10-20, reader** | [#441](https://github.com/breferrari/vigia/issues/441) |
-| ⬜ | Enforce the core's unsafe-free and output-free claims with lints **Found by the standards review, 2026-10-20** **Moved from Phase 13; ordered 2026-10-20, reader** | [#682](https://github.com/breferrari/vigia/issues/682) |
+| ⬜ | Split render.rs, view.rs and lib.rs into modules **Found by the standards review, 2026-10-20** **Moved from Phase 13: render, then view, then lib** | [#683](https://github.com/breferrari/vigia/issues/683) |
+| ⬜ | State that vigia-core has no stable API, and narrow its public items **Follows #684** **Moved from Phase 13: with #683** | [#685](https://github.com/breferrari/vigia/issues/685) |
+| ⬜ | Hold the three overlays in one Option<Overlay> **Moved from Phase 13** | [#515](https://github.com/breferrari/vigia/issues/515) |
+| ⬜ | Let a test build a Shell and drive a gesture through it **Moved from Phase 13** | [#441](https://github.com/breferrari/vigia/issues/441) |
+| ⬜ | Enforce the core's unsafe-free and output-free claims with lints **Found by the standards review, 2026-10-20** **Moved from Phase 13** | [#682](https://github.com/breferrari/vigia/issues/682) |
 
 vigia2's lane:
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | Fuzz every decoder and parser that reads repository content **Found by the standards review, 2026-10-20; first in this phase** **Moved from Phase 12; ordered 2026-10-20, reader: two pull requests** | [#677](https://github.com/breferrari/vigia/issues/677) |
-| ⬜ | Test the diff engine against git with generated changes **Found by the standards review, 2026-10-20** **Moved from Phase 13; ordered 2026-10-20, reader: before any Phase 11 engine change** | [#681](https://github.com/breferrari/vigia/issues/681) |
-| ⬜ | Decide whether gix status gets a seam **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: build the seam, pure moves plus a contract per call and no trait; moved from Phase 13. #700 (gix 0.89) is held on it, then reviewed against it** | [#74](https://github.com/breferrari/vigia/issues/74) |
-| ⬜ | Publish to crates.io by trusted publishing and delete the registry token **Moved from Phase 14; ordered 2026-10-20, reader: needs the reader to register on crates.io** | [#141](https://github.com/breferrari/vigia/issues/141) |
+| ⬜ | Fuzz every decoder and parser that reads repository content **Found by the standards review, 2026-10-20; first in this phase** **Moved from Phase 12: two pull requests** | [#677](https://github.com/breferrari/vigia/issues/677) |
+| ⬜ | Test the diff engine against git with generated changes **Found by the standards review, 2026-10-20** **Moved from Phase 13: before any Phase 11 engine change** | [#681](https://github.com/breferrari/vigia/issues/681) |
+| ⬜ | Decide whether gix status gets a seam **Ruled 2026-10-20, reader: build the seam, pure moves plus a contract per call and no trait** **Moved from Phase 13** | [#74](https://github.com/breferrari/vigia/issues/74) |
+| ⬜ | Publish to crates.io by trusted publishing and delete the registry token **Moved from Phase 14: needs the reader to register on crates.io** | [#141](https://github.com/breferrari/vigia/issues/141) |
+
+#700 (gix 0.89) is held on #74, then reviewed against the seam.
 
 ## Phase 11 — off the paint
 
@@ -411,7 +413,7 @@ Milestone: [Phase 11](https://github.com/breferrari/vigia/milestone/12). Ships i
 | ⬜ | Prefetch pictures just past the view | [#663](https://github.com/breferrari/vigia/issues/663) |
 | ⬜ | Take change fingerprints from the status walk, not a stat per file | [#19](https://github.com/breferrari/vigia/issues/19) |
 | ⬜ | Budget the re-diff of drawn files inside the settle margin | [#73](https://github.com/breferrari/vigia/issues/73) |
-| ⬜ | Stop syntect recompiling a fence's closing regex on every search **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: vendored patch plus upstream; the build is Phase 11\'s** | [#264](https://github.com/breferrari/vigia/issues/264) |
+| ⬜ | Stop syntect recompiling a fence's closing regex on every search **Ruled 2026-10-20, reader: vendored patch plus upstream; the build is Phase 11's** | [#264](https://github.com/breferrari/vigia/issues/264) |
 | ⬜ | Measure an @ guard on Markdown's email auto-link pattern | [#265](https://github.com/breferrari/vigia/issues/265) |
 
 ## Phase 12 — correct at the edges
@@ -422,9 +424,9 @@ Milestone: [Phase 12](https://github.com/breferrari/vigia/milestone/13). Ships i
 
 | | Task | Issue |
 |---|---|---|
-| ✅ | Choose the default view: unstaged only, or staged beside it **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: unstaged only** | [#50](https://github.com/breferrari/vigia/issues/50) |
-| ⬜ | Choose how the header draws a worktree name with invisible characters **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: content; the build is still to do** | [#89](https://github.com/breferrari/vigia/issues/89) |
-| ✅ | Rule on a CP437 fallback for the caret, pulse and elision marks **Decision: the reader rules this, and nothing is taken from it until he does** **Ruled 2026-10-20, reader: substitutes accepted, no second ladder** | [#237](https://github.com/breferrari/vigia/issues/237) |
+| ✅ | Choose the default view: unstaged only, or staged beside it **Ruled 2026-10-20, reader: unstaged only** | [#50](https://github.com/breferrari/vigia/issues/50) |
+| ⬜ | Choose how the header draws a worktree name with invisible characters **Ruled 2026-10-20, reader: content; the build is still to do** | [#89](https://github.com/breferrari/vigia/issues/89) |
+| ✅ | Rule on a CP437 fallback for the caret, pulse and elision marks **Ruled 2026-10-20, reader: substitutes accepted, no second ladder** | [#237](https://github.com/breferrari/vigia/issues/237) |
 | ⬜ | Catch a write that restores the modification time | [#16](https://github.com/breferrari/vigia/issues/16) |
 | ⬜ | Key the frame cache on raw path bytes, not a lossy string | [#17](https://github.com/breferrari/vigia/issues/17) |
 | ⬜ | Check whether a default tmux sends mouse events to a non-active pane | [#188](https://github.com/breferrari/vigia/issues/188) |
@@ -727,7 +729,8 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 | All 25 open Shelf items ([#16](https://github.com/breferrari/vigia/issues/16), [#17](https://github.com/breferrari/vigia/issues/17), [#19](https://github.com/breferrari/vigia/issues/19), [#48](https://github.com/breferrari/vigia/issues/48), [#50](https://github.com/breferrari/vigia/issues/50), [#72](https://github.com/breferrari/vigia/issues/72), [#73](https://github.com/breferrari/vigia/issues/73), [#74](https://github.com/breferrari/vigia/issues/74), [#89](https://github.com/breferrari/vigia/issues/89), [#108](https://github.com/breferrari/vigia/issues/108), [#141](https://github.com/breferrari/vigia/issues/141), [#145](https://github.com/breferrari/vigia/issues/145), [#188](https://github.com/breferrari/vigia/issues/188), [#237](https://github.com/breferrari/vigia/issues/237), [#264](https://github.com/breferrari/vigia/issues/264), [#265](https://github.com/breferrari/vigia/issues/265), [#284](https://github.com/breferrari/vigia/issues/284), [#312](https://github.com/breferrari/vigia/issues/312), [#332](https://github.com/breferrari/vigia/issues/332), [#393](https://github.com/breferrari/vigia/issues/393), [#441](https://github.com/breferrari/vigia/issues/441), [#444](https://github.com/breferrari/vigia/issues/444), [#504](https://github.com/breferrari/vigia/issues/504), [#515](https://github.com/breferrari/vigia/issues/515), [#661](https://github.com/breferrari/vigia/issues/661)) | Shelf → Phases 11 to 14, 2026-10-19 | Reader, 2026-10-19: the shelf is retired and every open issue sits in a phase. #524 closed the same day, resolved by #611. |
 | Class every prose path as docs ([#667](https://github.com/breferrari/vigia/issues/667)) | Phase 14, 2026-10-19 | Reader, 2026-10-19: taken before #659. |
 | Bound every test, CI job and mutation run in time ([#676](https://github.com/breferrari/vigia/issues/676)) | Phase 14, 2026-10-20 | Reader, 2026-10-20: "This must be fixed within this milestone." Moved to Phase 9, where it gates 1.2.0, and taken before #639 finishes. |
-| The foundation block ([#683](https://github.com/breferrari/vigia/issues/683), [#685](https://github.com/breferrari/vigia/issues/685), [#515](https://github.com/breferrari/vigia/issues/515), [#441](https://github.com/breferrari/vigia/issues/441), [#682](https://github.com/breferrari/vigia/issues/682), [#677](https://github.com/breferrari/vigia/issues/677), [#681](https://github.com/breferrari/vigia/issues/681), [#74](https://github.com/breferrari/vigia/issues/74), [#141](https://github.com/breferrari/vigia/issues/141)), and [#444](https://github.com/breferrari/vigia/issues/444) into Phase 11 | Phases 12 to 14, 2026-10-20 | Reader, 2026-10-20: right after 1.2.0 and before Phase 11, so the large files are split and the core tested before Phase 11's engine changes. |
+| The foundation block ([#683](https://github.com/breferrari/vigia/issues/683), [#685](https://github.com/breferrari/vigia/issues/685), [#515](https://github.com/breferrari/vigia/issues/515), [#441](https://github.com/breferrari/vigia/issues/441), [#682](https://github.com/breferrari/vigia/issues/682), [#677](https://github.com/breferrari/vigia/issues/677), [#681](https://github.com/breferrari/vigia/issues/681), [#74](https://github.com/breferrari/vigia/issues/74), [#141](https://github.com/breferrari/vigia/issues/141)) | Phases 12 to 14, 2026-10-20 | Reader, 2026-10-20: right after 1.2.0 and before Phase 11, so the large files are split and the core tested before Phase 11's engine changes. |
+| Observe what a prompting session does with a posted note ([#444](https://github.com/breferrari/vigia/issues/444)) | Phase 12, 2026-10-20 | Reader, 2026-10-20: into Phase 11. |
 
 ---
 
