@@ -9,42 +9,50 @@ fn fork_parses_as_upstream() {
         syntect::dumps::from_uncompressed_data(dump).expect("the dump loads in the fork");
     let theirs: syntect_upstream::parsing::SyntaxSet =
         syntect_upstream::dumps::from_uncompressed_data(dump).expect("the dump loads upstream");
-    let ours_md = ours
-        .find_syntax_by_extension("md")
-        .expect("a Markdown grammar");
-    let theirs_md = theirs
-        .find_syntax_by_extension("md")
-        .expect("a Markdown grammar");
 
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let listed = Command::new("git")
-        .args(["ls-files", "*.md"])
+        .args(["ls-files"])
         .current_dir(root)
         .output()
         .expect("git runs");
-    let (mut files, mut fences) = (0, 0);
+    let (mut files, mut grammars, mut lines) = (0, std::collections::BTreeSet::new(), 0);
     for path in String::from_utf8_lossy(&listed.stdout).lines() {
+        // The vendored crates are more Rust, read by a grammar this already covers.
         if path.starts_with("vendor/") {
             continue;
         }
-        let text = std::fs::read_to_string(format!("{root}/{path}")).expect("read a tracked file");
-        let mut mine = syntect::parsing::ParseState::new(ours_md);
-        let mut upstream = syntect_upstream::parsing::ParseState::new(theirs_md);
+        let Some(extension) = path.rsplit_once('.').map(|(_, ext)| ext) else {
+            continue;
+        };
+        let (Some(mine), Some(upstream)) = (
+            ours.find_syntax_by_extension(extension),
+            theirs.find_syntax_by_extension(extension),
+        ) else {
+            continue;
+        };
+        let Ok(text) = std::fs::read_to_string(format!("{root}/{path}")) else {
+            continue;
+        };
+        let mut a = syntect::parsing::ParseState::new(mine);
+        let mut b = syntect_upstream::parsing::ParseState::new(upstream);
         for (number, line) in text.split_inclusive('\n').enumerate() {
-            fences += usize::from(line.trim_start().starts_with("```"));
-            let a = mine.parse_line(line, &ours).expect("the fork parses");
-            let b = upstream.parse_line(line, &theirs).expect("upstream parses");
+            let ours_ops = a.parse_line(line, &ours).expect("the fork parses");
+            let theirs_ops = b.parse_line(line, &theirs).expect("upstream parses");
             assert_eq!(
-                format!("{a:?}"),
-                format!("{b:?}"),
+                format!("{ours_ops:?}"),
+                format!("{theirs_ops:?}"),
                 "{path}:{} parses differently in the fork",
                 number + 1
             );
+            lines += 1;
         }
         files += 1;
+        grammars.insert(mine.name.clone());
     }
     assert!(
-        files > 10 && fences > 10,
-        "{files} files and {fences} fences, too few to prove anything"
+        files > 50 && grammars.len() > 5 && grammars.contains("Markdown"),
+        "{files} files in {grammars:?}, too few to prove anything"
     );
+    eprintln!("{files} files, {lines} lines, grammars {grammars:?}");
 }

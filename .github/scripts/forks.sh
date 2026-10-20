@@ -27,7 +27,7 @@ FIELDS
     continue
   fi
 
-  curl -fsSL "https://static.crates.io/crates/$crate/$crate-$version.crate" -o "$work/$name.crate"
+  curl -fsSL --retry 3 "https://static.crates.io/crates/$crate/$crate-$version.crate" -o "$work/$name.crate"
   if [ "$(sha256 "$work/$name.crate")" != "$pinned" ]; then
     echo "::error::vendor/$name: $crate $version on crates.io does not match its pinned checksum"
     failed=1
@@ -50,6 +50,30 @@ FIELDS
   else
     echo "::error::vendor/$name is not $crate $version plus its patches"
     head -c 4000 "$work/$name.diff"
+    failed=1
+  fi
+done
+
+# A fork published already must be exactly what `vendor/` would package, since
+# that is what a `cargo install` builds.
+for dir in "$root"/vendor/*/; do
+  dir=${dir%/}
+  [ -d "$dir/patches" ] || continue
+  fork=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$dir/Cargo.toml" | head -1)
+  version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$dir/Cargo.toml" | head -1)
+  if ! curl -fsSL --retry 3 "https://static.crates.io/crates/$fork/$fork-$version.crate" -o "$work/$fork.crate" 2>/dev/null; then
+    echo "vendor/$(basename "$dir"): $fork $version is not published yet"
+    continue
+  fi
+  cargo package --quiet --allow-dirty --no-verify --manifest-path "$dir/Cargo.toml" --target-dir "$work/package"
+  mkdir "$work/published-$fork" "$work/packaged-$fork"
+  tar -xzf "$work/$fork.crate" -C "$work/published-$fork"
+  tar -xzf "$work/package/package/$fork-$version.crate" -C "$work/packaged-$fork"
+  if diff -r -x .cargo_vcs_info.json "$work/published-$fork" "$work/packaged-$fork" >"$work/$fork.published.diff"; then
+    echo "$fork $version on crates.io is vendor/$(basename "$dir")"
+  else
+    echo "::error::$fork $version on crates.io is not what vendor/$(basename "$dir") packages"
+    head -c 4000 "$work/$fork.published.diff"
     failed=1
   fi
 done

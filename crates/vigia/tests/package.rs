@@ -3255,13 +3255,15 @@ fn the_spec_quotes_the_sheets_purpose_lines() {
 
 /// Direct dependencies that the `Built with` table in `docs/ARCHITECTURE.md`
 /// leaves out on purpose.
-const NOT_DOCUMENTED: [&str; 7] = [
+const NOT_DOCUMENTED: [&str; 8] = [
     "libc",
     "rustix",
     "rustls-graviola",
     "serde_json",
     "signal-hook",
     "ureq",
+    // The `syntect` row, under the name the fork is published as.
+    "vigia-syntect",
     "windows-sys",
 ];
 
@@ -3289,28 +3291,29 @@ fn direct_dependencies() -> &'static [(String, bool)] {
         );
         let metadata: serde_json::Value =
             serde_json::from_slice(&output.stdout).expect("cargo metadata answers JSON");
+        // `canonicalize` gives Windows a `\\?\` prefix that metadata's paths lack.
+        let root = repo_root();
+        let vendor = Path::new(root.to_str().expect("a UTF-8 root").trim_start_matches(r"\\?\"))
+            .join("vendor");
 
         let found: BTreeSet<(String, bool)> = metadata["packages"]
             .as_array()
             .expect("metadata lists packages")
             .iter()
             .flat_map(|package| package["dependencies"].as_array().expect("a list"))
-            // A fork under `vendor/` is a dependency like any other, under the
-            // name the code uses.
+            // A fork under `vendor/` is a dependency like any other.
             .filter(|dependency| {
-                dependency["path"].as_str().is_none_or(|path| {
-                    Path::new(path)
-                        .components()
-                        .any(|part| part.as_os_str() == "vendor")
-                })
-            })
-            .map(|dependency| {
-                let name = dependency["rename"]
+                dependency["path"]
                     .as_str()
-                    .or(dependency["name"].as_str())
-                    .expect("a name")
-                    .to_owned();
-                (name, dependency["kind"] == "dev")
+                    .is_none_or(|path| Path::new(path).starts_with(&vendor))
+            })
+            // A renamed dependency by both names, the crate's and the code's.
+            .flat_map(|dependency| {
+                let dev = dependency["kind"] == "dev";
+                [dependency["name"].as_str(), dependency["rename"].as_str()]
+                    .into_iter()
+                    .flatten()
+                    .map(move |name| (name.to_owned(), dev))
             })
             .collect();
         assert!(

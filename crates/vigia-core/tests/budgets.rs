@@ -1491,7 +1491,7 @@ fn fenced(edit: usize) -> String {
 }
 
 #[test]
-fn fenced_markdown_holds_the_frame_budget() {
+fn fenced_markdown_budget() {
     // I9 for the parse a fenced block costs, beside the same bytes in a file no
     // grammar claims, so the gap is the grammar's and not the fixture's.
     let scratch = Scratch::new("i9-fence");
@@ -1531,6 +1531,10 @@ fn fenced_markdown_holds_the_frame_budget() {
         "fenced markdown: p99 {:?}, the same bytes without a grammar {:?}",
         at(&fence),
         at(&control)
+    );
+    assert!(
+        at(&control) < at(&fence),
+        "the control costs as much as the block, so the gate is not timing the grammar"
     );
     holds_p99(
         &format!("I9: re-highlighting a {FENCE_LINES}-line fenced block"),
