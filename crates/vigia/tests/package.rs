@@ -3949,6 +3949,24 @@ fn actions_one_version() {
             .or_default()
             .insert(rev.to_owned());
     }
+    // Every action release.yml uses is pinned through dist, or the next
+    // `dist generate` puts its tag back.
+    let release = without_comments(&repo_file(".github/workflows/release.yml"));
+    for line in release.lines() {
+        let Some(target) = line
+            .trim_start()
+            .trim_start_matches("- ")
+            .strip_prefix("uses:")
+        else {
+            continue;
+        };
+        if let Some((action, _)) = target.trim().split_once('@') {
+            assert!(
+                pins.contains(&format!("\"{action}\"")),
+                "dist does not pin {action}"
+            );
+        }
+    }
     assert_eq!(
         split_actions(&seen),
         Vec::<String>::new(),
