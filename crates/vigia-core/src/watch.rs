@@ -182,6 +182,8 @@ pub struct Watcher<'repo> {
     /// The LFS store's `objects`, in every spelling as for `roots`. An object
     /// landing there can turn a `binary` side into a picture.
     store: Vec<PathBuf>,
+    /// An out-of-tree store not watched because no attributes name LFS yet.
+    store_deferred: bool,
     /// While `objects` outside the worktree does not exist yet, its deepest
     /// existing ancestor, watched until it appears.
     store_ancestor: Option<PathBuf>,
@@ -325,6 +327,7 @@ impl<'repo> Watcher<'repo> {
             git_dir,
             common_dir,
             store,
+            store_deferred: false,
             store_ancestor: None,
             git_watches,
             store_notice: None,
@@ -336,7 +339,11 @@ impl<'repo> Watcher<'repo> {
         };
         // Inside the worktree, the recursive watch above already covers it.
         if outside {
-            watcher.arm_store();
+            if lfs_attributes(repo, workdir, None) {
+                watcher.arm_store();
+            } else {
+                watcher.store_deferred = true;
+            }
         }
         Ok(watcher)
     }
@@ -489,6 +496,16 @@ impl<'repo> Watcher<'repo> {
             .any(|path| path.file_name() == Some(OsStr::new(".gitignore")))
         {
             self.stack_stale = true;
+        }
+        if self.store_deferred
+            && let Some(named) = event.paths.iter().find(|path| {
+                path.file_name() == Some(OsStr::new(".gitattributes"))
+                    || path.ends_with(Path::new("info").join("attributes"))
+            })
+            && lfs_attributes(&self.repo, &self.roots[0], Some(named))
+        {
+            self.store_deferred = false;
+            self.arm_store();
         }
 
         // Reads are not changes. Most backends never report them, but inotify
@@ -768,6 +785,30 @@ impl IndexPrint {
     }
 }
 
+/// Whether an attributes file names the LFS filter: every tracked
+/// `.gitattributes`, `info/attributes`, and `named` when an event names one.
+fn lfs_attributes(repo: &gix::Repository, workdir: &Path, named: Option<&Path>) -> bool {
+    let names_lfs = |path: &Path| {
+        std::fs::read_to_string(path).is_ok_and(|text| {
+            text.lines()
+                .filter(|line| !line.trim_start().starts_with('#'))
+                .any(|line| line.split_whitespace().any(|word| word == "filter=lfs"))
+        })
+    };
+    if named.is_some_and(names_lfs) || names_lfs(&repo.common_dir().join("info").join("attributes"))
+    {
+        return true;
+    }
+    let Ok(index) = repo.index_or_empty() else {
+        return false;
+    };
+    index.entries().iter().any(|entry| {
+        let path = entry.path(&index);
+        (path == ".gitattributes" || path.ends_with(b"/.gitattributes"))
+            && names_lfs(&workdir.join(gix::path::from_bstr(path)))
+    })
+}
+
 /// The reader's words for a store watch that could not be armed.
 fn store_notice(error: &notify::Error) -> String {
     let reason = match &error.kind {
@@ -937,6 +978,9 @@ mod tests {
         };
         git(&["init", "-q"]);
         git(&["config", "lfs.storage", &store.to_string_lossy()]);
+        std::fs::create_dir_all(tree.join(".git").join("info")).expect("info");
+        std::fs::write(tree.join(".git/info/attributes"), "*.png filter=lfs\n")
+            .expect("attributes");
         let repo = gix::open(&tree).expect("open");
         let config = repo.common_dir().join("config");
         let mut watcher = Watcher::armed_by(

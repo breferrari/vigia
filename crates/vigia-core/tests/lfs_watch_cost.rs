@@ -50,6 +50,7 @@ fn lfs_store_watch_cost() {
     let directories = dirs.len() + 1;
     let scratch = Scratch::new("watch-lfs-cost-repo");
     scratch.write("a.txt", "x\n");
+    scratch.write(".gitattributes", "*.png filter=lfs\n");
     scratch.commit_all("initial");
     let scratch = scratch.settled();
     let worktree = scratch.worktree();
