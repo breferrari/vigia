@@ -129,6 +129,14 @@ A user-scoped server is started from your own config directory rather than from 
 
 </details>
 
+## How fast a note leaves
+
+Measured 2026-10-20 on an Apple M1 Max, macOS 27.0.1, with a release build of `main` at ccdce3f. A script started the binary in a pseudo-terminal at 100 by 90 cells, on a scratch repository with one changed file. A listening Unix socket was registered through `vigia mcp register`, fed a `SessionStart` payload on stdin and the socket and token in its environment, the way the Claude Code hook runs it. For each note the script clicked a line number with an SGR mouse report, typed a sentence, and took the time just before writing `Enter`. It took the time again when the second line, the note's frame, arrived on the socket.
+
+Two runs of 16 notes each, since a pane that size fits 16 note boxes. Over the 32: 0.98 ms at the fastest, 3.40 ms at the median, 12.01 ms at the 90th percentile and 20.64 ms at the slowest.
+
+That is the part `vigia` controls: the store write, the post on its own thread and the socket write. What the agent does after the line arrives is not measured here.
+
 ## Other agents
 
 The server and `pending` work with any agent. The live push does not.

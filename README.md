@@ -83,7 +83,7 @@ You see a line you want changed. Click its line number, type one sentence, press
 
 Without the live post, a note waits until the agent next calls `notes` or you send your next prompt.
 
-**How fast.** From `Enter` to the note arriving on the session's socket: 3.4 ms at the median and 21 ms at the slowest, over 32 notes on an Apple M1 Max with a release build. How soon the agent acts on it after that is up to the agent.
+**How fast.** From `Enter` to the note arriving on the session's socket. Measured 2026-10-20: 3.4 ms at the median and 21 ms at the slowest, over 32 notes on an Apple M1 Max with a release build ([how](https://github.com/breferrari/vigia/blob/main/docs/NOTES.md#how-fast-a-note-leaves)). How soon the agent acts on it after that is up to the agent.
 
 **Set it up once**, for every project you open:
 
