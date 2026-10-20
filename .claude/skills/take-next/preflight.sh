@@ -15,7 +15,7 @@
 # reading and never counted.
 #
 # Test seams (test-only, never set in a real run): PREFLIGHT_SPEC_FILE,
-# PREFLIGHT_ROADMAP_FILE and PREFLIGHT_ISSUES_FILE substitute local files for
+# PREFLIGHT_ROADMAP_FILE, PREFLIGHT_ISSUES_FILE and PREFLIGHT_MILESTONES_FILE substitute local files for
 # the ref's copies and for the tracker fetch, so a mutation ("delete an
 # invariant row", "flip a row's mark", "hand it a board at the cap") can prove
 # each comparison fires. A drift check that cannot report "no drift" has not
@@ -155,28 +155,31 @@ if [ -s "$tmp/unfiled.out" ]; then cat "$tmp/unfiled.out"; findings=$((findings 
 say "5. judgment — open SPEC.md §10 bullets (read these; ordering language means a blocker):"
 sed -n '/^## 10\./,/^## 11\./p' "$tmp/spec.md" | grep -E '^- \[ \]' | cut -c1-160 | sed 's/^/  /'
 
-say "6. milestone drift — step 1's answer vs the roadmap's section order:"
-if [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
+say "6. milestone drift — the roadmap's phases vs the tracker's milestones:"
+# Step 1 reads the roadmap alone, so a milestone cannot steer it. What this
+# catches is the two records disagreeing about which phases exist at all.
+if [ -n "${PREFLIGHT_MILESTONES_FILE:-}" ]; then cp "$PREFLIGHT_MILESTONES_FILE" "$tmp/ms.json"
+elif [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
   gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" > "$tmp/ms.json"
-  step1=$(NEXT_MILESTONES_FILE="$tmp/ms.json" sh "$(dirname "$0")/next.sh" | sed -n 's/^milestone: //p' | tr -d '\r')
-  grep -oE '^## Phase [0-9]+.*' "$tmp/roadmap.md" | sed 's/^## //' | tr -d '\r' > "$tmp/order.txt"
-  jq -r '.[] | select(.open_issues > 0) | .title' "$tmp/ms.json" | tr -d '\r' > "$tmp/withwork.txt"
-  roadmap_says=""
-  while IFS= read -r s; do
-    grep -qxF "$s" "$tmp/withwork.txt" || continue
-    roadmap_says="$s"; break
-  done < "$tmp/order.txt"
-  if [ "$step1" = "$roadmap_says" ]; then ok "step 1 and the roadmap agree: ${step1:-<no eligible work>}"
-  else hit "step 1 says '${step1:-<empty>}', roadmap section order says '${roadmap_says:-<empty>}'"; fi
-  LC_ALL=C sort "$tmp/withwork.txt" > "$tmp/ww.s"
-  LC_ALL=C sort "$tmp/order.txt" > "$tmp/or.s"
-  LC_ALL=C comm -23 "$tmp/ww.s" "$tmp/or.s" > "$tmp/ms-orphans.out"
-  if [ -s "$tmp/ms-orphans.out" ]; then
-    sed 's/^/  DRIFT milestone with work and no roadmap section: /' "$tmp/ms-orphans.out"
-    findings=$((findings + $(wc -l < "$tmp/ms-orphans.out")))
-  else ok "every open milestone with work has a roadmap section"; fi
+fi
+if [ -f "$tmp/ms.json" ]; then
+  jq '[.[] | select(.state == "OPEN") | {number, title}]' "$tmp/issues.json" > "$tmp/open.json"
+  step1=$(NEXT_ROADMAP_FILE="$tmp/roadmap.md" NEXT_ISSUES_FILE="$tmp/open.json" sh "$(dirname "$0")/next.sh" | sed -n 's/^section: //p' | tr -d '\r')
+  say "  step 1 takes from: ${step1:-<no eligible section>}"
+  awk '/^## Shelf/ { exit } /^## Phase [0-9]/ { print substr($0, 4) }' "$tmp/roadmap.md" | tr -d '\r' > "$tmp/phases.txt"
+  # A phase whose rows are not all done, by the same rule step 1 reads.
+  awk '/^## Shelf/ { exit } /^## / { s = substr($0, 4); next } /^\| *(⬜|🔨) *\|/ && s ~ /^Phase [0-9]/ { print s }' "$tmp/roadmap.md" | tr -d '\r' | LC_ALL=C sort -u > "$tmp/phases-open.s"
+  jq -r '.[] | .title' "$tmp/ms.json" | tr -d '\r' | LC_ALL=C sort > "$tmp/ms-all.s"
+  jq -r '.[] | select(.open_issues > 0) | .title' "$tmp/ms.json" | tr -d '\r' | LC_ALL=C sort > "$tmp/ww.s"
+  LC_ALL=C sort "$tmp/phases.txt" > "$tmp/or.s"
+  LC_ALL=C comm -23 "$tmp/ww.s" "$tmp/or.s" | sed 's/^/  DRIFT milestone with work and no roadmap section: /' > "$tmp/ms-drift.out"
+  LC_ALL=C comm -23 "$tmp/phases-open.s" "$tmp/ms-all.s" | sed 's/^/  DRIFT roadmap phase with open rows and no open milestone: /' >> "$tmp/ms-drift.out"
+  if [ -s "$tmp/ms-drift.out" ]; then
+    cat "$tmp/ms-drift.out"
+    findings=$((findings + $(wc -l < "$tmp/ms-drift.out")))
+  else ok "every open milestone with work has a phase, and every open phase a milestone"; fi
 else
-  say "  (skipped under test seams — needs the live tracker)"
+  say "  (skipped under test seams without PREFLIGHT_MILESTONES_FILE)"
 fi
 
 say "7. missing row — issues the roadmap never mentions (the direction the 2026-08-03 sweep found four gaps in):"

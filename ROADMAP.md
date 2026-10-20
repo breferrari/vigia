@@ -461,7 +461,7 @@ Milestone: [Phase 14](https://github.com/breferrari/vigia/milestone/15). Interna
 | ⬜ | Read the take-order from ROADMAP.md, not milestone titles | [#108](https://github.com/breferrari/vigia/issues/108) |
 | ⬜ | Harden the bump.yml gates against reindents, echoes and env values | [#145](https://github.com/breferrari/vigia/issues/145) |
 | ⬜ | Fail the build when the README calls a released version unreleased. **Found by review on #670** **Taken with the README rework (vigia), 2026-10-20** | [#671](https://github.com/breferrari/vigia/issues/671) |
-| ⬜ | Fail the flake-rate workflow when its filter matches no test. **Found on #673** | [#674](https://github.com/breferrari/vigia/issues/674) |
+| ✅ | Fail the flake-rate workflow when its filter matches no test. **Found on #673** | [#674](https://github.com/breferrari/vigia/issues/674) |
 | ✅ | Decide whether vigia-core's public API is stable **Ruled C by the reader, 2026-10-20** | [#684](https://github.com/breferrari/vigia/issues/684) |
 
 ## Shelf (retired 2026-10-19)
@@ -505,7 +505,7 @@ Milestone: [Shelf](https://github.com/breferrari/vigia/milestone/5), closed.
 | ✅ | The bulk-rewrite I9 gate is flaky on macOS hosted runners | [#36](https://github.com/breferrari/vigia/issues/36) |
 | ⬜ | Rename tracking and the non-streaming walk, at ten thousand files. **Moved to Phase 11, 2026-10-19** | [#48](https://github.com/breferrari/vigia/issues/48) |
 | ⬜ | The thesis workload, measured from real use rather than a fixture. **Moved to Phase 11, 2026-10-19** | [#72](https://github.com/breferrari/vigia/issues/72) |
-| ⬜ | Default view: unstaged only, or working-tree-vs-HEAD. **Moved to Phase 12, 2026-10-19** | [#50](https://github.com/breferrari/vigia/issues/50) |
+| ✅ | Default view: unstaged only, or working-tree-vs-HEAD. **Moved to Phase 12, 2026-10-19** | [#50](https://github.com/breferrari/vigia/issues/50) |
 | ✅ | I7 is measured without the highlighter, and the first parse costs 98ms | [#51](https://github.com/breferrari/vigia/issues/51) |
 | ✅ | The heat projection's cost follows the file rather than the window | [#55](https://github.com/breferrari/vigia/issues/55) |
 | ✅ | The chrome may be too dim to read on a real terminal | [#60](https://github.com/breferrari/vigia/issues/60) |
@@ -554,7 +554,7 @@ Milestone: [Shelf](https://github.com/breferrari/vigia/milestone/5), closed.
 | ✅ | The churn band's heights are ungated, so three mutations to its stacking survive | [#225](https://github.com/breferrari/vigia/issues/225) |
 | ✅ | WSL inside Windows Terminal gets no row wash, because `WT_SESSION` is read only on Windows | [#226](https://github.com/breferrari/vigia/issues/226) |
 | ✅ | `gh pr checks --watch` reports green while the matrix has not started | [#236](https://github.com/breferrari/vigia/issues/236) |
-| ⬜ | The caret, the pulse and the elision markers are drawn outside CP437 with no rung. **Moved to Phase 12, 2026-10-19** | [#237](https://github.com/breferrari/vigia/issues/237) |
+| ✅ | The caret, the pulse and the elision markers are drawn outside CP437 with no rung. **Moved to Phase 12, 2026-10-19** | [#237](https://github.com/breferrari/vigia/issues/237) |
 | ✅ | The CPU attribution clock under-reports on a loaded Windows runner | [#246](https://github.com/breferrari/vigia/issues/246) |
 | ✅ | A heat strip finer than its file draws a solid change as dashes | [#230](https://github.com/breferrari/vigia/issues/230) |
 | ✅ | A churn sample buys the file size the status walk already paid for | [#233](https://github.com/breferrari/vigia/issues/233) |

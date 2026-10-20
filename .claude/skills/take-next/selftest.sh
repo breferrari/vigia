@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Self-test for step 1's milestone selection and pre-flight comparison 6.
+# Self-test for step 1's section selection and pre-flight comparison 6.
 #
 # Why this exists: the selection rule is a jq filter inside a shell script, so
 # no cargo test can reach it, and the first two edits to it were verified by
@@ -27,100 +27,71 @@ trap 'rm -rf "$FIX"' EXIT
 ok() { printf '  ok   %s\n' "$1"; }
 no() { printf '  FAIL %s\n    expected: %s\n    actual:   %s\n' "$1" "$2" "$3"; FAIL=$((FAIL + 1)); }
 
-# Every case drives next.sh through its fixture seam, so what is tested is what
-# a session runs rather than a copy of it.
-case_is() { # name, expected, json
-  printf '%s' "$3" > "$FIX/ms.json"
-  actual=$(NEXT_MILESTONES_FILE="$FIX/ms.json" sh "$NEXT" 2>&1 | tr -d '\r' | sed -n 's/^milestone: //p')
+# Every case drives next.sh through its fixture seams, so what is tested is what
+# a session runs rather than a copy of it. A fixture roadmap is written row by
+# row: `## Heading` starts a section, `⬜ N` and `✅ N` are rows naming issue N.
+roadmap() { # lines -> roadmap.md
+  printf '%s\n' "$@" | awk '
+    /^## / { print; print "| | Task | Issue |"; print "|---|---|---|"; next }
+    { printf "| %s | task %s | [#%s](https://example.invalid/%s) |\n", $1, $2, $2, $2 }' > "$FIX/roadmap.md"
+}
+open_issues() { # numbers -> open.json
+  printf '%s\n' "$@" | jq -R 'select(length > 0) | {number: tonumber, title: "issue \(.)"}' | jq -s . > "$FIX/open.json"
+}
+take() { # -> the section next.sh names
+  NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" 2>&1 | tr -d '\r' | sed -n 's/^section: //p'
+}
+case_is() { # name, expected
+  actual=$(take)
   [ "$actual" = "$2" ] && ok "$1" || no "$1" "$2" "$actual"
 }
 
 echo "selection:"
 
-# #83's own stated correct answer, from when Phase 4 was still open.
-case_is "lowest eligible phase number wins" \
-  "Phase 4 - artifacts" \
-  '[{"title":"Phase 4 - artifacts","description":"","open_issues":7},
-    {"title":"Phase 6 - measured","description":"","open_issues":4}]'
+roadmap "## Phase 6 - measured" "⬜ 1" "## Phase 7 - distribution" "⬜ 2"; open_issues 1 2
+case_is "the first section in file order wins" "Phase 6 - measured"
 
-# The bug: a milestone with no open issues must not be selected, which is the
-# case rule 1 has warned about since the first version.
-case_is "a milestone with no open issues is not selected" \
-  "Phase 7 - distribution" \
-  '[{"title":"Phase 6 - measured","description":"","open_issues":0},
-    {"title":"Phase 7 - distribution","description":"","open_issues":1}]'
+# The reader orders by section, and a section need not be a phase.
+roadmap "## Phase 10 - rust" "✅ 1" "## Foundation" "⬜ 2" "## Phase 11 - paint" "⬜ 3"; open_issues 2 3
+case_is "a section that is not a phase is taken in its place" "Foundation"
 
-case_is "an empty board gives empty" "" '[]'
+roadmap "## Phase 6 - measured" "✅ 1" "## Phase 7 - distribution" "⬜ 2"; open_issues 1 2
+case_is "a section whose rows are all done is skipped, even on an open issue" "Phase 7 - distribution"
 
-# Rule 1: an unrecognised title sorts last rather than vanishing. Both halves
-# matter, so both are asserted: it loses to a real phase, and it still wins when
-# it is the only thing eligible.
-case_is "an unnumbered milestone sorts last" \
-  "Phase 7 - distribution" \
-  '[{"title":"Housekeeping","description":"","open_issues":3},
-    {"title":"Phase 7 - distribution","description":"","open_issues":1}]'
+roadmap "## Phase 6 - measured" "⬜ 1" "## Phase 7 - distribution" "⬜ 2"; open_issues 2
+case_is "a row on a closed issue does not make its section eligible" "Phase 7 - distribution"
 
-case_is "an unnumbered milestone is still selectable alone" \
-  "Housekeeping" \
-  '[{"title":"Housekeeping","description":"","open_issues":3}]'
+roadmap "## Phase 6 - measured" "🔨 1" "## Phase 7 - distribution" "⬜ 2"; open_issues 1 2
+case_is "a row in progress keeps its section eligible" "Phase 6 - measured"
 
-# The anchor is real: "Phase 6" not at the start does not make it phase 6.
-case_is "the phase number must begin the title" \
-  "Phase 2 - two" \
-  '[{"title":"The Phase 1 retrospective","description":"","open_issues":1},
-    {"title":"Phase 2 - two","description":"","open_issues":1}]'
+roadmap "## Phase 6 - measured" "✅ 1" "## Shelf" "⬜ 2" "## Phase 9 - later" "⬜ 3"; open_issues 2 3
+case_is "nothing at or below the Shelf is taken" ""
 
-# Ordering is numeric, not lexicographic. 10 must not beat 9.
-case_is "ordering is numeric, not lexicographic" \
-  "Phase 9 - nine" \
-  '[{"title":"Phase 10 - ten","description":"","open_issues":1},
-    {"title":"Phase 9 - nine","description":"","open_issues":1}]'
+roadmap "## Phase 6 - measured" "✅ 1"; open_issues
+case_is "a finished roadmap gives empty" ""
 
-# A tie must be defined rather than input-order dependent, so the same two
-# milestones are asserted in both orders and must give the same answer.
-case_is "a tie breaks on title, given one order" \
-  "Phase 6 - alpha" \
-  '[{"title":"Phase 6 - zulu","description":"","open_issues":1},
-    {"title":"Phase 6 - alpha","description":"","open_issues":1}]'
-
-case_is "a tie breaks on title, given the other" \
-  "Phase 6 - alpha" \
-  '[{"title":"Phase 6 - alpha","description":"","open_issues":1},
-    {"title":"Phase 6 - zulu","description":"","open_issues":1}]'
-
-# A null description must not throw, which is what `// ""` is for. GitHub
-# returns null rather than "" for a milestone created without one.
-case_is "a null description is handled" \
-  "Phase 6 - measured" \
-  '[{"title":"Phase 6 - measured","description":null,"open_issues":1}]'
+# A row names its issue in its last cell, and prose may cite another before it.
+printf '%s\n' "## Phase 6 - measured" "| | Task | Issue |" "|---|---|---|" \
+  "| ⬜ | Closed by [#1](https://example.invalid/1) | [#2](https://example.invalid/2) |" > "$FIX/roadmap.md"
+open_issues 1
+case_is "a row's issue is the one in its last cell" ""
 
 # --ranked shows the whole order the answer came from.
-printf '%s' '[{"title":"Phase 7 - distribution","description":"","open_issues":1},
-  {"title":"Phase 6 - measured","description":"","open_issues":4}]' > "$FIX/ms.json"
-ranked=$(NEXT_MILESTONES_FILE="$FIX/ms.json" sh "$NEXT" --ranked 2>&1 | tr -d '\r' | paste -sd '|' -)
-[ "$ranked" = "Phase 6 - measured|Phase 7 - distribution" ] && ok "--ranked lists every eligible milestone in take order" \
-  || no "--ranked lists every eligible milestone in take order" "Phase 6 - measured|Phase 7 - distribution" "$ranked"
+roadmap "## Phase 6 - measured" "⬜ 1" "## Phase 7 - distribution" "✅ 2" "## Phase 8 - look" "⬜ 3" "⬜ 4"; open_issues 1 3 4
+ranked=$(NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" --ranked 2>&1 | tr -d '\r' | paste -sd '|' -)
+[ "$ranked" = "Phase 6 - measured|Phase 8 - look" ] && ok "--ranked lists every eligible section once, in order" \
+  || no "--ranked lists every eligible section once, in order" "Phase 6 - measured|Phase 8 - look" "$ranked"
 
-echo "mutation (the check must be able to fail):"
+listed=$(NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" 2>&1 | tr -d '\r' | sed 1d | cut -f1 | paste -sd '|' -)
+[ "$listed" = "#1" ] && ok "the answer lists only its own section's open issues" \
+  || no "the answer lists only its own section's open issues" "#1" "$listed"
 
-# Rule 1 claims the fallback is what stops a milestone vanishing, and that scan
-# fails loudly where capture fails silently. Both halves are asserted, because
-# the rule said the opposite before #83's review corrected it and the prose is
-# only trustworthy if something holds it to account.
-F='[{"title":"Phase 6 - six","description":"","open_issues":1},{"title":"Backlog","description":"","open_issues":1}]'
-
-kept=$(printf '%s' "$F" | jq -c '[.[] | {o:(((.title|capture("^Phase +(?<n>[0-9]+)").n)//"9999")|tonumber)}] | length' 2>/dev/null | tr -d '\r')
-[ "$kept" = "2" ] && ok "with the fallback, capture keeps every milestone too" \
-  || no "with the fallback, capture keeps every milestone too" "2" "$kept"
-
-kept=$(printf '%s' "$F" | jq -c '[.[] | {o:((.title|capture("^Phase +(?<n>[0-9]+)").n)|tonumber)}] | length' 2>/dev/null | tr -d '\r')
-[ "$kept" = "1" ] && ok "without the fallback, capture drops one silently" \
-  || no "without the fallback, capture drops one silently" "1" "$kept"
-
-if printf '%s' "$F" | jq -c '[.[] | {o:((.title|[scan("^Phase +([0-9]+)")[]]|first)|tonumber)}]' >/dev/null 2>&1; then
-  no "without the fallback, scan fails loudly" "a jq error" "no error"
+# A short fetch would read open issues as closed and skip their sections.
+jq -n '[range(0; 1000) | {number: ., title: "x"}]' > "$FIX/open.json"
+if NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" >/dev/null 2>&1; then
+  no "an open-issue fetch at its limit is refused" "a non-zero exit" "exit 0"
 else
-  ok "without the fallback, scan fails loudly"
+  ok "an open-issue fetch at its limit is refused"
 fi
 
 echo "preflight (the board every comparison reads):"
@@ -273,16 +244,46 @@ out=$(flight 29)
 out=$(pre 2>&1 | grep -c '^8\.')
 [ "$out" = 0 ] && ok "no issue, no comparison 8" || no "no issue, no comparison 8" "0" "$out"
 
+# Comparison 6 in both directions. The roadmap above is all done, so the second
+# case's phase is open only once a row is added for it.
+milestones() { # json -> the comparison-6 DRIFT lines
+  printf '%s' "$1" > "$FIX/ms.json"
+  board 3 > "$FIX/issues.json"
+  PREFLIGHT_SPEC_FILE="$FIX/spec.md" \
+  PREFLIGHT_ROADMAP_FILE="$FIX/roadmap6.md" \
+  PREFLIGHT_ISSUES_FILE="$FIX/issues.json" \
+  PREFLIGHT_MILESTONES_FILE="$FIX/ms.json" \
+  PREFLIGHT_ISSUE_LIMIT=10 \
+    sh "$PRE" 2>&1 | awk '/^6\./ { on = 1; next } /^[0-9]+\./ { on = 0 } on && /DRIFT|ok/ { $1 = $1; print }'
+}
+printf '%s\n' "## Phase 8 - look" "| | Task | Issue |" "|---|---|---|" "| ✅ | one | [#1](https://example.invalid/1) |" > "$FIX/roadmap6.md"
+
+line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":0}]')
+[ "$line" = "ok every open milestone with work has a phase, and every open phase a milestone" ] \
+  && ok "comparison 6 reads clean when the two records agree" \
+  || no "comparison 6 reads clean when the two records agree" "ok" "$line"
+
+line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":0},{"title":"Phase 9 - pictures","state":"open","open_issues":2}]')
+[ "$line" = "DRIFT milestone with work and no roadmap section: Phase 9 - pictures" ] \
+  && ok "a milestone that matches no heading is reported" \
+  || no "a milestone that matches no heading is reported" "DRIFT milestone with work and no roadmap section: Phase 9 - pictures" "$line"
+
+printf '%s\n' "| ⬜ | three | [#3](https://example.invalid/3) |" "## Phase 12 - edges" "| | Task | Issue |" "|---|---|---|" "| ⬜ | two | [#2](https://example.invalid/2) |" >> "$FIX/roadmap6.md"
+line=$(milestones '[{"title":"Phase 8 - look","state":"open","open_issues":1}]')
+[ "$line" = "DRIFT roadmap phase with open rows and no open milestone: Phase 12 - edges" ] \
+  && ok "a heading that matches no milestone is reported" \
+  || no "a heading that matches no milestone is reported" "DRIFT roadmap phase with open rows and no open milestone: Phase 12 - edges" "$line"
+
 echo "drift:"
 
 present() { # needle, file, name
   grep -qF "$1" "$2" 2>/dev/null && ok "$3" || no "$3" "$1" "absent"
 }
 
-# One filter, two callers. The skill sends a session to the script, and the
-# pre-flight compares the script's answer against the roadmap.
+# One chooser, two callers. The skill sends a session to the script, and the
+# pre-flight reports the script's answer beside the milestone comparison.
 present 'sh .claude/skills/take-next/next.sh' "$SKILL" "SKILL.md sends a session to next.sh"
-present 'next.sh' "$PRE" "preflight.sh compares the roadmap against next.sh"
+present 'next.sh' "$PRE" "preflight.sh reports the section next.sh takes"
 
 # The limit is the one thing the cases above cannot check about themselves: they
 # run at a small override, so nothing there would notice the shipped default

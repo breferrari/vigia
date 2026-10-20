@@ -1,44 +1,64 @@
 #!/bin/sh
-# Names the milestone the next task is taken from, then lists its open issues.
+# Names the roadmap section the next task is taken from, then lists its open
+# issues.
 #
-# The order is the phase number at the start of the title. It is deterministic
-# and needs no metadata, where the milestone due date was null on every row and
-# so sorted nothing. A title not beginning `Phase <n>` sorts last rather than
-# vanishing, which is what the `// "9999"` fallback holds: with it removed,
-# `scan` fails loudly where `capture` would drop the row in silence, so `scan`
-# is the form to keep. A milestone with no open issues is not a place to look,
-# so a finished phase left open cannot answer.
+# The order is ROADMAP.md's section order on origin/main, which is versioned and
+# reviewed. A section is eligible when one of its rows is not marked done and
+# names an open issue, so a finished section is never an answer. The walk stops
+# at `## Shelf`: nothing at or below it is taken. Milestones play no part, so a
+# renamed or renumbered milestone cannot change which task comes next.
+#
+# A row names its issue in its last cell. Some rows cite a second issue in their
+# task prose, so the last link on the line is the one read.
 #
 # Usage: next.sh [--ranked]
-#   --ranked  print every eligible milestone in take order, not only the first
+#   --ranked  print every eligible section in take order, not only the first
 #
-# Test seam: NEXT_MILESTONES_FILE substitutes a fixture for the tracker fetch,
-# and the issue listing is then skipped.
+# Test seams: NEXT_ROADMAP_FILE substitutes a file for the roadmap, and
+# NEXT_ISSUES_FILE a JSON array of `{number, title}` for the open issues.
 set -eu
 
-SELECT='[ .[]
-    | select(.open_issues > 0)
-    | { order: (((.title | [scan("^Phase +([0-9]+)")[]] | first) // "9999") | tonumber), title: .title }
-  ] | sort_by(.order, .title) | .[].title'
+REF="${NEXT_REF:-origin/main}"
+LIMIT=1000
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
 
-if [ -n "${NEXT_MILESTONES_FILE:-}" ]; then
-  ranked=$(jq -r "$SELECT" "$NEXT_MILESTONES_FILE" | tr -d '\r')
-else
-  # per_page=100 and no --paginate: `gh api --paginate --jq` runs its filter
-  # once per page and emits one answer per page.
-  ranked=$(gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" | jq -r "$SELECT" | tr -d '\r')
+if [ -n "${NEXT_ROADMAP_FILE:-}" ]; then tr -d '\r' < "$NEXT_ROADMAP_FILE" > "$tmp/roadmap.md"
+else git show "$REF:ROADMAP.md" | tr -d '\r' > "$tmp/roadmap.md"; fi
+
+if [ -n "${NEXT_ISSUES_FILE:-}" ]; then cp "$NEXT_ISSUES_FILE" "$tmp/open.json"
+else gh issue list --state open --limit "$LIMIT" --json number,title > "$tmp/open.json"; fi
+# A short fetch would make an open issue look closed and skip its section.
+if [ "$(jq 'length' "$tmp/open.json")" -ge "$LIMIT" ]; then
+  echo "the open-issue fetch reached its limit of $LIMIT, so the answer would be wrong" >&2
+  exit 2
 fi
+jq -r '.[] | "\(.number)\t\(.title)"' "$tmp/open.json" | tr -d '\r' > "$tmp/open.tsv"
+
+# One line per eligible row: the section heading, a tab, the issue number.
+awk -F'\t' '
+  FILENAME == ARGV[1] { open[$1] = 1; next }
+  /^## Shelf/ { exit }
+  /^## / { section = substr($0, 4); next }
+  section == "" { next }
+  /^\| *(⬜|🔨) *\|.*\[#[0-9]+\]\([^)]*\) *\|$/ {
+    line = $0
+    n = ""
+    while (match(line, /\[#[0-9]+\]/)) { n = substr(line, RSTART + 2, RLENGTH - 3); line = substr(line, RSTART + RLENGTH) }
+    if (n in open) print section "\t" n
+  }' "$tmp/open.tsv" "$tmp/roadmap.md" > "$tmp/rows.tsv"
 
 if [ "${1:-}" = "--ranked" ]; then
-  printf '%s\n' "$ranked"
+  cut -f1 "$tmp/rows.tsv" | awk '!seen[$0]++'
   exit 0
 fi
 
-title=$(printf '%s\n' "$ranked" | head -n 1)
-if [ -z "$title" ]; then
-  echo "no eligible milestone: what is left is finished or empty. Read which before acting."
+section=$(cut -f1 "$tmp/rows.tsv" | head -n 1)
+if [ -z "$section" ]; then
+  echo "no eligible section: every row above the Shelf is done or names a closed issue. Read which before acting."
   exit 0
 fi
-printf 'milestone: %s\n' "$title"
-[ -n "${NEXT_MILESTONES_FILE:-}" ] && exit 0
-gh issue list --state open --milestone "$title"
+printf 'section: %s\n' "$section"
+awk -F'\t' -v s="$section" '
+  FILENAME == ARGV[1] { title[$1] = $2; next }
+  $1 == s { printf "#%s\t%s\n", $2, title[$2] }' "$tmp/open.tsv" "$tmp/rows.tsv"
