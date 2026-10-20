@@ -1166,17 +1166,26 @@ mod tests {
             let _ = backend.watch(path, mode);
             Err(notify::Error::new(notify::ErrorKind::MaxFilesWatch))
         });
-        assert!(
-            ticks_within(&mut watcher, arming()),
-            "the failure did not tick"
-        );
-        let notice = watcher.take_store_notice().expect("no notice");
+        // A tree event from setting the repository up can tick first; the
+        // failure's tick is the one that carries the notice.
+        let started = std::time::Instant::now();
+        let notice = loop {
+            assert!(
+                ticks_within(&mut watcher, arming()),
+                "the failure did not tick"
+            );
+            if let Some(notice) = watcher.take_store_notice() {
+                break notice;
+            }
+            assert!(started.elapsed() < arming(), "no notice");
+        };
         assert!(
             notice.starts_with("LFS images redraw on the next change")
                 && notice.ends_with("watch limit reached"),
             "{notice}"
         );
         assert_eq!(watcher.take_store_notice(), None, "the notice came twice");
+        while ticks_within(&mut watcher, Duration::from_millis(300)) {}
 
         std::fs::write(store.join("objects").join("object"), "x\n").expect("write");
         assert!(
@@ -1262,6 +1271,10 @@ mod tests {
             before + 1,
             "a ticking arm was filtered"
         );
+        // The arms these messages asked for finish on the arming thread; wait
+        // for them so nothing is still arming when the directories go.
+        let _ = ticks_within(&mut watcher, arming());
+        drop(watcher);
     }
 
     /// An I/O failure says its kind, not its message.
