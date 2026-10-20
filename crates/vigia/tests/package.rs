@@ -3819,6 +3819,43 @@ fn forks_replace_crates() {
     );
 }
 
+/// CI formats the workspace members by name, since `--all` reaches the forks
+/// under `vendor/`; the names must be every member.
+#[test]
+fn fmt_names_members() {
+    let manifest = repo_file("Cargo.toml");
+    let members: Vec<&str> = manifest
+        .lines()
+        .find_map(|line| line.strip_prefix("members = ["))
+        .expect("a members list")
+        .trim_end_matches(']')
+        .split(',')
+        .map(|member| member.trim().trim_matches('"'))
+        .filter(|member| !member.is_empty())
+        .collect();
+    let names: String = members
+        .iter()
+        .map(|member| {
+            let path = repo_root().join(member).join("Cargo.toml");
+            let package = std::fs::read_to_string(&path).expect("a member manifest");
+            let name = package
+                .lines()
+                .find_map(|line| line.strip_prefix("name = \""))
+                .and_then(|rest| rest.strip_suffix('"'))
+                .expect("a package name")
+                .to_owned();
+            format!("-p {name}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    for file in [".github/workflows/ci.yml", "CONTRIBUTING.md"] {
+        assert!(
+            repo_file(file).contains(&format!("cargo fmt {names}")),
+            "{file} does not format exactly the members, `cargo fmt {names}`"
+        );
+    }
+}
+
 /// The workspace patches no crate: a `[patch]` reaches a checkout and never a
 /// crates.io build, so a fix carried that way ships to half the installs.
 #[test]

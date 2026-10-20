@@ -76,7 +76,7 @@ cargo test --workspace --doc                  # the doctests, which nextest does
 cargo test --release --test budgets --features vigia/pdf           # a release gate; first_paint is the other, run as its own step like CI does
 CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets   # the lints, with the warnings CI refuses
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps   # the docs, with the warnings CI refuses
-cargo fmt -p vigia -p vigia-core -p xtask    # the members; --all would reformat the forks under vendor/
+cargo fmt -p vigia-core -p vigia -p xtask    # the members; --all would reformat the forks under vendor/
 cargo deny check advisories licenses sources   # cargo install cargo-deny --version 0.20.2 --locked
 cargo deny --exclude-dev check bans             # no crate that needs a C toolchain, outside dev-dependencies
 ```

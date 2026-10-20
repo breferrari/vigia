@@ -6,7 +6,7 @@ Upstream: `https://github.com/LaurenzV/hayro` at tag `hayro-v0.8.0`, in `hayro/`
 
 Suite: `none`.
 
-This directory is that crate as published, with the patches in `patches/` applied in order, and nothing else. Its code is unchanged: it is forked only so that it depends on `vigia-hayro-interpret`, which leads to the decode limit in `vendor/hayro-syntax`, and so a `cargo install vigia` gets that limit. A crate that kept upstream's dependency would pull a second, unlimited `hayro-syntax` beside the fork.
+This directory is that crate as published, with the patches in `patches/` applied in order, and nothing else. Its code is unchanged: it is forked only so that it depends on `vigia-hayro-interpret`, which leads through `vigia-hayro-interpret` to the decode limit in `vendor/hayro-syntax`, and so a `cargo install vigia` gets that limit. A crate that kept upstream's dependency would pull a second, unlimited `hayro-syntax` beside the fork.
 
 ## `0001-name-the-fork.patch`
 

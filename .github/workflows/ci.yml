@@ -132,7 +132,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # The members by name: `--all` also formats path dependencies, and the
       # forks under `vendor/` stay as upstream wrote them.
-      - run: cargo fmt -p vigia -p vigia-core -p xtask -- --check
+      - run: cargo fmt -p vigia-core -p vigia -p xtask -- --check
 
       # #131: both crates deny `rustdoc::broken_intra_doc_links` and no job ran
       # rustdoc, so the deny was decorative. Three links had rotted behind it —

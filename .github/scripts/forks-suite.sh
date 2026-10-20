@@ -22,6 +22,15 @@ for dir in "$root"/vendor/*/; do
     exit 1
   fi
   if [ "$suite" = none ]; then
+    for patch in "$dir"/patches/*.patch; do
+      case $patch in
+        *-name-the-fork.patch | *-fork-notice.patch) ;;
+        *)
+          echo "::error::vendor/$name: Suite is none, but $(basename "$patch") changes code"
+          exit 1
+          ;;
+      esac
+    done
     echo "vendor/$name: no code patch, so no suite of its own"
     continue
   fi

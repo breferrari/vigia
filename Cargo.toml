@@ -78,8 +78,7 @@ ratatui-image = { version = "=12.0.0-rc.3", default-features = false, features =
 resvg = { version = "0.48.1", default-features = false, features = ["raster-images", "text", "system-fonts", "memmap-fonts"] }
 # An SVG root's size for the size line, without parsing the document.
 svgtypes = "0.16.1"
-# `vigia-hayro` and `vigia-hayro-syntax`: hayro 0.8.0 with the decode limit in
-# `vendor/hayro-syntax/PATCHES.md`, through the whole chain.
+# Forks: see `vendor/hayro-syntax/PATCHES.md`.
 hayro = { package = "vigia-hayro", version = "=0.8.0", path = "vendor/hayro" }
 hayro-syntax = { package = "vigia-hayro-syntax", version = "=0.8.0", path = "vendor/hayro-syntax" }
 # The requirement `usvg` declares, so the two resolve to one copy.
