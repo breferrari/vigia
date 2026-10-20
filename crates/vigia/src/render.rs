@@ -2570,8 +2570,7 @@ const KEYBOARD: [Gesture; 19] = [
         keys: ["m  Esc", "m  Esc"],
         verb: ["the config menu", "config menu"],
     },
-    // `Ctrl+L` shares the row so the sheet stays one page at 80 by 24, and the
-    // tight spelling leaves it out as `q`'s leaves out `Ctrl+C`.
+    // `Ctrl+L` shares this row to keep 80 by 24 one page; tight drops it.
     Gesture {
         keys: ["?  Esc  Ctrl+L", "?  Esc"],
         verb: ["this sheet · redraw the pane", "this sheet"],

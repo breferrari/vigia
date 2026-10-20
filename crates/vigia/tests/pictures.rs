@@ -1415,6 +1415,8 @@ fn kitty_resent_on_refresh() {
     );
     let mut every: Vec<u32> = sent.clone();
     for press in 0..5 {
+        // Twice before a paint, which owes each delete once.
+        pane.pictures.refresh();
         pane.pictures.refresh();
         let deletes = pane.pictures.retired();
         for id in &sent {
@@ -1441,7 +1443,7 @@ fn kitty_resent_on_refresh() {
 }
 
 #[test]
-fn sixel_redrawn_on_refresh() {
+fn other_protocols_redrawn() {
     for (protocol, sequence) in [
         (ProtocolType::Sixel, "\x1bP"),
         (ProtocolType::Iterm2, "1337;File="),
@@ -1549,4 +1551,26 @@ impl ratatui::backend::Backend for Written {
     fn flush(&mut self) -> Result<(), Self::Error> {
         self.inner.flush()
     }
+}
+
+#[test]
+fn refresh_without_pictures() {
+    // With no picture held, `Ctrl+L` owes no delete and builds nothing.
+    let scratch = changed("pictures-refresh-none", "a.txt", b"a\n", b"b\n");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let (_, mut pane) = protocol_pane("pictures-refresh-none-pane", ProtocolType::Kitty);
+    pane.settled(&mut frame);
+    pane.pictures.refresh();
+    assert_eq!(
+        pane.pictures.retired(),
+        "",
+        "a delete was owed with no picture"
+    );
+    assert_eq!(
+        pane.pictures.kept(),
+        0,
+        "a picture was kept with none on screen"
+    );
 }

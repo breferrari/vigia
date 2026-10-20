@@ -734,10 +734,10 @@ impl Pictures {
     }
 
     /// Drop each picture `drop` names, and owe the deletes of its Kitty images.
-    fn retire_where(&mut self, drop: impl Fn(&Arc<Key>, &Built) -> bool) {
+    fn retire_where(&mut self, doomed: impl Fn(&Arc<Key>, &Built) -> bool) {
         let retired = &mut self.retired;
         self.built.retain(|key, ready| {
-            let dropped = drop(key, &ready.0);
+            let dropped = doomed(key, &ready.0);
             if dropped {
                 retired.extend(&ready.0.kitty);
             }
