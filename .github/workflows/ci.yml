@@ -24,7 +24,9 @@ concurrency:
   #
   # A pull request keeps only its newest run. On main the running one finishes
   # and a newer push replaces the waiting one before it starts, since a run
-  # cancelled mid-run draws its commit red with nothing failed.
+  # cancelled mid-run draws its commit red with nothing failed. A replaced
+  # commit is never run, so a conflict between two merges shows first in the
+  # newest main run.
   #
   # The event is in the key so a manual dispatch on main is not cancelled by
   # the next push, nor cancels it.
@@ -587,8 +589,8 @@ jobs:
   # notice an absent matrix would go absent with it, which is the failure it
   # exists to catch wearing the fix's clothes.
   #
-  # Outside a pull request a cancelled run is a superseded one, and no check
-  # reads it, so it is skipped there rather than turning its commit red.
+  # Outside a pull request a run is cancelled only by hand, and no check reads
+  # it, so it is skipped there rather than turning its commit red.
   #
   # It carries no draft guard and still runs on a draft, so the required check
   # always reports rather than going absent. What it must not do is judge a

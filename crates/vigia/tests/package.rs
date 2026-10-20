@@ -3357,7 +3357,7 @@ fn ready_run_survives() {
     assert!(
         complete.lines().any(|line| line.trim()
             == "if: ${{ always() && !(cancelled() && github.event_name != 'pull_request') }}"),
-        "ci complete runs in a run cancelled by hand on main, so its commit reads as \
+        "ci complete runs when a main run is cancelled by hand, so its commit reads as \
          failed:\n{complete}"
     );
 }
