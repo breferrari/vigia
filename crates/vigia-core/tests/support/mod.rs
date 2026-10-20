@@ -107,10 +107,10 @@ fn thread_cpu() -> Option<Duration> {
 }
 
 /// This thread's cycles so far, converted at the highest rate calibration
-/// measured. Cycles count at a fixed rate while the thread runs, which
-/// Microsoft does not promise and `cycle_clock_direction` checks, so a slice
-/// the thread lost time in reads a lower rate, and the highest is at most the
-/// true one: it reads as no less CPU than ran, and no overshoot is
+/// measured. Cycles count at a fixed rate while the thread runs (not
+/// guaranteed; `cycle_clock_direction` checks it), so a slice the thread lost
+/// time in reads a lower rate, and the highest is at most the true one: it
+/// reads as no less CPU than ran, and no overshoot is
 /// excused by the conversion. `None` where the rate could not be measured,
 /// which counts every frame's wall time as its own. `GetThreadTimes` steps at
 /// 15.625ms, too coarse to judge one frame.
@@ -135,8 +135,8 @@ fn thread_cycles() -> Option<u64> {
     ok.then_some(cycles)
 }
 
-/// This thread's user and kernel time from `GetThreadTimes`, in its coarse
-/// ticks.
+/// This thread's kernel plus user time from `GetThreadTimes`, in
+/// [`COARSE_TICK`] steps.
 #[cfg(windows)]
 pub fn thread_times() -> Option<Duration> {
     use windows_sys::Win32::Foundation::FILETIME;

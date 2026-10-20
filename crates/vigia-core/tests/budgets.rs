@@ -975,8 +975,8 @@ fn a_breach_with_no_cpu_clock_is_treated_as_ours() {
 
 /// Windows' cycle clock reads a busy spin as at least nine tenths of the time
 /// `GetThreadTimes` charges the same spin, and never more than twice its wall
-/// time. A rate calibrated too high reads low against the thread's own clock,
-/// and a spin that lost the CPU to the rest of the suite does not.
+/// time. A rate calibrated too high reads low against the thread's own clock;
+/// a spin preempted by the rest of the suite does not.
 #[cfg(windows)]
 #[test]
 fn cycle_clock_direction() {
@@ -992,6 +992,10 @@ fn cycle_clock_direction() {
         let (wall, cpu) = time_cpu(|| support::spin_for(busy));
         let charged = support::thread_times().expect("GetThreadTimes failed") - before;
         eprintln!("cycle clock: wall {wall:?}, cycles {cpu:?}, GetThreadTimes {charged:?}");
+        assert!(
+            charged >= COARSE_TICK,
+            "GetThreadTimes charged a busy spin of {wall:?} only {charged:?}"
+        );
         assert!(
             cpu <= wall * 2,
             "a busy spin of {wall:?} read as {cpu:?} of CPU, past twice its wall time"
