@@ -163,6 +163,9 @@ palette! {
     added_bar,
     /// The same, on a removed line.
     removed_bar,
+    /// A changed pixel in a picture's mask. Unset in every built-in, so it
+    /// takes [`Theme::removed_bar`]'s colour, as the mask did before it had a key.
+    picture_changed,
     /// The wash over rows a drag has selected. It stands in for the diff wash
     /// rather than layering over it, so the sigil column carries added against
     /// removed while it is up, which is the degradation §5.1 already rules for a
@@ -512,6 +515,7 @@ impl Theme {
             // background and this palette assumes none.
             added_bar: Style::new().bg(Color::Green),
             removed_bar: Style::new().bg(Color::Red),
+            picture_changed: Style::new(),
             // Reversed rather than a background, for the reason the row washes
             // above are unset here: a background has to assume one, and this
             // palette is the one that cannot. Reversing swaps whatever the
@@ -619,6 +623,7 @@ impl Theme {
             // Unset, and that is a ruling rather than a gap.
             added_bar: Style::new().bg(Color::Rgb(0x3f, 0xb9, 0x50)),
             removed_bar: Style::new().bg(Color::Rgb(0xf8, 0x51, 0x49)),
+            picture_changed: Style::new(),
             // The row washes' own luminance in a hue neither uses, so a selected
             // removal cannot read as an addition and the ink it covers is no
             // worse off than the diff already leaves it.
@@ -719,6 +724,7 @@ impl Theme {
             // blank cell, so what it has to clear is the page behind it.
             added_bar: Style::new().bg(Color::Rgb(0x1a, 0x7f, 0x37)),
             removed_bar: Style::new().bg(Color::Rgb(0xcf, 0x22, 0x2e)),
+            picture_changed: Style::new(),
             // The dark palette's hue re-picked at light-background luminance, as
             // every other pair here is.
             selection: Style::new().bg(Color::Rgb(0xcf, 0xe0, 0xf7)),

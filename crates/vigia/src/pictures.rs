@@ -323,7 +323,7 @@ pub struct Inks {
 
 impl Inks {
     /// The pane's colour as the terminal said it is, or as dark or light as it
-    /// said, and the theme's removed bar.
+    /// said, and the theme's picture mask colour.
     pub fn of(theme: &crate::Theme, pane: Option<(u8, u8, u8)>, light: bool) -> Self {
         // Unanswered, the palette says which: a light one washes rows light.
         let washed_light = matches!(
@@ -335,7 +335,7 @@ impl Inks {
         } else {
             (0, 0, 0)
         });
-        let changed = match theme.removed_bar.bg {
+        let changed = match theme.picture_changed.bg.or(theme.removed_bar.bg) {
             Some(ratatui::style::Color::Rgb(r, g, b)) => (r, g, b),
             _ => (0xf8, 0x51, 0x49),
         };
@@ -2160,6 +2160,49 @@ mod tests {
             changed(&old, &new),
             [false],
             "a re-encoded transparent pixel counted"
+        );
+    }
+
+    #[test]
+    fn mask_ink_defaults() {
+        let changed = |theme: &crate::Theme| Inks::of(theme, None, false).changed;
+        let colours = crate::terminal::Colours {
+            background: (0x10, 0x10, 0x10),
+            foreground: None,
+            ansi: [Some((0xaa, 0x33, 0x33)); 16],
+        };
+        // What each built-in drew before the mask had a key of its own.
+        for (name, theme, today) in [
+            ("ansi", crate::Theme::ansi(), (0xf8, 0x51, 0x49)),
+            ("dark", crate::Theme::dark(), (0xf8, 0x51, 0x49)),
+            ("light", crate::Theme::light(), (0xcf, 0x22, 0x2e)),
+            ("system", crate::Theme::system(None), (0xf8, 0x51, 0x49)),
+            (
+                "system answered",
+                crate::Theme::system(Some(&colours)),
+                (0xf8, 0x51, 0x49),
+            ),
+        ] {
+            assert_eq!(changed(&theme), today, "{name}'s mask changed colour");
+        }
+    }
+
+    #[test]
+    fn mask_ink_key() {
+        let changed = |source: &str| {
+            let theme = crate::theme::parse(source).expect("theme parses");
+            (Inks::of(&theme, None, false).changed, theme.removed_bar)
+        };
+        let dark = crate::Theme::dark().removed_bar;
+        assert_eq!(
+            changed("base = dark\npicture_changed = on #00ff00"),
+            ((0x00, 0xff, 0x00), dark),
+            "picture_changed did not move the mask alone"
+        );
+        assert_eq!(
+            changed("base = dark\nremoved_bar = on #123456").0,
+            (0x12, 0x34, 0x56),
+            "an unset picture_changed did not follow the theme's removed_bar"
         );
     }
 

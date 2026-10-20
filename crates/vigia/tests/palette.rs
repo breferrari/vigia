@@ -423,6 +423,8 @@ fn nothing_a_reader_has_to_read_is_drawn_in_colour_eight() {
         removed_row: _,
         added_bar: _,
         removed_bar: _,
+        // Exempt: a pixel colour, never text, and unset on this palette.
+        picture_changed: _,
         // Exempt for the reason the washes above it are, and one further: on this
         // palette it carries no colour at all, only `REVERSED`, because a
         // background has to assume one and this is the palette that cannot.
