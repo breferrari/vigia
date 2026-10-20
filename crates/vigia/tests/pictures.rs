@@ -1729,3 +1729,33 @@ fn unsized_baseline_waits() {
         "the cell no longer follows the window"
     );
 }
+
+#[test]
+fn prepick_build_stale() {
+    // A job sent before the picker was given is built at the queried cell, and
+    // a resize before it lands makes it stale like any other.
+    let (scratch, mut pane) = protocol_pane("pictures-cell-prepick", ProtocolType::Sixel);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let small = sixel_sizes(&pane.draw(&view));
+    pane.pictures = Pictures::unpicked(INKS, Box::new(|| {}));
+    pane.view(&mut frame);
+    let mut picker = Picker::halfblocks();
+    picker.set_protocol_type(ProtocolType::Sixel);
+    pane.pictures.pick(picker);
+    pane.pictures.window_sized(window(100, 30, 1000, 600));
+    assert!(pane.pictures.window_sized(window(100, 30, 2000, 1200)));
+    pane.settled(&mut frame);
+    let view = pane.settled(&mut frame);
+    let large = sixel_sizes(&pane.draw(&view));
+    assert_eq!(large.len(), small.len());
+    for (small, large) in small.iter().zip(&large) {
+        assert_eq!(
+            (large.0, large.1),
+            (small.0 * 2, small.1 * 2),
+            "a build sent before the picker was drawn at the old cell"
+        );
+    }
+}

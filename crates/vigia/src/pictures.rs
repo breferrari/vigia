@@ -487,15 +487,17 @@ pub type Cell = (u16, u16);
 /// reports it.
 pub type Window = ratatui::crossterm::terminal::WindowSize;
 
-/// The cell `queried` at the query, scaled by how the window's pixels per cell
-/// moved from `then` to `now`. `None` when either reports no pixels. The
-/// window's own count is not the cell: padding is in it.
+/// The cell in `now`, from the cell `queried` in `then`: the window's pixels
+/// beyond its cells at the query are padding, held fixed, so a window that only
+/// gains or loses cells keeps the cell. `None` when either reports no pixels.
 pub fn scaled_cell(queried: Cell, then: &Window, now: &Window) -> Option<Cell> {
     let axis = |cell: u16, px_then: u16, cells_then: u16, px_now: u16, cells_now: u16| {
-        let num = u64::from(cell) * u64::from(px_now) * u64::from(cells_then);
-        let den = u64::from(px_then) * u64::from(cells_now);
-        (den > 0 && num > 0)
-            .then(|| ((num * 2 + den) / (den * 2)).clamp(1, u64::from(u16::MAX)) as u16)
+        if px_then == 0 || px_now == 0 || cells_now == 0 {
+            return None;
+        }
+        let pad = i64::from(px_then) - i64::from(cells_then) * i64::from(cell);
+        let (inner, cells) = (i64::from(px_now) - pad, i64::from(cells_now));
+        Some(((inner * 2 + cells) / (cells * 2)).clamp(1, i64::from(u16::MAX)) as u16)
     };
     Some((
         axis(queried.0, then.width, then.columns, now.width, now.columns)?,
@@ -789,6 +791,11 @@ impl Pictures {
         }
     }
 
+    /// Whether a window size can move the cell: not for half-blocks.
+    pub fn follows_cell(&self) -> bool {
+        self.queried.is_some()
+    }
+
     /// Whether the cell changed with the window: the first call after
     /// [`Pictures::pick`] is the window the cell was queried in, and each later
     /// one rebuilds the pictures on screen when the cell it scales to differs.
@@ -865,7 +872,8 @@ impl Pictures {
         while let Ok((key, cell, built)) = self.done.try_recv() {
             self.pending.remove(&key);
             // Built at a cell the window has since left: asked for again.
-            if cell.is_some() && cell != self.cell {
+            let at = cell.or(self.queried);
+            if at.is_some() && at != self.cell {
                 self.retired
                     .extend(built.iter().flat_map(|built| built.kitty.iter()));
                 continue;
@@ -1715,7 +1723,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scaled_cell_ratio() {
+    fn scaled_cell_padding() {
         let window = |columns, rows, width, height| Window {
             rows,
             columns,
@@ -1728,10 +1736,19 @@ mod tests {
             scaled_cell((10, 20), &then, &window(100, 30, 1500, 900)),
             Some((15, 30))
         );
-        // A queried cell of 9 by 19 in a window whose own count says 10 by 20.
+        // A 9 by 19 cell with 100 by 30 pixels of padding, zoomed to 18 by 38.
         assert_eq!(
-            scaled_cell((9, 19), &then, &window(100, 30, 2000, 1200)),
+            scaled_cell((9, 19), &then, &window(100, 30, 1900, 1170)),
             Some((18, 38))
+        );
+        // The same cell and padding, in a pane cut to 20 columns: no change.
+        assert_eq!(
+            scaled_cell(
+                (9, 20),
+                &window(100, 30, 920, 600),
+                &window(20, 30, 200, 600)
+            ),
+            Some((9, 20))
         );
         assert_eq!(
             scaled_cell((10, 20), &then, &window(100, 30, 1049, 600)),
@@ -1743,7 +1760,7 @@ mod tests {
             Some((11, 20))
         );
         assert_eq!(
-            scaled_cell((1, 1), &then, &window(100, 30, 1, 1)),
+            scaled_cell((10, 20), &then, &window(100, 30, 1, 1)),
             Some((1, 1))
         );
         assert_eq!(scaled_cell((10, 20), &then, &window(100, 30, 0, 0)), None);

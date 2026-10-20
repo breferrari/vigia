@@ -1183,7 +1183,9 @@ impl Drop for Shell {
 impl Shell {
     /// Tell the pictures the window's size now, which the cell follows.
     fn follow_window(&mut self) {
-        if let Ok(window) = ratatui::crossterm::terminal::window_size() {
+        if self.pictures.follows_cell()
+            && let Ok(window) = ratatui::crossterm::terminal::window_size()
+        {
             self.pictures.window_sized(window);
         }
     }
@@ -1392,7 +1394,7 @@ impl Shell {
                 self.app.warn(format!("redraw: {e}"));
             }
         }
-        if action == Action::Redraw {
+        if matches!(action, Action::Redraw | Action::Refresh) {
             self.follow_window();
         }
         if !matches!(action, Action::Redraw | Action::Refresh) {
@@ -2605,7 +2607,7 @@ mod tests {
         for route in [
             "    shell.pictures.pick(picker);\n",
             "    shell.follow_window();\n",
-            "if action == Action::Redraw {\n            self.follow_window();",
+            "if matches!(action, Action::Redraw | Action::Refresh) {\n            self.follow_window();",
             "self.pictures.window_sized(window);",
         ] {
             assert!(
