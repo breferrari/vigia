@@ -2603,7 +2603,8 @@ mod tests {
         let source = include_str!("lib.rs");
         let shipped = source.split("#[cfg(test)]").next().expect("split");
         for route in [
-            "shell.pictures.pick(picker);\n    // The window the cell was measured in, which a later resize is scaled from.\n    shell.follow_window();",
+            "    shell.pictures.pick(picker);\n",
+            "    shell.follow_window();\n",
             "if action == Action::Redraw {\n            self.follow_window();",
             "self.pictures.window_sized(window);",
         ] {

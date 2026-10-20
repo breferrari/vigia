@@ -503,11 +503,11 @@ pub fn scaled_cell(queried: Cell, then: &Window, now: &Window) -> Option<Cell> {
     ))
 }
 
-/// `base` at `cell`. `from_fontsize` is deprecated in `ratatui-image`
-/// `=12.0.0-rc.3` and has no replacement that takes a size; it drops the
-/// queried capabilities and background, and vigia reads neither: Kitty is
-/// built with compression and shared memory off, and no background is set.
+/// `base` at `cell`.
 pub fn picker_at(base: &Picker, cell: Cell) -> Picker {
+    // Deprecated in `ratatui-image` `=12.0.0-rc.3`, with no other way to a
+    // size. It drops the queried capabilities and background, and vigia reads
+    // neither: Kitty is built with compression and shared memory off.
     #[allow(deprecated)]
     let mut picker = Picker::from_fontsize(cell.into());
     picker.set_protocol_type(base.protocol_type());
@@ -536,7 +536,7 @@ pub struct Pictures {
     /// The cell the query found; `None` for half-blocks, whose grid is no cell's.
     queried: Option<Cell>,
     /// The window the cell was queried in, once told.
-    then: Option<Window>,
+    queried_in: Option<Window>,
     /// How many images this cache's worker has decoded.
     decoded: Arc<AtomicU64>,
     /// Sizes the worker found since [`Pictures::found_sizes`] last took them.
@@ -701,7 +701,7 @@ impl Pictures {
             picker: Some(picked),
             cell: None,
             queried: None,
-            then: None,
+            queried_in: None,
             decoded,
             found: Vec::new(),
             asked: HashSet::new(),
@@ -789,17 +789,20 @@ impl Pictures {
         }
     }
 
-    /// Follow the window to `window`: the first call after [`Pictures::pick`]
-    /// is the window the cell was queried in, and each later one rebuilds the
-    /// pictures on screen when the cell it scales to differs. Always scaled from
-    /// that first window, so a size gone and come back is the queried one.
-    /// Whether the cell changed.
+    /// Whether the cell changed with the window: the first call after
+    /// [`Pictures::pick`] is the window the cell was queried in, and each later
+    /// one rebuilds the pictures on screen when the cell it scales to differs.
+    /// Always scaled from that first window, so a size gone and come back is the
+    /// queried one.
     pub fn window_sized(&mut self, window: Window) -> bool {
         let Some(queried) = self.queried else {
             return false;
         };
-        let Some(then) = &self.then else {
-            self.then = Some(window);
+        let Some(then) = &self.queried_in else {
+            // A window with no pixels is no baseline; the first that has them is.
+            if window.width > 0 && window.height > 0 {
+                self.queried_in = Some(window);
+            }
             return false;
         };
         let Some(cell) = scaled_cell(queried, then, &window) else {

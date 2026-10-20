@@ -1707,3 +1707,25 @@ fn stale_build_dropped() {
         );
     }
 }
+
+#[test]
+fn unsized_baseline_waits() {
+    // A window with no pixels at the query is no baseline: the first that
+    // reports them is, and the cell follows from there.
+    let (scratch, mut pane) = protocol_pane("pictures-cell-unsized", ProtocolType::Sixel);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(!pane.pictures.window_sized(window(100, 30, 0, 0)));
+    pane.settled(&mut frame);
+    assert!(!pane.pictures.window_sized(window(100, 30, 1000, 600)));
+    assert_eq!(
+        pane.pictures.kept(),
+        1,
+        "the first sized window rebuilt the picture"
+    );
+    assert!(
+        pane.pictures.window_sized(window(100, 30, 2000, 1200)),
+        "the cell no longer follows the window"
+    );
+}
