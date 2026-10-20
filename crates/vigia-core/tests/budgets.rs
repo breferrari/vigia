@@ -973,10 +973,10 @@ fn a_breach_with_no_cpu_clock_is_treated_as_ours() {
     );
 }
 
-/// Windows' cycle clock reads a busy spin as at least nine tenths of the time
-/// `GetThreadTimes` charges the same spin, and never more than twice its wall
-/// time. A rate calibrated too high reads low against the thread's own clock;
-/// a spin preempted by the rest of the suite does not.
+/// Windows' cycle clock reads busy spins as at least nine tenths, and at most
+/// twice, the time `GetThreadTimes` charged the same spins. A rate calibrated
+/// too high reads low against the thread's own clock; a spin preempted by the
+/// rest of the suite does not.
 #[cfg(windows)]
 #[test]
 fn cycle_clock_direction() {
@@ -984,29 +984,25 @@ fn cycle_clock_direction() {
         support::cycle_rate().is_some(),
         "the cycle rate was not measured"
     );
-    // Long enough that `GetThreadTimes`' step is under 2% of it.
-    let busy = Duration::from_secs(1);
-    let mut read = Vec::new();
-    for _ in 0..5 {
+    // One judgement over summed spins: `GetThreadTimes` charges whole ticks,
+    // so a short or retried comparison would pass on its noise.
+    let (mut wall, mut cpu, mut charged) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
+    for _ in 0..2 {
         let before = support::thread_times().expect("GetThreadTimes failed");
-        let (wall, cpu) = time_cpu(|| support::spin_for(busy));
-        let charged = support::thread_times().expect("GetThreadTimes failed") - before;
-        eprintln!("cycle clock: wall {wall:?}, cycles {cpu:?}, GetThreadTimes {charged:?}");
-        assert!(
-            charged >= COARSE_TICK,
-            "GetThreadTimes charged a busy spin of {wall:?} only {charged:?}"
-        );
-        assert!(
-            cpu <= wall * 2,
-            "a busy spin of {wall:?} read as {cpu:?} of CPU, past twice its wall time"
-        );
-        read.push((wall, cpu, charged));
-        if cpu.as_secs_f64() >= charged.as_secs_f64() * 0.9 {
-            return;
-        }
+        let (one_wall, one_cpu) = time_cpu(|| support::spin_for(Duration::from_secs(1)));
+        charged += support::thread_times().expect("GetThreadTimes failed") - before;
+        wall += one_wall;
+        cpu += one_cpu;
     }
-    panic!(
-        "no busy spin's cycles read as nine tenths of its GetThreadTimes time (wall, cycles, GetThreadTimes): {read:?}"
+    eprintln!("cycle clock: wall {wall:?}, cycles {cpu:?}, GetThreadTimes {charged:?}");
+    assert!(
+        charged >= COARSE_TICK * FLOOR_TICKS,
+        "the spins of {wall:?} were charged only {charged:?}, too few ticks to judge"
+    );
+    let ratio = cpu.as_secs_f64() / charged.as_secs_f64();
+    assert!(
+        (0.9..=2.0).contains(&ratio),
+        "busy spins charged {charged:?} read as {cpu:?} of cycles, outside nine tenths to twice"
     );
 }
 

@@ -136,18 +136,14 @@ fn thread_cycles() -> Option<u64> {
     ok.then_some(cycles)
 }
 
-/// This thread's kernel plus user time from `GetThreadTimes`, in
-/// [`COARSE_TICK`] steps.
+/// This thread's kernel plus user time from `GetThreadTimes`, in clock
+/// interrupt steps ([`COARSE_TICK`] by default).
 #[cfg(windows)]
 pub fn thread_times() -> Option<Duration> {
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
 
-    let zero = FILETIME {
-        dwLowDateTime: 0,
-        dwHighDateTime: 0,
-    };
-    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    let [mut created, mut exited, mut kernel, mut user] = [FILETIME::default(); 4];
     // SAFETY: four live locals of the type the call writes, and a pseudo-handle
     // that needs no close.
     let ok = unsafe {
