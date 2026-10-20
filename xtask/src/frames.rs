@@ -36,7 +36,7 @@ pub const FRAMES: &[Frame] = &[
         size: "80x16",
         rows: &[(0, 16)],
         file: "frame-glance.svg",
-        label: "The vigia pane, labelled down its left side: the header naming the worktree and how many files changed; the list of changed files, each with its status letter, path, pulse, heat strip, sparkline and line counts; a rule; the diff of the file being read, with its heading, hunk and lines; another rule; and the status bar with key hints, frame time, memory and position.",
+        label: "The vigia pane, labelled down its left side: the header naming the worktree and how many files changed; the list of changed files with their status letters, paths, sparklines and line counts, the newest marked by a pulse and the recently changed ones by heat strips; a rule; the diff of the file being read, with its heading, hunk and lines; another rule; and the status bar with key hints, frame time, memory and position.",
         labels: &[
             Label {
                 row: 0,
@@ -54,9 +54,9 @@ pub const FRAMES: &[Frame] = &[
                 marker: "─",
             },
             Label {
-                row: 7,
+                row: 6,
                 name: "diff",
-                marker: "@@",
+                marker: "watch.rs",
             },
             Label {
                 row: 14,
@@ -152,18 +152,8 @@ const TITLE: usize = 46;
 
 /// The picture for `frame`, drawn from the snapshot's text.
 pub fn draw(frame: &Frame, snapshot: &str) -> String {
-    let every = snapshot_rows(snapshot);
-    let rows: Vec<&str> = frame
-        .rows
-        .iter()
-        .flat_map(|&(start, end)| start..end)
-        .map(|i| {
-            every.get(i).map_or_else(
-                || panic!("{} has no row {} for {}", frame.snapshot, i + 1, frame.file),
-                String::as_str,
-            )
-        })
-        .collect();
+    let drawn = drawn_rows(frame, snapshot);
+    let rows: Vec<&str> = drawn.iter().map(String::as_str).collect();
     assert!(
         rows.len() >= 2,
         "{} needs a header and a status row",
@@ -218,8 +208,15 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
         out,
         "  <defs>\n    <clipPath id=\"win\"><rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{h}\" rx=\"12\"/></clipPath>\n    <style>\n      .m {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, \"DejaVu Sans Mono\", monospace; white-space: pre; }}\n      .fg {{ fill: #e6edf3 }} .dim {{ fill: #7d8590 }} .faint {{ fill: #6e7681 }}\n      .grn {{ fill: #3fb950 }} .red {{ fill: #f85149 }} .cyn {{ fill: #39c5cf }}\n      .con {{ fill: #e3b341 }}\n    </style>\n  </defs>"
     );
-    // The window shifts right by the labels' margin.
-    let _ = writeln!(out, "  <g transform=\"translate({margin},0)\">");
+    if margin > 0 {
+        // The labels sit on a dark card of their own, so they read on a light page.
+        let _ = writeln!(
+            out,
+            "  <rect x=\"0.5\" y=\"0.5\" width=\"{}\" height=\"{}\" rx=\"16\" fill=\"#010409\" stroke=\"#30363d\"/>\n  <g transform=\"translate({margin},0)\">",
+            width - 1,
+            height - 1
+        );
+    }
     let _ = writeln!(
         out,
         "  <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{h}\" rx=\"12\" fill=\"#0d1117\"/>\n  <g clip-path=\"url(#win)\">\n    <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{TITLE}\" fill=\"#161b22\"/>\n    <circle cx=\"34\" cy=\"31\" r=\"6\" fill=\"#f85149\"/>\n    <circle cx=\"54\" cy=\"31\" r=\"6\" fill=\"#e3b341\"/>\n    <circle cx=\"74\" cy=\"31\" r=\"6\" fill=\"#3fb950\"/>\n    <rect x=\"8\" y=\"{status}\" width=\"{w}\" height=\"30\" fill=\"#161b22\"/>\n    <line x1=\"8\" y1=\"{status}\" x2=\"{}\" y2=\"{status}\" stroke=\"#21262d\" stroke-width=\"1\"/>",
@@ -264,15 +261,26 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
     }
     let _ = writeln!(
         out,
-        "  </g>\n  <rect x=\"8.5\" y=\"8.5\" width=\"{}\" height=\"{}\" rx=\"12\" fill=\"none\" stroke=\"#30363d\"/>\n  </g>",
+        "  </g>\n  <rect x=\"8.5\" y=\"8.5\" width=\"{}\" height=\"{}\" rx=\"12\" fill=\"none\" stroke=\"#30363d\"/>",
         w - 1,
         h - 1
     );
+    if margin > 0 {
+        out.push_str("  </g>\n");
+    }
     for label in frame.labels {
-        let (y, name) = (ys[label.row], label.name);
+        let y = *ys.get(label.row).unwrap_or_else(|| {
+            panic!(
+                "{}'s {} label points past its {} rows",
+                frame.file,
+                label.name,
+                ys.len()
+            )
+        });
+        let name = label.name;
         let _ = writeln!(
             out,
-            "  <text class=\"m dim\" x=\"{}\" y=\"{y}\" font-size=\"12.5\" text-anchor=\"end\">{}</text>\n  <line x1=\"{}\" y1=\"{mid}\" x2=\"{:.1}\" y2=\"{mid}\" stroke=\"#30363d\" stroke-width=\"1\"/>",
+            "  <text class=\"m fg\" x=\"{}\" y=\"{y}\" font-size=\"12.5\" text-anchor=\"end\">{}</text>\n  <line x1=\"{}\" y1=\"{mid}\" x2=\"{:.1}\" y2=\"{mid}\" stroke=\"#6e7681\" stroke-width=\"1\"/>",
             margin - 16,
             escape(name),
             margin - 10,
@@ -282,6 +290,21 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
     }
     out.push_str("</svg>\n");
     out
+}
+
+/// The snapshot's rows that `frame` draws, in order.
+pub fn drawn_rows(frame: &Frame, snapshot: &str) -> Vec<String> {
+    let every = snapshot_rows(snapshot);
+    frame
+        .rows
+        .iter()
+        .flat_map(|&(start, end)| start..end)
+        .map(|i| {
+            every.get(i).cloned().unwrap_or_else(|| {
+                panic!("{} has no row {} for {}", frame.snapshot, i + 1, frame.file)
+            })
+        })
+        .collect()
 }
 
 /// The space between the window's edge and the nearest drawn column.

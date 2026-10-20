@@ -10,7 +10,6 @@
       .con { fill: #e3b341 }
     </style>
   </defs>
-  <g transform="translate(0,0)">
   <rect x="8" y="8" width="665" height="612" rx="12" fill="#0d1117"/>
   <g clip-path="url(#win)">
     <rect x="8" y="8" width="665" height="46" fill="#161b22"/>
@@ -49,5 +48,4 @@
     <text class="m row" y="610" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="dim">  q quit · f follow · m config · ? keys                </tspan><tspan x="469.7" class="dim"> 4 notes </tspan><tspan x="542.6" class="dim"> follow </tspan><tspan x="607.4" class="cyn">▶</tspan><tspan x="615.5" class="dim">  1/1</tspan></text>
   </g>
   <rect x="8.5" y="8.5" width="664" height="611" rx="12" fill="none" stroke="#30363d"/>
-  </g>
 </svg>

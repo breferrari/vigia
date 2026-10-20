@@ -7558,6 +7558,9 @@ fn glance_frame() {
             _ => None,
         })
         .collect();
+    // The newest file's counts are the hunk drawn below it.
+    let mut entries = entries;
+    entries[0].churn = Some((3, 1));
     let mut view = one_file();
     view.list_span = entries.len();
     view.list = entries.iter().cloned().map(Into::into).collect();

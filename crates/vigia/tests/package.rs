@@ -4266,13 +4266,7 @@ fn frame_svgs_match() {
         // A label points at the row whose text it names, so a renderer change
         // that moves a row cannot leave a label on the wrong one.
         if !frame.labels.is_empty() {
-            let rows = frames::snapshot_rows(&snapshot);
-            let drawn: Vec<&String> = frame
-                .rows
-                .iter()
-                .flat_map(|&(start, end)| start..end)
-                .map(|i| &rows[i])
-                .collect();
+            let drawn = frames::drawn_rows(frame, &snapshot);
             for label in frame.labels {
                 assert!(
                     drawn
@@ -4322,6 +4316,11 @@ fn frame_svgs_match() {
         repo_root().join("README.md"),
         "https://raw.githubusercontent.com/breferrari/vigia/main/assets/",
     ));
+    let readme = std::fs::read_to_string(repo_root().join("README.md")).expect("read README.md");
+    assert!(
+        !readme.contains("(assets/frame-") && !readme.contains("(../assets/frame-"),
+        "README.md links a frame by a relative path, which crates.io cannot load"
+    );
     for (path, prefix) in pages {
         let page = std::fs::read_to_string(&path).unwrap_or_default();
         for frame in frames::FRAMES {
