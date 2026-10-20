@@ -3255,8 +3255,13 @@ fn ready_run_survives() {
         "main's runs are grouped per commit, so a burst of merges runs every one \
          to the end and holds runners from the pull requests: {group}"
     );
+    let concurrency = ci
+        .split_once("\nconcurrency:\n")
+        .map(|(_, rest)| rest.split("\n\n").next().unwrap_or_default())
+        .expect("ci.yml has a concurrency block");
     assert!(
-        ci.lines()
+        concurrency
+            .lines()
             .any(|line| line.trim() == "cancel-in-progress: true"),
         "a superseded run is left to finish"
     );
