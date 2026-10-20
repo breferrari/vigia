@@ -1467,7 +1467,7 @@ fn rename_frame_many_small() {
     );
 }
 
-/// Code lines in the fenced block, the size #264 measured.
+/// Code lines in the fenced block.
 const FENCE_LINES: usize = 24;
 /// Frames sampled for the fence gate.
 const FENCE_FRAMES: usize = 60;
