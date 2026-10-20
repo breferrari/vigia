@@ -4243,3 +4243,79 @@ fn release_attested() {
         );
     }
 }
+
+/// Each frame picture under `assets/` draws exactly the rows of the snapshot
+/// its comment names, so a renderer change cannot leave a stale picture.
+#[test]
+fn frame_svgs_match() {
+    let assets = repo_root().join("assets");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&assets).expect("read assets/").flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !(name.starts_with("frame-") && name.ends_with(".svg")) {
+            continue;
+        }
+        let svg = std::fs::read_to_string(entry.path()).expect("read the picture");
+        let (_, source) = svg
+            .split_once("<!-- source: ")
+            .unwrap_or_else(|| panic!("{name} names no snapshot"));
+        let (snap, rest) = source.split_once(" rows=").expect("a row list");
+        let (spans, _) = rest.split_once(',').map_or((rest, ""), |(a, _)| (a, ""));
+        let spans = rest.split_once(", rendered").map_or(spans, |(a, _)| a);
+        let snapshot = std::fs::read_to_string(repo_root().join(snap))
+            .unwrap_or_else(|e| panic!("{name} names {snap}, which is unreadable: {e}"));
+        let body = snapshot.splitn(3, "---\n").nth(2).expect("a snapshot body");
+        let rows: Vec<&str> = body
+            .trim_end_matches('\n')
+            .lines()
+            .map(|row| {
+                row.strip_prefix('"')
+                    .and_then(|r| r.strip_suffix('"'))
+                    .unwrap_or(row)
+            })
+            .collect();
+        let mut picked = Vec::new();
+        for span in spans.split(',') {
+            let (from, to) = span.split_once('-').unwrap_or((span, span));
+            let (from, to): (usize, usize) = (from.parse().unwrap(), to.parse().unwrap());
+            picked.extend((from..=to).map(|row| rows[row - 1]));
+        }
+        let drawn: Vec<String> = svg
+            .split("<text class=\"m row\"")
+            .skip(1)
+            .map(|text| unescaped(&untagged(text.split("</text>").next().unwrap_or_default())))
+            .collect();
+        let squeeze = |row: &str| row.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert_eq!(
+            drawn.iter().map(|row| squeeze(row)).collect::<Vec<_>>(),
+            picked.iter().map(|row| squeeze(row)).collect::<Vec<_>>(),
+            "{name} no longer draws the rows of {snap}"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 7, "found {checked} frame pictures under assets/");
+}
+
+/// The text of an element, its tags dropped.
+fn untagged(element: &str) -> String {
+    let mut out = String::new();
+    let mut inside = true;
+    for ch in element.chars() {
+        match ch {
+            '>' if inside => inside = false,
+            '<' => inside = true,
+            _ if !inside => out.push(ch),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The five entities the picture writer escapes, put back.
+fn unescaped(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&amp;", "&")
+}

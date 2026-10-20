@@ -22,21 +22,7 @@ Press `s` and the diff shows **only the file the caret is on**. Scrolling stops 
 
 Press `a` and the pane adds **what is staged**, as a second run beside the first. Two labelled lists share the top panel, unstaged above staged, and every staged row draws its status letter in green so the two never blur together. The mark costs no width, so asking for the staged run never shortens a filename. It exists because `vigia` shows the working tree against the index, so an agent that stages its own work would otherwise leave the pane empty, which reads exactly like a clean tree. A file staged and then edited again appears in both runs, once for each diff, because they are two different changes. `a` again puts it back, and even with it off a blank pane says where the work went: `no unstaged changes · 3 staged`.
 
-<!-- From crates/vigia/tests/snapshots/render__the_staged_run_at_eighty_columns.snap (80x12), trimmed of nothing. -->
-```
-   header  │  vigia · current ▾ · 4 changed · 2 staged                            watching
-           │
- unstaged  │  ──  unstaged  2 ────────────────────────────────────────────────────────────
-           │▸ M src/render.rs                        ■■■■■■■■■■■■ ____________    +4    -1
-           │  M src/frame.rs                         ■■■■■■■■■■■■ ____________   +11    -3
-   staged  │  ──  staged  2 ──────────────────────────────────────────────────────────────
-           │  M src/render.rs                        ■■■■■■■■■■■■ ____________   +42    -7
-     rule  │────────────────────────────────────────────────────────────────────────────────
-     diff  │  M src/render.rs                        ■■■■■■■■■■■■ ____________    +4    -1
-           │  M tests/staged.rs                      ■■■■■■■■■■■■ ____________   +64    -0
-     rule  │────────────────────────────────────────────────────────────────────────────────
-   status  │  q quit · f follow · m config · ? keys                                    1/4
-```
+![The vigia pane with staged changes shown: an unstaged run and a staged run, each under its own labelled rule, one file appearing in both.](../assets/frame-staged.svg)
 
 `src/render.rs` is in both runs: once for what is staged, once for the edit made after.
 
@@ -58,32 +44,11 @@ They exist separately because a glance can only ask one question. You read the o
 
 A renamed file names both paths, new first, as long as the row has room for both:
 
-<!-- From crates/vigia/tests/snapshots/render__rename_frame.snap (100x14), rows 1 to 9. -->
-```
-   header  │  vigia · current ▾ · 1 changed                                                           watching
-           │
-     list  │▸ R crates/vigia/src/shell.rs ← crates/vigia/src/main.rs                  ____________    +3    -1
-           │────────────────────────────────────────────────────────────────────────────────────────────────────
-     diff  │  R crates/vigia/src/shell.rs ← crates/vigia/src/main.rs                  ____________    +3    -1
-           │  @@ -258,7 +258,9 @@
-           │  258       pub fn advance(&mut self) {
-           │  259           let mut files = Vec::new();
-           │  260 -         for change in self.changes() {
-```
+![The vigia pane listing a renamed and edited file as its new path, an arrow and its old path, above its diff.](../assets/frame-rename.svg)
 
 A file with no line diff says why instead of drawing nothing. Here a binary file, a merge conflict and a rename with no edit:
 
-<!-- From crates/vigia/tests/snapshots/render__a_file_with_no_line_diff_says_why.snap (60x8), trimmed of nothing. -->
-```
-   header  │ vigia · current ▾ · 3 changed                     watching
-     list  │ M …s/banner.jpg                  ____________
-           │   binary
-           │ U src/merge.rs                   ____________
-           │   unresolved conflict
-           │ R …src/shell.rs                  ____________    +0    -0
-     rule  │────────────────────────────────────────────────────────────
-   status  │ q quit · f follow · m config · ? keys                  1/3
-```
+![The vigia pane listing three files with no line diff, each saying why: a binary file, an unresolved conflict, and a rename with no edit.](../assets/frame-no-diff.svg)
 
 <details>
 <summary><b>📝 The note mark is <i>whose turn it is</i></b></summary>

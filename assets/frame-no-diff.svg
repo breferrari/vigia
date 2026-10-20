@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 518 228" width="518" height="228" role="img"
+     aria-label="The vigia pane listing three files with no line diff, each saying why: a binary file, an unresolved conflict, and a rename with no edit.">
+  <!-- source: crates/vigia/tests/snapshots/render__a_file_with_no_line_diff_says_why.snap rows=1-8, rendered at 60x8. Every row's text is the snapshot's; package.rs::frame_svgs_match holds it. -->
+  <defs>
+    <clipPath id="win"><rect x="8" y="8" width="502" height="212" rx="12"/></clipPath>
+    <style>
+      .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; white-space: pre; }
+      .fg { fill: #e6edf3 } .dim { fill: #7d8590 } .faint { fill: #6e7681 }
+      .grn { fill: #3fb950 } .red { fill: #f85149 } .cyn { fill: #39c5cf }
+      .con { fill: #e3b341 }
+    </style>
+  </defs>
+  <rect x="8" y="8" width="502" height="212" rx="12" fill="#0d1117"/>
+  <g clip-path="url(#win)">
+    <rect x="8" y="8" width="502" height="46" fill="#161b22"/>
+    <circle cx="34" cy="31" r="6" fill="#f85149"/>
+    <circle cx="54" cy="31" r="6" fill="#e3b341"/>
+    <circle cx="74" cy="31" r="6" fill="#3fb950"/>
+    <rect x="8" y="190" width="502" height="30" fill="#161b22"/>
+    <line x1="8" y1="190" x2="510" y2="190" stroke="#21262d" stroke-width="1"/>
+    <text class="m row" x="96" y="36" font-size="13.5" xml:space="preserve"><tspan class="fg">vigia · current </tspan><tspan class="cyn">▾</tspan><tspan class="fg"> · 3 changed</tspan> <tspan x="429.1" class="fg">watching</tspan></text>
+    <text class="m row" x="16" y="76" font-size="13.5" xml:space="preserve"><tspan class="fg"> </tspan><tspan class="dim">M</tspan><tspan class="fg"> …s/banner.jpg                  </tspan><tspan class="faint">____________</tspan></text>
+    <text class="m row" x="16" y="96" font-size="13.5" xml:space="preserve"><tspan class="fg">   binary</tspan></text>
+    <text class="m row" x="16" y="116" font-size="13.5" xml:space="preserve"><tspan class="fg"> </tspan><tspan class="dim">U</tspan><tspan class="fg"> src/merge.rs                   </tspan><tspan class="faint">____________</tspan></text>
+    <text class="m row" x="16" y="136" font-size="13.5" xml:space="preserve"><tspan class="fg">   unresolved conflict</tspan></text>
+    <text class="m row" x="16" y="156" font-size="13.5" xml:space="preserve"><tspan class="fg"> </tspan><tspan class="dim">R</tspan><tspan class="fg"> …src/shell.rs                  </tspan><tspan class="faint">____________</tspan><tspan class="fg">    </tspan><tspan class="grn">+0</tspan><tspan class="fg">    </tspan><tspan class="red">-0</tspan></text>
+    <text class="m row" x="16" y="176" font-size="13.5" xml:space="preserve"><tspan class="faint">────────────────────────────────────────────────────────────</tspan></text>
+    <text class="m row" x="16" y="210" font-size="13.5" xml:space="preserve"><tspan class="dim"> q quit · f follow · m config · ? keys                  1/3</tspan></text>
+  </g>
+  <rect x="8.5" y="8.5" width="501" height="211" rx="12" fill="none" stroke="#30363d"/>
+</svg>

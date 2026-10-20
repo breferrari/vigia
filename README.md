@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/banner.jpg" alt="vigia: a watchtower sweeping a beam of light across changed lines of code" width="100%">
+<img src="https://raw.githubusercontent.com/breferrari/vigia/main/assets/banner.jpg" alt="vigia: a watchtower sweeping a beam of light across changed lines of code" width="100%">
 
 ### The terminal pane your **coding agent** works beside.
 
@@ -16,7 +16,7 @@ It shows the working-tree diff live, as the agent writes it. Click a line, type 
 
 </div>
 
-<img src="assets/preview.svg" alt="The vigia interface: a pinned list of changed files, each row carrying a caret, a status letter, a path, a note mark, a change sparkline, a heat strip and line counts, above a syntax highlighted diff whose own file heading repeats the same row, with a note box open under a changed line holding a half-typed sentence for the agent, a scrollbar down its side and a status bar showing key hints, frame time, resident memory and the follow state." width="100%">
+<img src="https://raw.githubusercontent.com/breferrari/vigia/main/assets/preview.svg" alt="The vigia interface: a pinned list of changed files, each row carrying a caret, a status letter, a path, a note mark, a change sparkline, a heat strip and line counts, above a syntax highlighted diff whose own file heading repeats the same row, with a note box open under a changed line holding a half-typed sentence for the agent, a scrollbar down its side and a status bar showing key hints, frame time, resident memory and the follow state." width="100%">
 
 ---
 

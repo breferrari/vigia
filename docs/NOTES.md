@@ -9,22 +9,7 @@ Point at a line number in the diff and it becomes a pencil `✎`. Click it, type
 
 While you type, the box sits under the line it is about, and every key belongs to it:
 
-<!-- From crates/vigia/tests/snapshots/notes__note_box_frame.snap (80x24), rows 5 to 17. -->
-```
-  heading  │  M src/watch.rs                         ■■■■■■■■■■■■ ____________    +1    -1
-           │  @@ -2,7 +2,7 @@
-           │  2   line 2
-           │  3   line 3
-           │  4   line 4
-           │  5 - line 5
- the line  │  5 +     margin.checked_mul(2).unwrap_or(margin)
-  the box  │      ┌ note · src/watch.rs:5 ───────────────────────────────────────────────┐
-           │      │ should this reset on every event, or just the fir                    │
-           │      └ Enter sends · Esc cancels ───────────────────────────────────────────┘
-           │  6   line 6
-           │  7   line 7
-           │  8   line 8
-```
+![The vigia pane with the note box open under a changed line, titled with the file and line it is about, holding a half-typed sentence, with Enter sends and Esc cancels along its bottom edge.](../assets/frame-note-box.svg)
 
 It goes to the agent in the other pane carrying the file, the line and your words. The answer comes back on a row under yours.
 
@@ -38,32 +23,7 @@ Every note draws under its line with one word for where it stands.
 
 Four notes on one file, each in a different state:
 
-<!-- From crates/vigia/tests/snapshots/notes__note_states_frame.snap (80x40), rows 5 to 27. -->
-```
-  heading  │  M src/watch.rs                     ↳   ■■■■■■■■■■■■ ____________    +1    -1
-     gone  │      ┌──────────────────────────────────────────────────────────────────────┐
-           │      │ check the end                                                        │
-           │      └───────────────────────────────────────────────────────────── gone ───┘
-           │  @@ -2,7 +2,7 @@
-           │  2   line 2
-           │  3   line 3
-     seen  │      ┌──────────────────────────────────────────────────────────────────────┐
-           │      │ why keep this line?                                                  │
-           │      └───────────────────────────────────────────────────────────── seen ───┘
-    reply  │      ↳ it seeds the margin; kept
-           │  4   line 4
-           │  5 - line 5
-           │  5 +     margin.checked_mul(2).unwrap_or(margin)
-     open  │      ┌──────────────────────────────────────────────────────────────────────┐
-           │      │ use saturating_mul here                                              │
-           │      └───────────────────────────────────────────────────────────── open ───┘
-           │  6   line 6
-           │  7   line 7
-  changed  │      ┌──────────────────────────────────────────────────────────────────────┐
-           │      │ rename this                                                          │
-           │      └────────────────────────────────────────────────────────── changed ───┘
-           │  8   line 8
-```
+![The vigia pane with one changed file carrying four notes: one whose line has left the diff, drawn under the file&#x27;s heading and marked gone; one the agent has read and answered, marked seen with its reply under it; one on the changed line, marked open; and one whose line was edited under it, marked changed.](../assets/frame-note-states.svg)
 
 | | |
 |---|---|
