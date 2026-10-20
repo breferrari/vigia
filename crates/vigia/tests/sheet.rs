@@ -3996,3 +3996,19 @@ fn ctrl_l_on_sheet_row() {
         );
     }
 }
+
+/// The sheet's first page on a tall pane, for `docs/KEYS.md`.
+#[test]
+fn sheet_frame() {
+    let scratch = Scratch::large_diff("sheet-frame", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let at = Rect::new(0, 0, 100, 34);
+    toggle_at(&mut app, &mut frame, at);
+    let (buf, _) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    insta::assert_snapshot!(text_of(&buf, at));
+}

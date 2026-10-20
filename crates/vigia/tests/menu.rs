@@ -1151,3 +1151,14 @@ fn refresh_over_overlays() {
         }
     });
 }
+
+/// The menu as a reader first sees it, for `docs/CONFIG.md`.
+#[test]
+fn menu_frame() {
+    let mut pane = Pane::open("menu-frame");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let (buf, _) = paint(app, frame, highlighter, history, area());
+        insta::assert_snapshot!(text_of(&buf, area()));
+    });
+}

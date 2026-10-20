@@ -1,0 +1,38 @@
+---
+source: crates/vigia/tests/sheet.rs
+expression: "text_of(&buf, at)"
+---
+  fixture · main · current ▾ · 3 changed                                                +120  -120  
+                                                                                                    
+▸ M src/mod_0.rs                                             ■■■■■■■■■■■■ ____________   +40   -40  
+  M src/mod_1.rs                                             ■■■■■■■■■■■■ ____________   +40   -40  
+  M src/mod_2.rs                                             ■■■■■■■■■■■■ ____________   +40   -40  
+──────────────┌─ gestures ─────────────────────────────────────────────────────── ✕ ┐───────────────
+  M src/mod_0.│ working tree's diff, live · it follows on its own                   │_   +40   -40 ▲
+  @@ -1,40 +1,│ keyboard ─────────────────────── mouse ──────────────────────────── │              █
+   1 - fn befo│ j  k  ↓  ↑   scroll a row        wheel          what you point at   │              █
+   2 - fn befo│ Space  PgDn  page                drag a bar     move that region    │              │
+   3 - fn befo│ d  u         half a page         click a track  send it there       │              │
+   4 - fn befo│ g  /  G      first / last file   click  ▲ ▼     a row, held repeats │              │
+   5 - fn befo│ n  /  p      next / prev file    click a file   jump the diff to it │              │
+   6 - fn befo│ 1  to  6     jump to a list row  click where    where it stands     │              │
+   7 - fn befo│ J  K         scroll the list     drag the diff  copy rows           │              │
+   8 - fn befo│ f            follow the newest   click number   open a note         │              │
+   9 - fn befo│ r            the left rail       click a note   take it back        │              │
+  10 - fn befo│ s            one file only       click  ✕       close the sheet     │              │
+  11 - fn befo│ o            the list alone      just point     it marks itself     │              │
+  12 - fn befo│ a            staged changes      Shift+drag     select text         │              │
+  13 - fn befo│ b  B  O      branch point                                           │              │
+  14 - fn befo│ w            wrap long lines                                        │              │
+  15 - fn befo│ c            the note rows                                          │              │
+  16 - fn befo│ Enter  Esc   send the note                                          │              │
+  17 - fn befo│ m  Esc       config menu                                            │              │
+  18 - fn befo│ ?  Esc       this sheet                                             │              │
+  19 - fn befo│ q            quit                                                   │              │
+  20 - fn befo└─────────────────────────────────────────────────────────────────────┘              │
+  21 - fn before_21() { let value = 147; }                                                         │
+  22 - fn before_22() { let value = 154; }                                                         │
+  23 - fn before_23() { let value = 161; }                                                         │
+  24 - fn before_24() { let value = 168; }                                                         ▼
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  q quit · f follow · m config · ? keys                                              follow ▶  1/3
