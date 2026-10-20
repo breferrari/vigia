@@ -478,7 +478,8 @@ pub fn zlib_zeros_lenient(length: u64) -> Vec<u8> {
 }
 
 /// `length` zeros, rounded up to whole runs, as LZW with the early change:
-/// each code after the first repeats the last one and one zero more.
+/// each code after the first repeats the last one and one zero more, until
+/// the table is full, and then its longest entry repeats.
 pub fn lzw_zeros(length: u64) -> Vec<u8> {
     let (mut out, mut held, mut count) = (Vec::new(), 0u64, 0u32);
     let mut push = |code: u64, bits: u32| {
@@ -495,20 +496,21 @@ pub fn lzw_zeros(length: u64) -> Vec<u8> {
         1024..2048 => 11,
         _ => 12,
     };
-    let mut written = 0;
-    while written < length {
-        push(256, 9);
-        push(0, 9);
-        written += 1;
-        let mut size = 258;
-        while size < 4096 && written < length {
-            push(size, width(size));
-            written += size - 256;
-            size += 1;
-        }
-        push(256, width(size));
+    push(256, 9);
+    push(0, 9);
+    let mut written = 1;
+    let mut size = 258;
+    while size < 4096 && written < length {
+        push(size, width(size));
+        written += size - 256;
+        size += 1;
     }
-    push(257, 9);
+    // The table is full: code 4095 holds 3839 zeros.
+    while written < length {
+        push(4095, 12);
+        written += 3839;
+    }
+    push(257, 12);
     // Enough padding to flush what is left of the end code.
     push(0, 7);
     out
