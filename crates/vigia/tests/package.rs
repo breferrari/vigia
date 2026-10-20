@@ -3343,10 +3343,10 @@ fn ready_run_survives() {
         .map(|(_, rest)| rest.split("\n\n").next().unwrap_or_default())
         .expect("ci.yml has a concurrency block");
     assert!(
-        concurrency
-            .lines()
-            .any(|line| line.trim() == "cancel-in-progress: true"),
-        "a superseded run is left to finish:\n{concurrency}"
+        concurrency.lines().any(|line| line.trim()
+            == "cancel-in-progress: ${{ github.event_name == 'pull_request' }}"),
+        "a superseded pull request run is left to finish, or a running main run is \
+         cancelled and marks its commit red:\n{concurrency}"
     );
     let complete = ci
         .split_once("\n  ci-complete:\n")

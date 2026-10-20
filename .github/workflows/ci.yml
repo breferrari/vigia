@@ -22,16 +22,17 @@ concurrency:
   # `ready_for_review` event after it land in different groups, so the ready
   # run, the only one whose legs run, is never cancelled by a skipped one.
   #
-  # Only the newest run on a ref is kept, main included. Every pull request's
-  # head is tested before it merges, so a cancelled run on main loses only the
-  # check of that exact squash. The cost: a conflict between two merges that
-  # each passed alone is first seen in the newest main run, and finding which
-  # merge caused it starts from the pull requests' own runs.
+  # A pull request keeps only its newest run. On main the running one
+  # finishes and one more waits: a newer push replaces the waiting run before
+  # it starts. A run replaced while waiting leaves no check on its commit, and
+  # one cancelled while running leaves a red cross with nothing failed. Every
+  # pull request's head is tested before it merges, so a skipped run on main
+  # loses only the check of that exact squash.
   #
   # The event is in the key so a manual dispatch on main is not cancelled by
   # the next push, nor cancels it.
   group: ci-${{ github.event_name }}-${{ github.ref }}-${{ github.event.pull_request.draft }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
 
