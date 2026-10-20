@@ -205,18 +205,21 @@ insta = "1.48"
 # the reference machine, discovered in CI instead of here. A trim with no
 # benefit is not worth paying for with a target you cannot test.
 libc = "0.2"
-# Three features, each the smallest set that answers, and they no longer answer
+# Four features, each the smallest set that answers, and they no longer answer
 # for one section alone. ProcessStatus is GetProcessMemoryInfo and
 # PROCESS_MEMORY_COUNTERS; Threading is GetCurrentProcess, whose pseudo-handle
 # could be written as `-1` instead but would then be a magic number nobody could
 # check against a header. Console is SetConsoleCtrlHandler and the CTRL_*
 # constants, which is the Windows half of the externally delivered signal in
 # SPEC.md section 6, and it adds no crate because a feature never does.
+# WindowsProgramming is QueryThreadCycleTime, which only the budgets' thread
+# clock reads (SPEC.md section 7).
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_Console",
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
+    "Win32_System_WindowsProgramming",
 ] }
 # The Unix half of that same decision, SPEC.md section 6. Windows has no
 # signals, so the two halves are two crates rather than one behind a cfg.
