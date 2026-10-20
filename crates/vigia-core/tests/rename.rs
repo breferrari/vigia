@@ -309,8 +309,13 @@ fn pair_scores_start_again() {
 fn binary_rename_charged_once() {
     // The old side is read whole to learn it is binary, and that read serves
     // the score too: the frame pays for each side once.
-    let old = noise(70, 300_000);
-    let new = tail_changed(&old, 0.1);
+    // Binary only before, so the old side is the one read to learn it.
+    let mut old: Vec<u8> = noise(70, 300_000)
+        .into_iter()
+        .map(|byte| byte.max(1))
+        .collect();
+    old[0] = 0;
+    let new = old[1..].to_vec();
     let total = (old.len() + new.len()) as u64;
     let scratch = moved("rename-once", &[("a.bin", old)], &[("b.bin", new)]);
     let worktree = scratch.worktree();
