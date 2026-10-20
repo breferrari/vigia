@@ -488,9 +488,7 @@ pub type Cell = (u16, u16);
 pub type Window = ratatui::crossterm::terminal::WindowSize;
 
 /// The cell in `now`, from the cell `queried` in `then`, kept at `current`
-/// unless it moved further than the windows' leftover pixels can explain:
-/// each window may hold up to a cell beyond its whole cells, so a pane that
-/// only gains or loses cells keeps its cell. `None` when either reports no
+/// unless it moved further than the windows' leftover pixels can explain. `None` when either reports no
 /// pixels.
 pub fn scaled_cell(queried: Cell, current: Cell, then: &Window, now: &Window) -> Option<Cell> {
     let axis = |cell: u16, at: u16, px_then: u16, cells_then: u16, px_now: u16, cells_now: u16| {
@@ -532,7 +530,8 @@ pub fn scaled_cell(queried: Cell, current: Cell, then: &Window, now: &Window) ->
 pub fn picker_at(base: &Picker, cell: Cell) -> Picker {
     // Deprecated in `ratatui-image` `=12.0.0-rc.3`, with no other way to a
     // size. It drops the queried capabilities and background, and vigia reads
-    // neither: Kitty is built with compression and shared memory off.
+    // neither: Kitty is built with compression and shared memory off, Sixel
+    // and iTerm2 read only the font size and tmux, and no background is set.
     #[allow(deprecated)]
     let mut picker = Picker::from_fontsize(cell.into());
     picker.set_protocol_type(base.protocol_type());

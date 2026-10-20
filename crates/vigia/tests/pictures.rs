@@ -1629,8 +1629,7 @@ fn resize_round_trip() {
     pane.pictures.window_sized(window(100, 30, 1000, 600));
     let view = pane.settled(&mut frame);
     let queried = sixel_sizes(&pane.draw(&view));
-    // A third of the cell rounds to 3 by 7, which scaled back from there
-    // would be 9 by 21.
+    // A chained scale would come back at 9 by 21.
     assert!(pane.pictures.window_sized(window(100, 30, 333, 200)));
     pane.settled(&mut frame);
     assert!(pane.pictures.window_sized(window(100, 30, 1000, 600)));
