@@ -4265,19 +4265,25 @@ fn frame_svgs_match() {
         );
         // A label points at the row whose text it names, so a renderer change
         // that moves a row cannot leave a label on the wrong one.
-        let rows = frames::snapshot_rows(&snapshot);
-        let drawn: Vec<&String> = frame
-            .rows
-            .iter()
-            .flat_map(|&(start, end)| start..end)
-            .map(|i| &rows[i])
-            .collect();
-        for &(at, name, marker) in frame.labels {
-            assert!(
-                drawn.get(at).is_some_and(|row| row.contains(marker)),
-                "{}'s {name} label points at a row without {marker:?}",
-                frame.file
-            );
+        if !frame.labels.is_empty() {
+            let rows = frames::snapshot_rows(&snapshot);
+            let drawn: Vec<&String> = frame
+                .rows
+                .iter()
+                .flat_map(|&(start, end)| start..end)
+                .map(|i| &rows[i])
+                .collect();
+            for label in frame.labels {
+                assert!(
+                    drawn
+                        .get(label.row)
+                        .is_some_and(|row| row.contains(label.marker)),
+                    "{}'s {} label points at a row without {:?}",
+                    frame.file,
+                    label.name,
+                    label.marker
+                );
+            }
         }
         if let Some(run) = frames::overflow(&svg) {
             panic!("{} draws past its window: {run}", frame.file);
@@ -4306,20 +4312,18 @@ fn frame_svgs_match() {
             );
         }
     }
-    let mut pages: Vec<std::path::PathBuf> = std::fs::read_dir(repo_root().join("docs"))
+    // The README links by absolute URL, so crates.io can load it.
+    let mut pages: Vec<(std::path::PathBuf, &str)> = std::fs::read_dir(repo_root().join("docs"))
         .expect("read docs/")
         .flatten()
-        .map(|entry| entry.path())
+        .map(|entry| (entry.path(), "../assets/"))
         .collect();
-    pages.push(repo_root().join("README.md"));
-    for path in pages {
+    pages.push((
+        repo_root().join("README.md"),
+        "https://raw.githubusercontent.com/breferrari/vigia/main/assets/",
+    ));
+    for (path, prefix) in pages {
         let page = std::fs::read_to_string(&path).unwrap_or_default();
-        // The README links by absolute URL, so crates.io can load it.
-        let prefix = if path.ends_with("README.md") {
-            "https://raw.githubusercontent.com/breferrari/vigia/main/assets/"
-        } else {
-            "../assets/"
-        };
         for frame in frames::FRAMES {
             let image = format!("({prefix}{})", frame.file);
             if let Some(at) = page.find(&image) {

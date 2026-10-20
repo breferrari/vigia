@@ -16,9 +16,16 @@ pub struct Frame {
     pub rows: &'static [(usize, usize)],
     pub file: &'static str,
     pub label: &'static str,
-    /// Names drawn left of the window with a leader to their row: the row's
-    /// index among the drawn rows, the name, and text that row must contain.
-    pub labels: &'static [(usize, &'static str, &'static str)],
+    /// Names drawn left of the window, each with a leader to its row.
+    pub labels: &'static [Label],
+}
+
+/// A name for one drawn row, and text that row must contain.
+pub struct Label {
+    /// The row's index among the frame's drawn rows.
+    pub row: usize,
+    pub name: &'static str,
+    pub marker: &'static str,
 }
 
 pub const SNAPSHOTS: &str = "crates/vigia/tests/snapshots";
@@ -31,12 +38,36 @@ pub const FRAMES: &[Frame] = &[
         file: "frame-glance.svg",
         label: "The vigia pane, labelled down its left side: the header naming the worktree and how many files changed; the list of changed files, each with its status letter, path, pulse, heat strip, sparkline and line counts; a rule; the diff of the file being read, with its heading, hunk and lines; another rule; and the status bar with key hints, frame time, memory and position.",
         labels: &[
-            (0, "header", "changed"),
-            (2, "list", "▸"),
-            (5, "rule", "─"),
-            (7, "diff", "@@"),
-            (14, "rule", "─"),
-            (15, "status", "q quit"),
+            Label {
+                row: 0,
+                name: "header",
+                marker: "changed",
+            },
+            Label {
+                row: 2,
+                name: "list",
+                marker: "▸",
+            },
+            Label {
+                row: 5,
+                name: "rule",
+                marker: "─",
+            },
+            Label {
+                row: 7,
+                name: "diff",
+                marker: "@@",
+            },
+            Label {
+                row: 14,
+                name: "rule",
+                marker: "─",
+            },
+            Label {
+                row: 15,
+                name: "status",
+                marker: "q quit",
+            },
         ],
     },
     Frame {
@@ -152,7 +183,7 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
     let margin = frame
         .labels
         .iter()
-        .map(|(_, name, _)| name.chars().count())
+        .map(|label| label.name.chars().count())
         .max()
         .map_or(0, |widest| (widest as f64 * CELL + 40.0).ceil() as usize);
     let width = margin + w + 16;
@@ -187,9 +218,11 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
         out,
         "  <defs>\n    <clipPath id=\"win\"><rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{h}\" rx=\"12\"/></clipPath>\n    <style>\n      .m {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, \"DejaVu Sans Mono\", monospace; white-space: pre; }}\n      .fg {{ fill: #e6edf3 }} .dim {{ fill: #7d8590 }} .faint {{ fill: #6e7681 }}\n      .grn {{ fill: #3fb950 }} .red {{ fill: #f85149 }} .cyn {{ fill: #39c5cf }}\n      .con {{ fill: #e3b341 }}\n    </style>\n  </defs>"
     );
+    // The window shifts right by the labels' margin.
+    let _ = writeln!(out, "  <g transform=\"translate({margin},0)\">");
     let _ = writeln!(
         out,
-        "  <g transform=\"translate({margin},0)\">\n  <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{h}\" rx=\"12\" fill=\"#0d1117\"/>\n  <g clip-path=\"url(#win)\">\n    <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{TITLE}\" fill=\"#161b22\"/>\n    <circle cx=\"34\" cy=\"31\" r=\"6\" fill=\"#f85149\"/>\n    <circle cx=\"54\" cy=\"31\" r=\"6\" fill=\"#e3b341\"/>\n    <circle cx=\"74\" cy=\"31\" r=\"6\" fill=\"#3fb950\"/>\n    <rect x=\"8\" y=\"{status}\" width=\"{w}\" height=\"30\" fill=\"#161b22\"/>\n    <line x1=\"8\" y1=\"{status}\" x2=\"{}\" y2=\"{status}\" stroke=\"#21262d\" stroke-width=\"1\"/>",
+        "  <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{h}\" rx=\"12\" fill=\"#0d1117\"/>\n  <g clip-path=\"url(#win)\">\n    <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{TITLE}\" fill=\"#161b22\"/>\n    <circle cx=\"34\" cy=\"31\" r=\"6\" fill=\"#f85149\"/>\n    <circle cx=\"54\" cy=\"31\" r=\"6\" fill=\"#e3b341\"/>\n    <circle cx=\"74\" cy=\"31\" r=\"6\" fill=\"#3fb950\"/>\n    <rect x=\"8\" y=\"{status}\" width=\"{w}\" height=\"30\" fill=\"#161b22\"/>\n    <line x1=\"8\" y1=\"{status}\" x2=\"{}\" y2=\"{status}\" stroke=\"#21262d\" stroke-width=\"1\"/>",
         8 + w
     );
     let last = rows.len() - 1;
@@ -235,8 +268,8 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
         w - 1,
         h - 1
     );
-    for &(k, name, _) in frame.labels {
-        let y = ys[k];
+    for label in frame.labels {
+        let (y, name) = (ys[label.row], label.name);
         let _ = writeln!(
             out,
             "  <text class=\"m dim\" x=\"{}\" y=\"{y}\" font-size=\"12.5\" text-anchor=\"end\">{}</text>\n  <line x1=\"{}\" y1=\"{mid}\" x2=\"{:.1}\" y2=\"{mid}\" stroke=\"#30363d\" stroke-width=\"1\"/>",
@@ -326,13 +359,12 @@ fn runs(
         // group of words starts at its own column and a wide font cannot carry
         // the end of a row past the window.
         let mut j = i;
-        while j < to
-            && tones[j] == tones[i]
-            && !(j > i && chars[j] == ' ' && chars.get(j + 1) == Some(&' '))
-        {
+        let gap = |at: usize| chars[at] == ' ' && chars.get(at + 1) == Some(&' ');
+        while j < to && tones[j] == tones[i] && !(j > i && gap(j)) {
             j += 1;
         }
-        while j < to && chars[j] == ' ' && tones[j] == tones[i] && chars.get(j + 1) == Some(&' ') {
+        // The gap itself goes with the run before it.
+        while j < to && tones[j] == tones[i] && gap(j) {
             j += 1;
         }
         let text: String = chars[i..j].iter().collect();
