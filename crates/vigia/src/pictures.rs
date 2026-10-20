@@ -2189,6 +2189,17 @@ mod tests {
             ),
         ] {
             assert_eq!(changed(&theme), today, "{name}'s mask changed colour");
+            for depth in [
+                crate::colour::Depth::Ansi256,
+                crate::colour::Depth::Ansi16,
+                crate::colour::Depth::None,
+            ] {
+                assert_eq!(
+                    changed(&theme.resolve(depth)),
+                    (0xf8, 0x51, 0x49),
+                    "{name}'s mask changed colour at {depth:?}"
+                );
+            }
         }
     }
 
@@ -2226,6 +2237,14 @@ mod tests {
             Inks::of(&resolved, None, false).changed,
             (0x00, 0xff, 0x00),
             "picture_changed was dropped below truecolour"
+        );
+        let foreground = crate::theme::parse("base = dark\npicture_changed = #00ff00")
+            .expect("theme parses")
+            .resolve(crate::colour::Depth::None);
+        assert_eq!(
+            Inks::of(&foreground, None, false).changed,
+            (0x00, 0xff, 0x00),
+            "a foreground picture_changed was dropped without colour"
         );
     }
 

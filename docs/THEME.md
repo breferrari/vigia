@@ -122,7 +122,7 @@ The three mark keys share a single reserved column and are told apart by their g
 | `removed_gutter` | the same, on a removed line |
 | `added_bar` | the sigil column's cell on an added line, the wash's stand-in below truecolour |
 | `removed_bar` | the same, on a removed line |
-| `picture_changed` | a picture's changed pixels, in its third panel. An RGB colour (`#rrggbb` or `on #rrggbb`), kept at every depth because it colours pixels. Unset or named, it takes `removed_bar`'s colour at truecolour, and a fixed red otherwise |
+| `picture_changed` | a picture's changed pixels, in its third panel. An RGB colour (`#rrggbb` or `on #rrggbb`, and the `on` one when both are set), kept at every depth because it colours pixels. Unset or named, it takes `removed_bar`'s colour at truecolour, and a fixed red otherwise |
 | `selection` | the wash over rows a drag is crossing. It stands in for the diff wash for as long as the button is down, and on `ansi` it reverses the row instead of colouring it |
 
 ### Syntax
