@@ -445,6 +445,29 @@ jobs:
       - run: cargo deny check advisories licenses sources
       - run: cargo deny --exclude-dev check bans
 
+  # The forks under `vendor/`: each is its published crate plus its patches,
+  # vigia's graph holds the fork and never the crate it forks, and the
+  # original's own suite passes with the patches.
+  forks:
+    name: forks
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - name: each fork is its crate plus its patches
+        run: sh .github/scripts/forks.sh
+      - name: each fork passes its upstream suite
+        run: sh .github/scripts/forks-suite.sh
+
   # Every workflow, on documents-only pull requests too.
   zizmor:
     name: workflow audit
@@ -633,7 +656,7 @@ jobs:
   ci-complete:
     name: ci complete
     if: always()
-    needs: [changes, lint, test, budgets, benches, pure-rust, deny, zizmor, musl, docs]
+    needs: [changes, lint, test, budgets, benches, pure-rust, deny, forks, zizmor, musl, docs]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -654,6 +677,7 @@ jobs:
           NEEDS_BENCHES_RESULT: ${{ needs.benches.result }}
           NEEDS_PURE_RUST_RESULT: ${{ needs.pure-rust.result }}
           NEEDS_DENY_RESULT: ${{ needs.deny.result }}
+          NEEDS_FORKS_RESULT: ${{ needs.forks.result }}
           NEEDS_ZIZMOR_RESULT: ${{ needs.zizmor.result }}
           NEEDS_MUSL_RESULT: ${{ needs.musl.result }}
           NEEDS_DOCS_RESULT: ${{ needs.docs.result }}
@@ -667,6 +691,7 @@ jobs:
             "benches=${NEEDS_BENCHES_RESULT}" \
             "pure-rust=${NEEDS_PURE_RUST_RESULT}" \
             "deny=${NEEDS_DENY_RESULT}" \
+            "forks=${NEEDS_FORKS_RESULT}" \
             "zizmor=${NEEDS_ZIZMOR_RESULT}" \
             "musl=${NEEDS_MUSL_RESULT}" \
             "docs=${NEEDS_DOCS_RESULT}"
