@@ -407,7 +407,7 @@ Milestone: [Phase 11](https://github.com/breferrari/vigia/milestone/12). Ships i
 |---|---|---|
 | ⬜ | Measure first paint at ten thousand changed files, renames on and off | [#48](https://github.com/breferrari/vigia/issues/48) |
 | ⬜ | Measure the pane beside real agent sessions on other repositories | [#72](https://github.com/breferrari/vigia/issues/72) |
-| ⬜ | Observe what a prompting session does with a posted note **Moved from Phase 12, 2026-10-20, reader: measure first** | [#444](https://github.com/breferrari/vigia/issues/444) |
+| ✅ | Observe what a prompting session does with a posted note **Moved from Phase 12, 2026-10-20, reader: measure first** | [#444](https://github.com/breferrari/vigia/issues/444) |
 | ⬜ | Keep size-proportional work off the frame path | [#666](https://github.com/breferrari/vigia/issues/666) |
 | ⬜ | Re-diff a large changed file off the paint | [#665](https://github.com/breferrari/vigia/issues/665) |
 | ⬜ | Bound Kitty's first transmit on the paint | [#664](https://github.com/breferrari/vigia/issues/664) |
@@ -485,7 +485,7 @@ Milestone: [Shelf](https://github.com/breferrari/vigia/milestone/5), closed.
 | ✅ | Four assertion messages carry a lost line continuation | [#438](https://github.com/breferrari/vigia/issues/438) |
 | ✅ | The CPU clock gate takes an absolute bound once, so a loaded suite fails it | [#439](https://github.com/breferrari/vigia/issues/439) |
 | ⬜ | No test can build a Shell, so a gesture's decisions must move out to be seen. **Moved to Phase 13, 2026-10-19** | [#441](https://github.com/breferrari/vigia/issues/441) |
-| ⬜ | What a prompting session does with a note posted into its socket is unobserved. **Moved to Phase 12, 2026-10-19** | [#444](https://github.com/breferrari/vigia/issues/444) |
+| ✅ | What a prompting session does with a note posted into its socket is unobserved. **Moved to Phase 12, 2026-10-19** | [#444](https://github.com/breferrari/vigia/issues/444) |
 | ✅ | Lift the tinyvec bound once a compiling release exists | [#397](https://github.com/breferrari/vigia/issues/397) |
 | ✅ | `SHEET_KEEP` names two things, so removing a gesture reassigns the never-drop set by rank | [#464](https://github.com/breferrari/vigia/issues/464) |
 | ✅ | Local gates diverge from CI | [#650](https://github.com/breferrari/vigia/issues/650) |
@@ -660,7 +660,7 @@ Items that surfaced mid-phase and would have derailed the block they surfaced in
 | Pointer motion draws a full frame ([#154](https://github.com/breferrari/vigia/issues/154)) | I1, 2026-08-15 | Phase 8 | Found while ruling [#123](https://github.com/breferrari/vigia/issues/123), which changes no source: this has been true since the mouse landed in Phase 2. |
 | A note's rows are built whole before the clamp trims them ([#530](https://github.com/breferrari/vigia/issues/530)) | 2026-09-12 | Shelf | Not an I9 breach: the steady frame holds at 12.6ms. Only the frame an answer arrives on scales with its length, and that is paid once. |
 | Three overlays are kept apart by hand in eight places ([#515](https://github.com/breferrari/vigia/issues/515)) | #511, 2026-09-11 | Shelf, then Phase 13 on 2026-10-19 | A structural refactor across the Shell. Nothing is broken: B22 holds today, by hand. |
-| What a prompting session does with a posted note is unobserved ([#444](https://github.com/breferrari/vigia/issues/444)) | B21, 2026-09-07 | Shelf, then Phase 12 on 2026-10-19 | Needs a person running two panes with a session that prompts. An agent cannot observe it. |
+| What a prompting session does with a posted note is unobserved ([#444](https://github.com/breferrari/vigia/issues/444)) | B21, 2026-09-07 | Shelf, then Phase 12 on 2026-10-19, observed by the reader 2026-10-20 | Needs a person running two panes with a session that prompts. An agent cannot observe it. |
 | No test can build a Shell ([#441](https://github.com/breferrari/vigia/issues/441)) | #420, 2026-09-06 | Shelf, then Phase 13 on 2026-10-19 | Needs a ruling on the harness shape before it is built. It changes how every gesture is tested. |
 | sheet.rs restates constants the table implies ([#393](https://github.com/breferrari/vigia/issues/393)) | #386, 2026-09-03 | Shelf, then Phase 13 on 2026-10-19 | Test-only. The suite restates the renderer on purpose, so only derivations from its own tables are safe. |
 | watch.rs evicts an arbitrary path ([#368](https://github.com/breferrari/vigia/issues/368)) | 2026-08-28 | Shelf | Has an open PR, #531, from another session. |
