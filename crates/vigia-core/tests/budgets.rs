@@ -974,8 +974,9 @@ fn a_breach_with_no_cpu_clock_is_treated_as_ours() {
 }
 
 /// Windows' cycle clock reads a busy spin as at least nine tenths of its wall
-/// time, and never more than twice it: converted at the slowest calibrated
-/// rate, it may read high and must not read low.
+/// time, and never more than twice it. Converted at the highest calibrated
+/// rate it may read high, when every slice was preempted, and must not read
+/// low; both bounds fail if the timestamp rate is not invariant.
 #[cfg(windows)]
 #[test]
 fn cycle_clock_direction() {

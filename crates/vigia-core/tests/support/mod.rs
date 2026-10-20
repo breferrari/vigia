@@ -106,11 +106,13 @@ fn thread_cpu() -> Option<Duration> {
     ok.then(|| Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32))
 }
 
-/// This thread's cycles so far, converted at the slowest rate calibration
-/// measured, so it reads as more CPU than ran rather than less, and an
-/// overshoot is never excused by the conversion. `None` where the rate could
-/// not be measured, which counts every frame's wall time as its own.
-/// `GetThreadTimes` steps at 15.625ms, too coarse to judge one frame.
+/// This thread's cycles so far, converted at the highest rate calibration
+/// measured. Cycles count at the fixed timestamp rate while the thread runs, so
+/// a slice the thread lost time in reads a lower rate, and the highest is at
+/// most the true one: it reads as no less CPU than ran, and no overshoot is
+/// excused by the conversion. `None` where the rate could not be measured,
+/// which counts every frame's wall time as its own. `GetThreadTimes` steps at
+/// 15.625ms, too coarse to judge one frame.
 #[cfg(windows)]
 fn thread_cpu() -> Option<Duration> {
     let rate = cycle_rate()?;
@@ -132,21 +134,21 @@ fn thread_cycles() -> Option<u64> {
     ok.then_some(cycles)
 }
 
-/// The fewest cycles a nanosecond of busy work took over a calibration spin,
+/// The most cycles a nanosecond of busy work took over a calibration spin,
 /// measured once per test binary.
 #[cfg(windows)]
 pub fn cycle_rate() -> Option<f64> {
     static RATE: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
     *RATE.get_or_init(|| {
-        let mut slowest: Option<f64> = None;
+        let mut fastest: Option<f64> = None;
         for _ in 0..CALIBRATION_SLICES {
             let (cycles, start) = (thread_cycles()?, Instant::now());
             spin_for(CALIBRATION_SLICE);
             let spun = thread_cycles()?.checked_sub(cycles)?;
             let rate = spun as f64 / start.elapsed().as_nanos() as f64;
-            slowest = Some(slowest.map_or(rate, |was: f64| was.min(rate)));
+            fastest = Some(fastest.map_or(rate, |was: f64| was.max(rate)));
         }
-        slowest.filter(|rate| *rate > 0.0)
+        fastest.filter(|rate| *rate > 0.0)
     })
 }
 

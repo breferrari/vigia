@@ -115,7 +115,9 @@ insta.workspace = true
 libc.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
-windows-sys.workspace = true
+# WindowsProgramming is QueryThreadCycleTime, the budgets' thread clock, kept
+# to tests so the shipped binary does not take it.
+windows-sys = { workspace = true, features = ["Win32_System_WindowsProgramming"] }
 
 # Not `workspace = true`: the workspace turns on the C-FAILURE lints, and this
 # crate is the binary. Those guidelines exist for callers you do not control, and
