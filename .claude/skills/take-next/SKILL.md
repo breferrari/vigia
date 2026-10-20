@@ -40,7 +40,7 @@ sh .claude/skills/take-next/preflight.sh       # does the spec still agree with 
 
 `next.sh` selects the earliest eligible section of `ROADMAP.md` on `origin/main`:
 
-- **Order is the roadmap's section order.** It is versioned and reviewed, so a change to it shows in a diff. A section need not be a phase: the reader can put a block among the phases. The walk starts at the first `## Phase` heading, so a block above it is not read. Milestones play no part in the order, so renaming one changes nothing.
+- **Order is the roadmap's section order.** It is versioned and reviewed, so a change to it shows in a diff. A section need not be a phase: the reader can put a block among the phases. The walk starts at the first `## Phase` heading, so a block above it is not read. A section whose heading names a release, as in "right after 1.2.0", is not taken until that release's tag is on origin, and nothing after it is taken before it: `next.sh` answers `waiting:` instead. Milestones play no part in the order, so renaming one changes nothing.
 - **A section is eligible when a row not marked done names an open issue.** A finished section is never selected. The walk stops at `## Shelf`. An empty answer means everything above it is done: find out whether that is true.
 
 After you edit `next.sh`, `preflight.sh` or these rules, run `sh .claude/skills/take-next/selftest.sh`. Close a milestone when it has no open issues: a section and a milestone can hold different issues.

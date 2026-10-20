@@ -11,10 +11,15 @@
 #
 # Usage: next.sh [--ranked | --rows]
 #   --ranked  print every eligible section in take order, not only the first
-#   --rows    print every eligible row as `section<TAB>issue`, in order
+#   --rows    print every row on an open issue as `section<TAB>issue<TAB>wait`,
+#             in order, where wait is 1 for a section waiting on its release
 #
-# Test seams: NEXT_ROADMAP_FILE substitutes a file for the roadmap, and
-# NEXT_ISSUES_FILE a JSON array of `{number, title}` for the open issues.
+# A section whose heading names a release, as in "right after 1.2.0", waits
+# until that release's tag is on origin, and nothing after it is taken first.
+#
+# Test seams: NEXT_ROADMAP_FILE substitutes a file for the roadmap,
+# NEXT_ISSUES_FILE a JSON array of `{number, title}` for the open issues, and
+# NEXT_TAGS_FILE one tag per line for origin's tags.
 set -eu
 
 REF="${NEXT_REF:-origin/main}"
@@ -39,26 +44,46 @@ if [ "$(jq 'length' "$tmp/open.json")" -ge "$LIMIT" ]; then
 fi
 jq -r '.[] | "\(.number)\t\(.title)"' "$tmp/open.json" | tr -d '\r' > "$tmp/open.tsv"
 
+if [ -n "${NEXT_TAGS_FILE:-}" ]; then tr -d '\r' < "$NEXT_TAGS_FILE" > "$tmp/tags.txt"
+elif grep -qE '^## .*after [0-9]+\.[0-9]+\.[0-9]+' "$tmp/roadmap.md"; then
+  git ls-remote --tags origin > "$tmp/remote.txt" || exit 2
+  sed -n 's|.*refs/tags/\([^^]*\).*|\1|p' "$tmp/remote.txt" > "$tmp/tags.txt"
+else : > "$tmp/tags.txt"; fi
+
 # One line per eligible row: the section heading, a tab, the issue number.
 awk -F'\t' '
-  FILENAME == ARGV[1] { open[$1] = 1; next }
+  FILENAME == ARGV[1] { tagged[$0] = 1; next }
+  FILENAME == ARGV[2] { open[$1] = 1; next }
   /^## Shelf/ { exit }
   /^## Phase / { walking = 1 }
-  /^## / { section = substr($0, 4); next }
+  /^## / {
+    section = substr($0, 4)
+    waiting = match(section, /after [0-9]+\.[0-9]+\.[0-9]+/) && !(("v" substr(section, RSTART + 6, RLENGTH - 6)) in tagged)
+    next
+  }
   !walking { next }
   /^\| *(⬜|🔨) *\|.*\[#[0-9]+\]\([^)]*\) *\| *$/ {
     line = $0
     n = ""
     while (match(line, /\[#[0-9]+\]/)) { n = substr(line, RSTART + 2, RLENGTH - 3); line = substr(line, RSTART + RLENGTH) }
-    if (n in open) print section "\t" n
-  }' "$tmp/open.tsv" "$tmp/roadmap.md" > "$tmp/rows.tsv"
+    if (n in open) print section "\t" n "\t" (waiting ? 1 : 0)
+  }' "$tmp/tags.txt" "$tmp/open.tsv" "$tmp/roadmap.md" > "$tmp/rows.tsv"
 
 case "${1:-}" in
   --rows) cat "$tmp/rows.tsv"; exit 0 ;;
-  --ranked) cut -f1 "$tmp/rows.tsv" | awk '!seen[$0]++'; exit 0 ;;
 esac
+awk -F'\t' '$3 == 1 { exit } { print }' "$tmp/rows.tsv" > "$tmp/ready.tsv"
+if [ "${1:-}" = "--ranked" ]; then
+  cut -f1 "$tmp/ready.tsv" | awk '!seen[$0]++'
+  exit 0
+fi
 
-section=$(cut -f1 "$tmp/rows.tsv" | head -n 1)
+section=$(cut -f1 "$tmp/ready.tsv" | head -n 1)
+waiting=$(awk -F'\t' '$3 == 1 { print $1; exit }' "$tmp/rows.tsv")
+if [ -z "$section" ] && [ -n "$waiting" ]; then
+  printf 'waiting: %s, until its release is tagged\n' "$waiting"
+  exit 0
+fi
 if [ -z "$section" ]; then
   echo "no eligible section: every row above the Shelf is done or names a closed issue. Read which before acting."
   exit 0
@@ -66,4 +91,4 @@ fi
 printf 'section: %s\n' "$section"
 awk -F'\t' -v s="$section" '
   FILENAME == ARGV[1] { title[$1] = $2; next }
-  $1 == s { printf "#%s\t%s\n", $2, title[$2] }' "$tmp/open.tsv" "$tmp/rows.tsv"
+  $1 == s { printf "#%s\t%s\n", $2, title[$2] }' "$tmp/open.tsv" "$tmp/ready.tsv"

@@ -38,8 +38,9 @@ roadmap() { # lines -> roadmap.md
 open_issues() { # numbers -> open.json
   printf '%s\n' "$@" | jq -R 'select(length > 0) | {number: tonumber, title: "issue \(.)"}' | jq -s . > "$FIX/open.json"
 }
+: > "$FIX/tags.txt"
 next_on() { # args -> next.sh's output on the fixtures
-  NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" "$@" 2>&1 | tr -d '\r'
+  NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" NEXT_TAGS_FILE="$FIX/tags.txt" sh "$NEXT" "$@" 2>&1 | tr -d '\r'
 }
 take() { # -> the section next.sh names
   next_on | sed -n 's/^section: //p'
@@ -56,6 +57,16 @@ case_is "file order" "Phase 6 - measured"
 
 roadmap "## Phase 10 - rust" "✅ 1" "## Foundation" "⬜ 2" "## Phase 11 - paint" "⬜ 3"; open_issues 2 3
 case_is "non-phase section" "Foundation"
+
+roadmap "## Phase 10 - rust" "✅ 1" "## Foundation, right after 1.2.0" "⬜ 2" "## Phase 11 - paint" "⬜ 3"; open_issues 2 3
+printf 'v1.1.0\n' > "$FIX/tags.txt"
+case_is "release not tagged" ""
+waited=$(next_on | head -n 1)
+[ "$waited" = "waiting: Foundation, right after 1.2.0, until its release is tagged" ] && ok "waiting answer" \
+  || no "waiting answer" "waiting: Foundation, right after 1.2.0, until its release is tagged" "$waited"
+printf 'v1.1.0\nv1.2.0\n' > "$FIX/tags.txt"
+case_is "release tagged" "Foundation, right after 1.2.0"
+: > "$FIX/tags.txt"
 
 roadmap "## Phase 6 - measured" "✅ 1" "## Phase 7 - distribution" "⬜ 2"; open_issues 1 2
 case_is "done section skipped" "Phase 7 - distribution"
@@ -98,7 +109,7 @@ listed=$(next_on | sed 1d | cut -f1 | paste -sd '|' -)
 [ "$listed" = "#1" ] && ok "own issues only" || no "own issues only" "#1" "$listed"
 
 jq -n '[range(0; 1000) | {number: ., title: "x"}]' > "$FIX/open.json"
-if NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" sh "$NEXT" >/dev/null 2>&1; then
+if NEXT_ROADMAP_FILE="$FIX/roadmap.md" NEXT_ISSUES_FILE="$FIX/open.json" NEXT_TAGS_FILE="$FIX/tags.txt" sh "$NEXT" >/dev/null 2>&1; then
   no "fetch limit refused" "a non-zero exit" "exit 0"
 else
   ok "fetch limit refused"

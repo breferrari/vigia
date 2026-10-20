@@ -167,7 +167,7 @@ if [ -f "$tmp/ms.json" ]; then
     hit "next.sh failed, so this comparison read nothing"
   fi
   tr -d '\r' < "$tmp/rows.raw" > "$tmp/rows.tsv"
-  say "  step 1 takes from: $(cut -f1 "$tmp/rows.tsv" | head -n 1 | sed 's/^$/<no eligible section>/')"
+  say "  step 1: $(NEXT_ROADMAP_FILE="$tmp/roadmap.md" NEXT_ISSUES_FILE="$tmp/open.json" sh "$(dirname "$0")/next.sh" 2>/dev/null | head -n 1)"
   cut -f1 "$tmp/rows.tsv" | grep '^Phase [0-9]' | LC_ALL=C sort -u > "$tmp/phases-open.s"
   awk '/^## Shelf/ { exit } /^## Phase [0-9]/ { print substr($0, 4) }' "$tmp/roadmap.md" | tr -d '\r' | LC_ALL=C sort > "$tmp/phases.s"
   jq -r '.[].title' "$tmp/ms.json" | tr -d '\r' | LC_ALL=C sort > "$tmp/ms-all.s"
