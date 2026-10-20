@@ -96,7 +96,7 @@ The suites run under nextest with its `ci` profile, which runs every test and re
 
 CI runs on Linux, macOS and Windows, with a musl leg for the artifact that Linux actually ships. The budget gates run in debug on every commit. The absolute wall-clock tier runs in release only. A pull request that changes only documents, skills, templates or images runs the suites that read documents on Linux and skips the rest, so it finishes in a couple of minutes. The `full-ci` label forces the whole run on any pull request.
 
-The dependency check reads `deny.toml`. It fails on a known advisory, a licence outside the allowed list, any crate that needs a C toolchain, and any source other than crates.io. It runs on every pull request that changes code, and weekly on `main`, because a new advisory needs no code change. An ignored advisory carries its reason in `deny.toml`.
+The dependency check reads `deny.toml`. It fails on a known advisory, a licence outside the allowed list, any crate it bans for needing a C toolchain (outside dev-dependencies), and any source other than crates.io. It runs on every pull request that changes code, and weekly on `main`, because a new advisory needs no code change. An ignored advisory carries its reason in `deny.toml`.
 
 ## What this project will not do
 

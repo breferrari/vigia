@@ -3703,15 +3703,10 @@ fn denied_crates(config: &str) -> Vec<String> {
         .collect()
 }
 
-/// `deny.toml` reads the graph the release ships: the dist targets, and bans
-/// every crate that brings a C toolchain.
-#[test]
-fn deny_policy() {
-    let fixture = "[bans]\ndeny = [\n    { crate = \"cc\", reason = \"x\" },\n]\n[sources]\n";
-    assert_eq!(denied_crates(fixture), ["cc"], "the scan missed a ban");
-    let deny = repo_file("deny.toml");
-    let denied = denied_crates(&deny);
-    for name in [
+/// The crates SPEC §6 rules out that `config` does not ban.
+fn missing_bans(config: &str) -> Vec<&'static str> {
+    let denied = denied_crates(config);
+    [
         "cc",
         "cmake",
         "bindgen",
@@ -3719,12 +3714,44 @@ fn deny_policy() {
         "aws-lc-sys",
         "ring",
         "openssl-sys",
-    ] {
-        assert!(
-            denied.iter().any(|ban| ban == name),
-            "deny.toml does not ban {name}"
-        );
-    }
+    ]
+    .into_iter()
+    .filter(|name| !denied.iter().any(|ban| ban == name))
+    .collect()
+}
+
+/// `deny.toml` reads the graph the release ships: the dist targets, and bans
+/// every crate that brings a C toolchain.
+#[test]
+fn deny_policy() {
+    let fixture = "[bans]\ndeny = [\n    { crate = \"cc\", reason = \"x\" },\n]\n[sources]\n";
+    assert_eq!(
+        missing_bans(fixture),
+        [
+            "cmake",
+            "bindgen",
+            "onig_sys",
+            "aws-lc-sys",
+            "ring",
+            "openssl-sys"
+        ],
+        "the scan missed which bans are absent"
+    );
+    let deny = repo_file("deny.toml");
+    assert_eq!(
+        missing_bans(&deny),
+        Vec::<&str>::new(),
+        "deny.toml does not ban these"
+    );
+    let allowed = toml_array(&deny, "allow");
+    assert!(
+        allowed.iter().all(|licence| !licence.contains("GPL")),
+        "deny.toml allows a GPL licence: {allowed:?}"
+    );
+    assert!(
+        without_comments(&deny).contains("unused-allowed-license = \"deny\""),
+        "an allowance the graph no longer needs would pass"
+    );
     let manifest = repo_file("Cargo.toml");
     let dist = manifest
         .split_once("[workspace.metadata.dist]")
@@ -3742,7 +3769,7 @@ fn deny_policy() {
         "ci.yml does not run the full dependency check"
     );
     assert!(
-        ci.contains("'deny=${{ needs.deny.result }}'"),
-        "ci complete does not judge the dependency check"
+        ci.contains("'deny=${{ needs.deny.result }}'") && ci.contains("pure-rust, deny, musl"),
+        "ci complete does not wait for and judge the dependency check"
     );
 }

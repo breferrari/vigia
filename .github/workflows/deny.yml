@@ -1,4 +1,4 @@
-name: dependencies
+name: weekly advisories
 
 # New advisories arrive without a code change, so main is checked against the
 # advisory database every week, not only when a pull request runs.

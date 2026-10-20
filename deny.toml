@@ -37,6 +37,8 @@ allow = [
     "Zlib",
 ]
 confidence-threshold = 0.9
+# An allowance the graph no longer needs fails, so the list stays what it needs.
+unused-allowed-license = "deny"
 
 # SPEC §6: nothing that needs a C toolchain.
 [bans]
