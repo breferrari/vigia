@@ -130,7 +130,9 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo fmt --all -- --check
+      # The members by name: `--all` also formats path dependencies, and the
+      # forks under `vendor/` stay as upstream wrote them.
+      - run: cargo fmt -p vigia -p vigia-core -p xtask -- --check
 
       # #131: both crates deny `rustdoc::broken_intra_doc_links` and no job ran
       # rustdoc, so the deny was decorative. Three links had rotted behind it —
