@@ -16,17 +16,36 @@ pub struct Frame {
     pub rows: &'static [(usize, usize)],
     pub file: &'static str,
     pub label: &'static str,
+    /// Names drawn left of the window with a leader to their row: the row's
+    /// index among the drawn rows, the name, and text that row must contain.
+    pub labels: &'static [(usize, &'static str, &'static str)],
 }
 
 pub const SNAPSHOTS: &str = "crates/vigia/tests/snapshots";
 
 pub const FRAMES: &[Frame] = &[
     Frame {
+        snapshot: "render__glance_frame.snap",
+        size: "80x16",
+        rows: &[(0, 16)],
+        file: "frame-glance.svg",
+        label: "The vigia pane, labelled down its left side: the header naming the worktree and how many files changed; the list of changed files, each with its status letter, path, pulse, heat strip, sparkline and line counts; a rule; the diff of the file being read, with its heading, hunk and lines; another rule; and the status bar with key hints, frame time, memory and position.",
+        labels: &[
+            (0, "header", "changed"),
+            (2, "list", "▸"),
+            (5, "rule", "─"),
+            (7, "diff", "@@"),
+            (14, "rule", "─"),
+            (15, "status", "q quit"),
+        ],
+    },
+    Frame {
         snapshot: "notes__note_states_frame.snap",
         size: "80x40",
         rows: &[(0, 27), (39, 40)],
         file: "frame-note-states.svg",
         label: "The vigia pane with one changed file carrying four notes: one whose line has left the diff, drawn under the file's heading and marked gone; one the agent has read and answered, marked seen with its reply under it; one on the changed line, marked open; and one whose line was edited under it, marked changed.",
+        labels: &[],
     },
     Frame {
         snapshot: "notes__note_box_frame.snap",
@@ -34,6 +53,7 @@ pub const FRAMES: &[Frame] = &[
         rows: &[(0, 17), (23, 24)],
         file: "frame-note-box.svg",
         label: "The vigia pane with the note box open under a changed line, titled with the file and line it is about, holding a half-typed sentence, with Enter sends and Esc cancels along its bottom edge.",
+        labels: &[],
     },
     Frame {
         snapshot: "sheet__sheet_frame.snap",
@@ -41,6 +61,7 @@ pub const FRAMES: &[Frame] = &[
         rows: &[(0, 34)],
         file: "frame-sheet.svg",
         label: "The vigia pane with the gestures sheet open over it: every key in one column and every mouse gesture in the next, each beside what it does.",
+        labels: &[],
     },
     Frame {
         snapshot: "menu__menu_frame.snap",
@@ -48,6 +69,7 @@ pub const FRAMES: &[Frame] = &[
         rows: &[(0, 24)],
         file: "frame-menu.svg",
         label: "The vigia pane with the config menu open over it: every on and off setting with where it stands, a row to save the settings and a row to reset them.",
+        labels: &[],
     },
     Frame {
         snapshot: "render__rename_frame.snap",
@@ -55,6 +77,7 @@ pub const FRAMES: &[Frame] = &[
         rows: &[(0, 14)],
         file: "frame-rename.svg",
         label: "The vigia pane listing a renamed and edited file as its new path, an arrow and its old path, above its diff.",
+        labels: &[],
     },
     Frame {
         snapshot: "render__the_staged_run_at_eighty_columns.snap",
@@ -62,6 +85,7 @@ pub const FRAMES: &[Frame] = &[
         rows: &[(0, 12)],
         file: "frame-staged.svg",
         label: "The vigia pane with staged changes shown: an unstaged run and a staged run, each under its own labelled rule, one file appearing in both.",
+        labels: &[],
     },
     Frame {
         snapshot: "render__a_file_with_no_line_diff_says_why.snap",
@@ -69,6 +93,7 @@ pub const FRAMES: &[Frame] = &[
         rows: &[(0, 8)],
         file: "frame-no-diff.svg",
         label: "The vigia pane listing three files with no line diff, each saying why: a binary file, an unresolved conflict, and a rename with no edit.",
+        labels: &[],
     },
 ];
 
@@ -123,7 +148,14 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
     let last_col = drawn().map(|r| r.chars().count()).max().unwrap_or(0);
     let grid = Grid { first };
     let w = ((last_col - first) as f64 * CELL + 2.0 * INSET).ceil() as usize;
-    let width = w + 16;
+    // Room left of the window for the labels and their leaders, when it has any.
+    let margin = frame
+        .labels
+        .iter()
+        .map(|(_, name, _)| name.chars().count())
+        .max()
+        .map_or(0, |widest| (widest as f64 * CELL + 40.0).ceil() as usize);
+    let width = margin + w + 16;
     let body = (rows.len() - 2) * PITCH + 16;
     let height = 8 + TITLE + body + 30 + 8;
     let h = height - 16;
@@ -157,10 +189,11 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
     );
     let _ = writeln!(
         out,
-        "  <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{h}\" rx=\"12\" fill=\"#0d1117\"/>\n  <g clip-path=\"url(#win)\">\n    <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{TITLE}\" fill=\"#161b22\"/>\n    <circle cx=\"34\" cy=\"31\" r=\"6\" fill=\"#f85149\"/>\n    <circle cx=\"54\" cy=\"31\" r=\"6\" fill=\"#e3b341\"/>\n    <circle cx=\"74\" cy=\"31\" r=\"6\" fill=\"#3fb950\"/>\n    <rect x=\"8\" y=\"{status}\" width=\"{w}\" height=\"30\" fill=\"#161b22\"/>\n    <line x1=\"8\" y1=\"{status}\" x2=\"{}\" y2=\"{status}\" stroke=\"#21262d\" stroke-width=\"1\"/>",
+        "  <g transform=\"translate({margin},0)\">\n  <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{h}\" rx=\"12\" fill=\"#0d1117\"/>\n  <g clip-path=\"url(#win)\">\n    <rect x=\"8\" y=\"8\" width=\"{w}\" height=\"{TITLE}\" fill=\"#161b22\"/>\n    <circle cx=\"34\" cy=\"31\" r=\"6\" fill=\"#f85149\"/>\n    <circle cx=\"54\" cy=\"31\" r=\"6\" fill=\"#e3b341\"/>\n    <circle cx=\"74\" cy=\"31\" r=\"6\" fill=\"#3fb950\"/>\n    <rect x=\"8\" y=\"{status}\" width=\"{w}\" height=\"30\" fill=\"#161b22\"/>\n    <line x1=\"8\" y1=\"{status}\" x2=\"{}\" y2=\"{status}\" stroke=\"#21262d\" stroke-width=\"1\"/>",
         8 + w
     );
     let last = rows.len() - 1;
+    let mut ys = Vec::with_capacity(rows.len());
     for (k, row) in rows.iter().enumerate() {
         let tones = tones(row, k == 0, k == last);
         let chars: Vec<char> = row.chars().collect();
@@ -177,6 +210,7 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
                 runs(&grid, &chars, &tones, 0, chars.len(), 0.0),
             )
         };
+        ys.push(y);
         // A rule across the whole pane is drawn over the content's width only,
         // inside the pane's two-cell margins, the same on both sides.
         if is_rule(row) {
@@ -197,10 +231,23 @@ pub fn draw(frame: &Frame, snapshot: &str) -> String {
     }
     let _ = writeln!(
         out,
-        "  </g>\n  <rect x=\"8.5\" y=\"8.5\" width=\"{}\" height=\"{}\" rx=\"12\" fill=\"none\" stroke=\"#30363d\"/>\n</svg>",
+        "  </g>\n  <rect x=\"8.5\" y=\"8.5\" width=\"{}\" height=\"{}\" rx=\"12\" fill=\"none\" stroke=\"#30363d\"/>\n  </g>",
         w - 1,
         h - 1
     );
+    for &(k, name, _) in frame.labels {
+        let y = ys[k];
+        let _ = writeln!(
+            out,
+            "  <text class=\"m dim\" x=\"{}\" y=\"{y}\" font-size=\"12.5\" text-anchor=\"end\">{}</text>\n  <line x1=\"{}\" y1=\"{mid}\" x2=\"{:.1}\" y2=\"{mid}\" stroke=\"#30363d\" stroke-width=\"1\"/>",
+            margin - 16,
+            escape(name),
+            margin - 10,
+            margin as f64 + 4.0,
+            mid = y - 4,
+        );
+    }
+    out.push_str("</svg>\n");
     out
 }
 
@@ -275,8 +322,17 @@ fn runs(
     let mut out = String::new();
     let mut i = from;
     while i < to {
+        // A run ends at a change of tone or at a gap of two spaces, so every
+        // group of words starts at its own column and a wide font cannot carry
+        // the end of a row past the window.
         let mut j = i;
-        while j < to && tones[j] == tones[i] {
+        while j < to
+            && tones[j] == tones[i]
+            && !(j > i && chars[j] == ' ' && chars.get(j + 1) == Some(&' '))
+        {
+            j += 1;
+        }
+        while j < to && chars[j] == ' ' && tones[j] == tones[i] && chars.get(j + 1) == Some(&' ') {
             j += 1;
         }
         let text: String = chars[i..j].iter().collect();

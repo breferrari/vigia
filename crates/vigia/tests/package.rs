@@ -4263,6 +4263,22 @@ fn frame_svgs_match() {
             frame.file,
             frame.snapshot
         );
+        // A label points at the row whose text it names, so a renderer change
+        // that moves a row cannot leave a label on the wrong one.
+        let rows = frames::snapshot_rows(&snapshot);
+        let drawn: Vec<&String> = frame
+            .rows
+            .iter()
+            .flat_map(|&(start, end)| start..end)
+            .map(|i| &rows[i])
+            .collect();
+        for &(at, name, marker) in frame.labels {
+            assert!(
+                drawn.get(at).is_some_and(|row| row.contains(marker)),
+                "{}'s {name} label points at a row without {marker:?}",
+                frame.file
+            );
+        }
         if let Some(run) = frames::overflow(&svg) {
             panic!("{} draws past its window: {run}", frame.file);
         }

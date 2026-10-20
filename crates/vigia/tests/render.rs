@@ -7543,3 +7543,31 @@ fn rename_frame() {
     view.rows[0] = Row::file(renamed);
     insta::assert_snapshot!(screen(100, 14, &view, &chrome()));
 }
+
+/// The pane as the README's "What you see" draws it: three files in the list,
+/// the newest one's diff below, and the status bar's readouts.
+#[test]
+fn glance_frame() {
+    let glance = glancing();
+    let scale = glance.scale;
+    let entries: Vec<FileEntry> = glance
+        .rows
+        .into_iter()
+        .filter_map(|row| match row {
+            Row::File(entry) => Some(*entry),
+            _ => None,
+        })
+        .collect();
+    let mut view = one_file();
+    view.list_span = entries.len();
+    view.list = entries.iter().cloned().map(Into::into).collect();
+    view.rows[0] = Row::file(entries[0].clone());
+    view.scale = scale;
+    view.files = entries.len();
+    let chrome = Chrome {
+        frame: Some(Duration::from_micros(800)),
+        memory: Some(19 * 1024 * 1024),
+        ..chrome()
+    };
+    insta::assert_snapshot!(screen(80, 16, &view, &chrome));
+}

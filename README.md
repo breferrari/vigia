@@ -143,21 +143,7 @@ From source, with a Rust toolchain: `cargo install vigia`. A source build leaves
 
 ## 👀 What you see
 
-```
-   header  │  my-repo · main · current ▾ · 3 changed                   +55 -10
-           │
-     list  │  ▸ M src/engine/watch.rs   ●  ■■■■■■■■■■■■  __▁▂▆█__   +42    -7
-           │    M src/render/frame.rs      ■■■■■■■■■■■■  ________   +11    -3
-           │    M Cargo.toml               ■■■■■■■■■■■■  ________    +2    -0
-     rule  │  ───────────────────────────────────────────────────────────────
-     diff  │    M src/engine/watch.rs   ●  ■■■■■■■■■■■■  __▁▂▆█__   +42    -7
-           │    @@ -38,7 +38,9 @@
-           │    38    fn coalesce(&mut self, ev: Event) -> Option<Frame> {
-           │    39 +      if self.pending.is_empty() {
-           │    40 +          self.deadline = Instant::now() + DEBOUNCE;
-     rule  │  ──────────────────────────────────────────────────────────────
-   status  │  q quit · f follow · m config · ? keys   3.1ms frame  25MiB  follow ▶  1/3
-```
+![The vigia pane, labelled down its left side: the header naming the worktree and how many files changed; the list of changed files, each with its status letter, path, pulse, heat strip, sparkline and line counts; a rule; the diff of the file being read, with its heading, hunk and lines; another rule; and the status bar with key hints, frame time, memory and position.](https://raw.githubusercontent.com/breferrari/vigia/main/assets/frame-glance.svg)
 
 Each row answers one question: the caret says where you are, the pulse `●` which file was written last, the note mark whose turn it is, the heat strip **where** in the file the change is, the sparkline **when** it changed, and the counters **how much**. The diff is syntax highlighted, and the words that changed inside a line are lit brighter than the line around them.
 

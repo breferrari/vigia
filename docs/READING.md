@@ -1,20 +1,6 @@
 # Reading the pane
 
-```
-   header  │  my-repo · main · current ▾ · 3 changed                   +55 -10
-           │
-     list  │  ▸ M src/engine/watch.rs   ●  ■■■■■■■■■■■■  __▁▂▆█__   +42    -7
-           │    M src/render/frame.rs      ■■■■■■■■■■■■  ________   +11    -3
-           │    M Cargo.toml               ■■■■■■■■■■■■  ________    +2    -0
-     rule  │  ───────────────────────────────────────────────────────────────
-     diff  │    M src/engine/watch.rs   ●  ■■■■■■■■■■■■  __▁▂▆█__   +42    -7
-           │    @@ -38,7 +38,9 @@
-           │    38    fn coalesce(&mut self, ev: Event) -> Option<Frame> {
-           │    39 +      if self.pending.is_empty() {
-           │    40 +          self.deadline = Instant::now() + DEBOUNCE;
-     rule  │  ──────────────────────────────────────────────────────────────
-   status  │  q quit · f follow · m config · ? keys   3.1ms frame  25MiB  follow ▶  1/3
-```
+![The vigia pane, labelled down its left side: the header naming the worktree and how many files changed; the list of changed files, each with its status letter, path, pulse, heat strip, sparkline and line counts; a rule; the diff of the file being read, with its heading, hunk and lines; another rule; and the status bar with key hints, frame time, memory and position.](../assets/frame-glance.svg)
 
 The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 139 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 139 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is the default at every width.
 
