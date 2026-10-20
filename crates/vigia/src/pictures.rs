@@ -558,6 +558,9 @@ pub struct Pictures {
     seen: HashMap<Arc<Key>, u64>,
     /// How many times [`Pictures::keep`] has run.
     tick: u64,
+    /// Where the frame's list of files was, and its length, when kept pictures
+    /// were last checked against it.
+    listing: (usize, usize),
     /// Whether a delete has to pass through tmux.
     tmux: bool,
     /// Where the picker goes, until it has been given.
@@ -736,6 +739,7 @@ impl Pictures {
             retired: Vec::new(),
             seen: HashMap::new(),
             tick: 0,
+            listing: (0, 0),
             tmux: false,
             picker: Some(picked),
             cell: None,
@@ -863,7 +867,7 @@ impl Pictures {
 
     /// Keep the pictures in `shown`, and the Kitty pictures that left the
     /// screen while the terminal still holds them, so coming back sends nothing.
-    /// A picture whose path is shown under another key is stale, and goes.
+    /// One whose side is shown under a newer picture is stale, and goes.
     fn keep(&mut self, shown: &HashSet<Arc<Key>>) {
         self.tick += 1;
         for key in shown {
@@ -871,15 +875,27 @@ impl Pictures {
                 self.seen.insert(Arc::clone(key), self.tick);
             }
         }
-        let paths: HashSet<&str> = shown.iter().map(|key| key.path.as_str()).collect();
-        // Never shown means never sent, so there is nothing in the terminal to keep.
-        let sent: HashSet<Arc<Key>> = self.seen.keys().cloned().collect();
-        self.retire_where(|key, built| {
-            !shown.contains(key)
-                && (built.kitty.is_empty()
-                    || !sent.contains(key)
-                    || paths.contains(key.path.as_str()))
-        });
+        // The staged and unstaged pictures of one path differ in their old side,
+        // and an edit keeps it.
+        let sides: HashSet<(&str, Option<u64>)> = shown
+            .iter()
+            .map(|key| (key.path.as_str(), key.before))
+            .collect();
+        let doomed: Vec<Arc<Key>> = self
+            .built
+            .iter()
+            .filter(|(key, ready)| {
+                !shown.contains(*key)
+                    && (ready.0.kitty.is_empty()
+                        // Never on screen, so nothing of it is in the terminal.
+                        || !self.seen.contains_key(*key)
+                        || sides.contains(&(key.path.as_str(), key.before)))
+            })
+            .map(|(key, _)| Arc::clone(key))
+            .collect();
+        if !doomed.is_empty() {
+            self.retire_where(|key, _| doomed.contains(key));
+        }
         self.evict(shown);
     }
 
@@ -1000,6 +1016,15 @@ impl Pictures {
             }
         }
         let shown: HashSet<Arc<Key>> = hung.iter().map(|(key, _, _)| Arc::clone(key)).collect();
+        // Once per new list of files, since the walk hashes every path. A list
+        // rebuilt in place is missed until the next, which only delays a delete.
+        let files = frame.files();
+        let listing = (files.as_ptr() as usize, files.len());
+        if listing != self.listing && self.built.keys().any(|key| !shown.contains(key)) {
+            self.listing = listing;
+            let listed: HashSet<&str> = files.iter().map(|file| file.path.as_str()).collect();
+            self.retire_where(|key, _| !shown.contains(key) && !listed.contains(key.path.as_str()));
+        }
         self.keep(&shown);
         // Before any job is sent, or the worker can skip one as not on screen.
         if let Ok(mut on_screen) = self.shown.lock() {
@@ -1861,6 +1886,85 @@ mod tests {
         };
         assert!(sent(true).contains("o=z"), "asked to compress, it sent raw");
         assert!(!sent(false).contains("o=z"), "it compressed unasked");
+    }
+
+    #[test]
+    fn kitty_unsent_dropped() {
+        let mut pictures = Pictures::unpicked(
+            Inks {
+                canvas: (0, 0, 0),
+                changed: (255, 0, 0),
+            },
+            Box::new(|| {}),
+        );
+        let key = Arc::new(Key {
+            path: "a.png".to_owned(),
+            before: Some(1),
+            after: Some(2),
+            shape: Shape {
+                kind: Kind::Three,
+                rows: 1,
+                slots: Vec::new(),
+            },
+        });
+        // Built after it scrolled away, so never on screen.
+        let built = Built {
+            kitty: vec![7],
+            stored: 1,
+            ..undecoded()
+        };
+        pictures.built.insert(key, Ready(Arc::new(built)));
+        pictures.keep(&HashSet::new());
+        assert_eq!(pictures.kept(), 0, "a picture never on screen was kept");
+    }
+
+    #[test]
+    fn kitty_stale_side() {
+        let mut pictures = Pictures::unpicked(
+            Inks {
+                canvas: (0, 0, 0),
+                changed: (255, 0, 0),
+            },
+            Box::new(|| {}),
+        );
+        let key = |before, after| {
+            Arc::new(Key {
+                path: "a.png".to_owned(),
+                before: Some(before),
+                after: Some(after),
+                shape: Shape {
+                    kind: Kind::Three,
+                    rows: 1,
+                    slots: Vec::new(),
+                },
+            })
+        };
+        let (staged, unstaged, edited) = (key(1, 2), key(2, 3), key(2, 4));
+        for (id, key) in [(1, &staged), (2, &unstaged), (3, &edited)] {
+            let built = Built {
+                kitty: vec![id],
+                stored: 1,
+                ..undecoded()
+            };
+            pictures
+                .built
+                .insert(Arc::clone(key), Ready(Arc::new(built)));
+        }
+        pictures.keep(&HashSet::from([Arc::clone(&staged), Arc::clone(&unstaged)]));
+        pictures.keep(&HashSet::from([Arc::clone(&unstaged)]));
+        assert!(
+            pictures.get(&staged).is_some(),
+            "the staged picture of a shown path went"
+        );
+        pictures.keep(&HashSet::from([Arc::clone(&edited)]));
+        assert!(
+            pictures.get(&unstaged).is_none(),
+            "the picture an edit replaced was kept"
+        );
+        assert!(
+            pictures.get(&staged).is_some(),
+            "an edit to the worktree dropped the staged picture"
+        );
     }
 
     #[test]

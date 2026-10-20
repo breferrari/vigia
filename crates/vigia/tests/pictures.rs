@@ -1023,6 +1023,29 @@ fn kitty_kept_off_screen() {
 }
 
 #[test]
+fn kitty_deleted_on_leave() {
+    let (scratch, mut pane) = protocol_pane("pictures-kitty-leave", ProtocolType::Kitty);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let sent = kitty_ids(&pane.draw(&view));
+    assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
+
+    // The image is reverted, so its file leaves the diff.
+    scratch.checkout("screen.png");
+    frame.advance().expect("advance");
+    pane.view(&mut frame);
+    let deletes = pane.pictures.retired();
+    for id in &sent {
+        assert!(
+            deletes.contains(&format!("a=d,d=I,i={id},q=2")),
+            "image {id} outlived its file in the diff: {deletes:?}"
+        );
+    }
+}
+
+#[test]
 fn kitty_deleted_on_edit() {
     let (scratch, mut pane) = protocol_pane("pictures-kitty-edit", ProtocolType::Kitty);
     let worktree = scratch.worktree();
