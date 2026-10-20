@@ -13,7 +13,7 @@
 // its mutation finishes. At `--limit` minutes (default 30) of wall time the run
 // stops, restores the file, and lists what did not run; the limit covers the
 // unmutated runs too. Exit 0 all killed, 1 any survived or broke, 2 aborted, 3
-// stopped at the limit with nothing survived.
+// stopped at the limit with nothing survived or broke.
 
 import { createHash } from "node:crypto";
 import { execSync, spawn } from "node:child_process";
@@ -69,8 +69,8 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
 		process.exit(2);
 	});
 }
-// Run `line` until it exits or the limit passes. `status` is null when the limit
-// stopped it.
+// Run `line` until it exits or the limit passes, which sets `late`. A run that
+// could not start, or was killed by a signal, has status 1.
 function test(line) {
 	return new Promise((resolve) => {
 		const child = spawn(line, {
@@ -87,7 +87,14 @@ function test(line) {
 		const timer = setTimeout(() => {
 			late = true;
 			stop(child);
+			// Not waiting on `close`: a kill that failed would never send it.
+			resolve({ late, status: 1, stdout, stderr });
 		}, Math.max(0, ends - Date.now()));
+		child.on("error", (error) => {
+			clearTimeout(timer);
+			running = null;
+			resolve({ late, status: 1, stdout, stderr: `${stderr}${error}` });
+		});
 		child.on("close", (status) => {
 			clearTimeout(timer);
 			running = null;

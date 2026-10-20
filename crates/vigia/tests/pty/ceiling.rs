@@ -1,6 +1,6 @@
 //! The ceiling on a wait for something to happen. A copy of
-//! `vigia-core/tests/support/ceiling.rs`, so the pty tests read nothing outside
-//! this package.
+//! `vigia-core/tests/support/ceiling.rs`, so the pty and update tests stay off
+//! the list of tests that read outside this package.
 
 use std::time::Duration;
 
