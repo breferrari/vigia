@@ -489,7 +489,7 @@ pub type Window = ratatui::crossterm::terminal::WindowSize;
 
 /// The cell in `now`, from the cell `queried` in `then`, kept at `current`
 /// unless it moved further than the windows' leftover pixels can explain:
-/// either window may hold up to a cell beyond its whole cells, so a pane that
+/// each window may hold up to a cell beyond its whole cells, so a pane that
 /// only gains or loses cells keeps its cell. `None` when either reports no
 /// pixels.
 pub fn scaled_cell(queried: Cell, current: Cell, then: &Window, now: &Window) -> Option<Cell> {
@@ -500,8 +500,10 @@ pub fn scaled_cell(queried: Cell, current: Cell, then: &Window, now: &Window) ->
         let (cell, at) = (f64::from(cell), f64::from(at));
         let scaled = cell * f64::from(px_now) * f64::from(cells_then)
             / (f64::from(px_then) * f64::from(cells_now));
-        let slack = at / f64::from(cells_now) + cell / f64::from(cells_then);
-        if (scaled - at).abs() <= slack {
+        // Leftover in the window now can only raise `scaled`, and in the
+        // query's window only lower it, by up to a cell each.
+        let moved = scaled - at;
+        if -at / f64::from(cells_then) <= moved && moved <= at / f64::from(cells_now) {
             return Some(at as u16);
         }
         Some(scaled.round().clamp(1.0, f64::from(u16::MAX)) as u16)
@@ -1779,6 +1781,37 @@ mod tests {
                 &window(50, 15, 250, 150)
             ),
             Some((10, 20))
+        );
+        // Rounded, not cut.
+        assert_eq!(at(&window(85, 30, 1000, 600)), Some((12, 20)));
+        // Gone and come back through windows with leftover pixels.
+        let gone = scaled_cell(
+            (10, 20),
+            (10, 20),
+            &window(100, 10, 1000, 200),
+            &window(100, 40, 1000, 920),
+        );
+        assert_eq!(gone, Some((10, 23)));
+        assert_eq!(
+            scaled_cell(
+                (10, 20),
+                (10, 23),
+                &window(100, 10, 1000, 200),
+                &window(100, 10, 1000, 200)
+            ),
+            Some((10, 20)),
+            "the query's own window kept the zoomed cell"
+        );
+        // Zoomed to twice, then widened: the query window's leftover lowers the
+        // scaled cell, and the current one stays.
+        assert_eq!(
+            scaled_cell(
+                (10, 20),
+                (20, 40),
+                &window(10, 30, 109, 600),
+                &window(40, 15, 800, 600)
+            ),
+            Some((20, 40))
         );
         assert_eq!(at(&window(100, 30, 0, 0)), None);
         assert_eq!(
