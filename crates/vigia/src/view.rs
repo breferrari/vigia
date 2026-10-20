@@ -428,12 +428,12 @@ impl Row {
     }
 
     /// Whether this is a display row the bar does not count: a continuation, a
-    /// note row or a row of the box. The bar's question and not the copy's: a
+    /// note row, a row of the box or a picture's. The bar's question and not the copy's: a
     /// `Wrap` is the line above it cut, and a `Note` is not that line at all.
     pub fn is_display(&self) -> bool {
         matches!(
             self,
-            Self::Wrap { .. } | Self::Note { .. } | Self::Box { .. }
+            Self::Wrap { .. } | Self::Note { .. } | Self::Box { .. } | Self::Picture { .. }
         )
     }
 

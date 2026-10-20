@@ -1,0 +1,37 @@
+# One grouped pull request per ecosystem a week, minor and patch updates only;
+# a major update arrives on its own, so one breaking bump holds back nothing.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    # Pinned on purpose: ratatui-image to a release candidate (SPEC §6), and
+    # hayro to the version the patched hayro-syntax in vendor/ applies to.
+    ignore:
+      - dependency-name: ratatui-image
+      - dependency-name: hayro
+      - dependency-name: hayro-syntax
+    open-pull-requests-limit: 2
+    labels: [internal]
+    commit-message:
+      prefix: chore
+  - package-ecosystem: github-actions
+    directory: /
+    # dist generates release.yml and refuses a release when it was edited.
+    exclude-paths:
+      - .github/workflows/release.yml
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    open-pull-requests-limit: 2
+    labels: [internal]
+    commit-message:
+      prefix: chore

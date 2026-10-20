@@ -77,6 +77,8 @@ cargo test --release --test budgets --features vigia/pdf           # a release g
 cargo clippy --workspace --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps   # the docs, with the warnings CI refuses
 cargo fmt --all
+cargo deny check advisories licenses sources   # cargo install cargo-deny --version 0.20.2 --locked
+cargo deny --exclude-dev check bans             # no crate that needs a C toolchain, outside dev-dependencies
 ```
 
 To look at every picture state beside ordinary code edits, build the scene bed and run `vigia` on what it prints in another pane:
@@ -93,6 +95,8 @@ PDF pictures are behind the `pdf` feature. The release binaries have it on, and 
 The suites run under nextest with its `ci` profile, which runs every test and reports every failure in one pass; `cargo test`, and nextest without that profile, stop at the first failure. The release gates run under `cargo test`, as CI runs them. CI sets `VIGIA_BUDGET_SLACK=3` on every step, because its shared runners are slow.
 
 CI runs on Linux, macOS and Windows, with a musl leg for the artifact that Linux actually ships. The budget gates run in debug on every commit. The absolute wall-clock tier runs in release only. A pull request that changes only documents, skills, templates or images runs the suites that read documents on Linux and skips the rest, so it finishes in a couple of minutes. The `full-ci` label forces the whole run on any pull request.
+
+The dependency check reads `deny.toml`. It fails on a known advisory, a licence outside the allowed list, any crate it bans for needing a C toolchain (outside dev-dependencies), and any source other than crates.io. It runs on every pull request that changes code, and weekly on `main`, because a new advisory needs no code change. An ignored advisory carries its reason in `deny.toml`.
 
 ## What this project will not do
 

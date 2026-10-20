@@ -3694,3 +3694,183 @@ fn nextest_time_bound() {
         "a nextest profile never kills a hung test"
     );
 }
+
+/// The crates `deny.toml`'s `bans.deny` list bans outright, by name. An entry
+/// with `wrappers` is let through those crates, so it does not count.
+fn denied_crates(config: &str) -> Vec<String> {
+    let config = format!("\n{}", without_comments(config));
+    let Some((_, bans)) = config.split_once("\n[bans]") else {
+        return Vec::new();
+    };
+    let bans = bans.split("\n[").next().unwrap_or_default();
+    let Some((_, deny)) = bans.split_once("\ndeny = [") else {
+        return Vec::new();
+    };
+    let deny = deny.split("\n]").next().unwrap_or_default();
+    deny.lines()
+        .filter(|entry| !entry.contains("wrappers"))
+        .filter_map(|entry| entry.split_once("crate = \""))
+        .filter_map(|(_, rest)| rest.split_once('"').map(|(name, _)| name.to_owned()))
+        .collect()
+}
+
+/// The crates SPEC §6 rules out that `config` does not ban.
+fn missing_bans(config: &str) -> Vec<&'static str> {
+    let denied = denied_crates(config);
+    [
+        "cc",
+        "cmake",
+        "bindgen",
+        "onig_sys",
+        "aws-lc-sys",
+        "ring",
+        "openssl-sys",
+    ]
+    .into_iter()
+    .filter(|name| !denied.iter().any(|ban| ban == name))
+    .collect()
+}
+
+/// `deny.toml` reads the graph the release ships: the dist targets, and bans
+/// every crate that brings a C toolchain.
+#[test]
+fn deny_policy() {
+    let fixture = "[bans]\nskip = [\n    { crate = \"ring\" },\n]\ndeny = [\n    { crate = \"cc\", reason = \"x\" },\n    { crate = \"cmake\", wrappers = [\"x\"] },\n]\n[sources]\n";
+    assert_eq!(
+        missing_bans(fixture),
+        [
+            "cmake",
+            "bindgen",
+            "onig_sys",
+            "aws-lc-sys",
+            "ring",
+            "openssl-sys"
+        ],
+        "the scan missed which bans are absent"
+    );
+    let deny = repo_file("deny.toml");
+    assert_eq!(
+        missing_bans(&deny),
+        Vec::<&str>::new(),
+        "deny.toml does not ban these"
+    );
+    // The licences `cargo deny list` found the release graph needs, 2026-10-20.
+    let mut allowed = toml_array(&deny, "allow");
+    allowed.sort();
+    assert_eq!(
+        allowed,
+        [
+            "0BSD",
+            "Apache-2.0",
+            "Apache-2.0 WITH LLVM-exception",
+            "BSD-2-Clause",
+            "BSD-3-Clause",
+            "BSL-1.0",
+            "CC0-1.0",
+            "CDLA-Permissive-2.0",
+            "ISC",
+            "MIT",
+            "MIT-0",
+            "MPL-2.0",
+            "Unicode-3.0",
+            "Unlicense",
+            "Zlib",
+        ],
+        "deny.toml allows other licences than the graph needs"
+    );
+    assert!(
+        without_comments(&deny).contains("unused-allowed-license = \"deny\""),
+        "an allowance the graph no longer needs would pass"
+    );
+    let manifest = repo_file("Cargo.toml");
+    let dist = manifest
+        .split_once("[workspace.metadata.dist]")
+        .map(|(_, rest)| rest.split("\n[").next().unwrap_or_default())
+        .expect("a dist table");
+    assert_eq!(
+        toml_array(&deny, "targets"),
+        toml_array(&format!("\n{dist}"), "targets"),
+        "deny.toml checks other targets than the release builds"
+    );
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    assert!(
+        ci.contains("cargo deny check advisories licenses sources")
+            && ci.contains("cargo deny --exclude-dev check bans"),
+        "ci.yml does not run the full dependency check"
+    );
+    assert!(
+        ci.contains("\"deny=${NEEDS_DENY_RESULT}\"")
+            && ci.contains("NEEDS_DENY_RESULT: ${{ needs.deny.result }}")
+            && jobs_of(&ci)
+                .iter()
+                .any(|(job, block)| job == "ci-complete" && block.contains(" deny,")),
+        "ci complete does not wait for and judge the dependency check"
+    );
+    let weekly = without_comments(&repo_file(".github/workflows/deny.yml"));
+    assert!(
+        weekly.contains("cargo deny check advisories") && weekly.contains("schedule:"),
+        "main is not checked for new advisories on a schedule"
+    );
+}
+
+/// The `uses:` lines in `workflow` that name an action by anything but a full
+/// commit or a local path.
+fn unpinned_uses(workflow: &str) -> Vec<String> {
+    without_comments(workflow)
+        .lines()
+        .filter_map(|line| {
+            line.trim_start()
+                .trim_start_matches("- ")
+                .strip_prefix("uses:")
+        })
+        .map(str::trim)
+        .filter(|target| {
+            if target.starts_with("./") {
+                return false;
+            }
+            let Some((_, rev)) = target.split_once('@') else {
+                return true;
+            };
+            !(rev.len() == 40 && rev.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Every workflow names its actions by commit, so a moved tag cannot change
+/// what runs.
+#[test]
+fn actions_pinned() {
+    let fixture = "      - uses: actions/checkout@v6\n      - uses: a/b@0123456789abcdef0123456789abcdef01234567 # v1\n      - uses: ./.github/workflows/x.yml\n";
+    assert_eq!(
+        unpinned_uses(fixture),
+        ["actions/checkout@v6"],
+        "the scan missed a tag"
+    );
+    let dir = repo_root().join(".github/workflows");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).expect("the workflows") {
+        let path = entry.expect("an entry").path();
+        if path.extension().is_none_or(|ext| ext != "yml") {
+            continue;
+        }
+        let text = read(&path);
+        assert_eq!(
+            unpinned_uses(&text),
+            Vec::<String>::new(),
+            "{} names actions by tag",
+            path.display()
+        );
+        checked += text.matches("uses:").count();
+    }
+    assert!(
+        checked >= 50,
+        "only {checked} uses: lines found, so the scan read nothing"
+    );
+    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
+    assert!(
+        ci.contains("zizmor --offline --config .github/zizmor.yml .github/workflows")
+            && ci.contains("\"zizmor=${NEEDS_ZIZMOR_RESULT}\""),
+        "ci complete does not judge the workflow audit"
+    );
+}

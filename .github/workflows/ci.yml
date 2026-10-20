@@ -419,6 +419,47 @@ jobs:
           done
           exit $status
 
+  # Advisories, licences, banned crates and sources, from `deny.toml`. A new
+  # advisory fails a pull request as a broken test does.
+  deny:
+    name: dependencies
+    needs: [changes]
+    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: cargo-deny@0.20.2
+      - run: cargo deny check advisories licenses sources
+      - run: cargo deny --exclude-dev check bans
+
+  # Every workflow audited on every pull request, documents-only ones too,
+  # since a broken workflow is code whatever else the pull request touched.
+  zizmor:
+    name: workflow audit
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: zizmor@1.31.1
+      - run: zizmor --offline --config .github/zizmor.yml .github/workflows
+
   musl:
     name: static musl binary
     needs: [changes]
@@ -590,7 +631,7 @@ jobs:
   ci-complete:
     name: ci complete
     if: always()
-    needs: [changes, lint, test, budgets, benches, pure-rust, musl, docs]
+    needs: [changes, lint, test, budgets, benches, pure-rust, deny, zizmor, musl, docs]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -610,6 +651,8 @@ jobs:
           NEEDS_BUDGETS_RESULT: ${{ needs.budgets.result }}
           NEEDS_BENCHES_RESULT: ${{ needs.benches.result }}
           NEEDS_PURE_RUST_RESULT: ${{ needs.pure-rust.result }}
+          NEEDS_DENY_RESULT: ${{ needs.deny.result }}
+          NEEDS_ZIZMOR_RESULT: ${{ needs.zizmor.result }}
           NEEDS_MUSL_RESULT: ${{ needs.musl.result }}
           NEEDS_DOCS_RESULT: ${{ needs.docs.result }}
         run: |
@@ -621,5 +664,7 @@ jobs:
             "budgets=${NEEDS_BUDGETS_RESULT}" \
             "benches=${NEEDS_BENCHES_RESULT}" \
             "pure-rust=${NEEDS_PURE_RUST_RESULT}" \
+            "deny=${NEEDS_DENY_RESULT}" \
+            "zizmor=${NEEDS_ZIZMOR_RESULT}" \
             "musl=${NEEDS_MUSL_RESULT}" \
             "docs=${NEEDS_DOCS_RESULT}"

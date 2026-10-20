@@ -1759,3 +1759,105 @@ fn prepick_build_stale() {
         );
     }
 }
+
+/// The most cells of any one column that carry a scrollbar's thumb.
+fn thumb_length(backend: &TestBackend) -> usize {
+    let buffer = backend.buffer();
+    let area = buffer.area;
+    (0..area.width)
+        .map(|x| {
+            (0..area.height)
+                .filter(|&y| buffer[(x, y)].symbol() == "█")
+                .count()
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+#[test]
+fn picture_rows_display() {
+    // A picture's rows hang under its size line and count toward nothing.
+    let (scratch, mut pane) = stacked("pictures-display", ProtocolType::Halfblocks, 30);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let pictures = picture_rows(&view).len();
+    assert!(pictures > 3, "the picture holds {pictures} rows");
+    assert!(
+        view.rows.iter().any(|row| matches!(row, Row::Sized { .. })),
+        "no size line on screen"
+    );
+    assert_eq!(
+        view.shown(),
+        view.rows.len() - pictures,
+        "the picture's rows were counted as rows of the diff"
+    );
+}
+
+#[test]
+fn thumb_ignores_pictures() {
+    // A screen that is mostly picture shows fewer rows of the diff than one of
+    // text, so its thumb is shorter.
+    let (scratch, mut pane) = stacked("pictures-thumb", ProtocolType::Halfblocks, 30);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    let pictured = thumb_length(&pane.draw(&view));
+    pane.scroll(&mut frame, 40);
+    let view = pane.settled(&mut frame);
+    assert!(
+        picture_rows(&view).is_empty(),
+        "the picture is still on screen"
+    );
+    let text = thumb_length(&pane.draw(&view));
+    assert!(
+        pictured < text,
+        "the thumb over a picture is {pictured} rows, as long as over text ({text})"
+    );
+}
+
+#[test]
+fn drag_reaches_end() {
+    let (scratch, mut pane) = stacked("pictures-drag", ProtocolType::Halfblocks, 30);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    pane.settled(&mut frame);
+    let height = pane.body(&frame).diff;
+    pane.app
+        .apply(Action::DiffTo(vigia::TRACK_SCALE), &mut frame, height)
+        .expect("drag");
+    let view = pane.settled(&mut frame);
+    let drawn = pane.draw(&view);
+    let text: String = drawn
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(
+        text.contains("line 90"),
+        "a drag to the end left the last line off screen"
+    );
+}
+
+#[test]
+fn position_ignores_pictures() {
+    // The footer's position counts files, so a picture on screen moves it no
+    // more than the bar.
+    let (scratch, mut pane) = stacked("pictures-position", ProtocolType::Halfblocks, 30);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = pane.settled(&mut frame);
+    assert_eq!(
+        view.top.file, 0,
+        "the pane does not open on the picture's file"
+    );
+    pane.app.draw_pictures(false);
+    let plain = pane.view(&mut frame);
+    assert_eq!(plain.top.file, view.top.file);
+    assert_eq!(plain.files, view.files);
+}
