@@ -1009,6 +1009,17 @@ fn kitty_kept_off_screen() {
         cells_with(&drawn, &PLACEHOLDER.to_string()) > 0,
         "the picture that came back is not placed"
     );
+
+    // Off screen again, then the pane leaves: every image it kept goes.
+    pane.scroll(&mut frame, 150);
+    pane.settled(&mut frame);
+    pane.pictures.retire_all();
+    let deletes = pane.pictures.retired();
+    assert_eq!(
+        deletes.matches("a=d").count(),
+        3,
+        "a kept image outlived the pane: {deletes:?}"
+    );
 }
 
 #[test]

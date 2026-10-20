@@ -257,8 +257,8 @@ pub struct Built {
     pub profiles_differ: bool,
     /// The ids of its Kitty images, which the terminal holds until told to drop them.
     pub kitty: Vec<u32>,
-    /// What those images hold: their unpacked pixels in the terminal, or the
-    /// base64 transmit this process keeps for each, whichever is more.
+    /// Bytes those images hold: their unpacked pixels in the terminal, or, sent
+    /// uncompressed, the larger base64 transmit this process keeps for each.
     pub stored: u64,
     /// Which page of a PDF was drawn, and whether the page count changed.
     pub page_note: Option<String>,
@@ -872,8 +872,13 @@ impl Pictures {
             }
         }
         let paths: HashSet<&str> = shown.iter().map(|key| key.path.as_str()).collect();
+        // Never shown means never sent, so there is nothing in the terminal to keep.
+        let sent: HashSet<Arc<Key>> = self.seen.keys().cloned().collect();
         self.retire_where(|key, built| {
-            !shown.contains(key) && (built.kitty.is_empty() || paths.contains(key.path.as_str()))
+            !shown.contains(key)
+                && (built.kitty.is_empty()
+                    || !sent.contains(key)
+                    || paths.contains(key.path.as_str()))
         });
         self.evict(shown);
     }
