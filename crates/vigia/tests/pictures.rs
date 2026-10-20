@@ -1228,23 +1228,9 @@ fn top_cut_kitty() {
 
 /// The raster height a Sixel sequence declares, from `"Pan;Pad;Ph;Pv`.
 fn sixel_heights(backend: &TestBackend) -> Vec<u32> {
-    backend
-        .buffer()
-        .content()
-        .iter()
-        .filter_map(|cell| {
-            let symbol = cell.symbol();
-            let at = symbol.find("\x1bP")?;
-            let raster = &symbol[at..][symbol[at..].find('"')? + 1..];
-            raster
-                .split(';')
-                .nth(3)?
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect::<String>()
-                .parse()
-                .ok()
-        })
+    sixel_sizes(backend)
+        .into_iter()
+        .map(|(_, height)| height)
         .collect()
 }
 

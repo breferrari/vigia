@@ -512,9 +512,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     frame.draw_svg(drawn);
     shell.pictures.pick(picker);
     // The window the cell was measured in, which a later resize is scaled from.
-    if let Ok(window) = ratatui::crossterm::terminal::window_size() {
-        shell.pictures.window_sized(window);
-    }
+    shell.follow_window();
     if ask {
         // On Windows the query drops a resize that came in during it, and it is
         // sent blind there, so it may have printed.
@@ -1183,6 +1181,13 @@ impl Drop for Shell {
 }
 
 impl Shell {
+    /// Tell the pictures the window's size now, which the cell follows.
+    fn follow_window(&mut self) {
+        if let Ok(window) = ratatui::crossterm::terminal::window_size() {
+            self.pictures.window_sized(window);
+        }
+    }
+
     /// Send the Kitty deletes owed. A failed write leaves the images to the
     /// terminal's own quota.
     fn write_retired(&mut self) {
@@ -1387,10 +1392,8 @@ impl Shell {
                 self.app.warn(format!("redraw: {e}"));
             }
         }
-        if action == Action::Redraw
-            && let Ok(window) = ratatui::crossterm::terminal::window_size()
-        {
-            self.pictures.window_sized(window);
+        if action == Action::Redraw {
+            self.follow_window();
         }
         if !matches!(action, Action::Redraw | Action::Refresh) {
             self.deselect();
@@ -2600,8 +2603,9 @@ mod tests {
         let source = include_str!("lib.rs");
         let shipped = source.split("#[cfg(test)]").next().expect("split");
         for route in [
-            "shell.pictures.pick(picker);\n    // The window the cell was measured in, which a later resize is scaled from.\n    if let Ok(window) = ratatui::crossterm::terminal::window_size() {\n        shell.pictures.window_sized(window);",
-            "if action == Action::Redraw\n            && let Ok(window) = ratatui::crossterm::terminal::window_size()\n        {\n            self.pictures.window_sized(window);",
+            "shell.pictures.pick(picker);\n    // The window the cell was measured in, which a later resize is scaled from.\n    shell.follow_window();",
+            "if action == Action::Redraw {\n            self.follow_window();",
+            "self.pictures.window_sized(window);",
         ] {
             assert!(
                 shipped.contains(route),

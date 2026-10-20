@@ -475,9 +475,9 @@ struct Job {
     key: Arc<Key>,
     sources: Sources,
     formats: (Option<Format>, Option<Format>),
-    /// The cell size in pixels to build at, or `(0, 0)` for the queried one,
+    /// The cell size in pixels to build at, or `None` for the queried one,
     /// as a job sent before the picker was given carries.
-    cell: Cell,
+    cell: Option<Cell>,
 }
 
 /// A cell's width and height in pixels.
@@ -524,7 +524,7 @@ pub struct Pictures {
     shown: Arc<Mutex<HashSet<Arc<Key>>>>,
     jobs: mpsc::Sender<Job>,
     /// Each finished job, with `None` for one skipped.
-    done: mpsc::Receiver<(Arc<Key>, Cell, Option<Built>)>,
+    done: mpsc::Receiver<(Arc<Key>, Option<Cell>, Option<Built>)>,
     /// Kitty images whose picture is gone, waiting to be deleted.
     retired: Vec<u32>,
     /// Whether a delete has to pass through tmux.
@@ -532,10 +532,11 @@ pub struct Pictures {
     /// Where the picker goes, until it has been given.
     picker: Option<mpsc::Sender<Picker>>,
     /// The cell size pictures are built at now.
-    cell: Cell,
-    /// The cell the query found, and the window it was found in once told;
-    /// `None` for half-blocks, whose grid is no cell's.
-    queried: Option<(Cell, Option<Window>)>,
+    cell: Option<Cell>,
+    /// The cell the query found; `None` for half-blocks, whose grid is no cell's.
+    queried: Option<Cell>,
+    /// The window the cell was queried in, once told.
+    then: Option<Window>,
     /// How many images this cache's worker has decoded.
     decoded: Arc<AtomicU64>,
     /// Sizes the worker found since [`Pictures::found_sizes`] last took them.
@@ -657,13 +658,14 @@ impl Pictures {
                 let queried = (base.font_size().width, base.font_size().height);
                 let mut resized: Option<(Cell, Picker)> = None;
                 for job in inbox {
-                    let picker = if job.cell == queried || job.cell == (0, 0) {
-                        &base
-                    } else {
-                        if resized.as_ref().is_none_or(|(cell, _)| *cell != job.cell) {
-                            resized = Some((job.cell, picker_at(&base, job.cell)));
+                    let picker = match job.cell {
+                        Some(cell) if cell != queried => {
+                            if resized.as_ref().is_none_or(|(at, _)| *at != cell) {
+                                resized = Some((cell, picker_at(&base, cell)));
+                            }
+                            resized.as_ref().map_or(&base, |(_, picker)| picker)
                         }
-                        &resized.as_ref().expect("set above").1
+                        _ => &base,
                     };
                     let wanted = still.lock().map_or(
                         true,
@@ -697,8 +699,9 @@ impl Pictures {
             retired: Vec::new(),
             tmux: false,
             picker: Some(picked),
-            cell: (0, 0),
+            cell: None,
             queried: None,
+            then: None,
             decoded,
             found: Vec::new(),
             asked: HashSet::new(),
@@ -778,9 +781,10 @@ impl Pictures {
     pub fn pick(&mut self, picker: Picker) {
         if let Some(picked) = self.picker.take() {
             self.tmux = picker.tmux_detected();
-            self.cell = (picker.font_size().width, picker.font_size().height);
+            let cell = (picker.font_size().width, picker.font_size().height);
+            self.cell = Some(cell);
             let protocol = picker.protocol_type() != ProtocolType::Halfblocks;
-            self.queried = protocol.then_some((self.cell, None));
+            self.queried = protocol.then_some(cell);
             let _ = picked.send(picker);
         }
     }
@@ -791,21 +795,21 @@ impl Pictures {
     /// that first window, so a size gone and come back is the queried one.
     /// Whether the cell changed.
     pub fn window_sized(&mut self, window: Window) -> bool {
-        let Some((queried, then)) = self.queried.as_mut() else {
+        let Some(queried) = self.queried else {
             return false;
         };
-        let Some(then) = then else {
-            *then = Some(window);
+        let Some(then) = &self.then else {
+            self.then = Some(window);
             return false;
         };
-        let Some(cell) = scaled_cell(*queried, then, &window) else {
+        let Some(cell) = scaled_cell(queried, then, &window) else {
             return false;
         };
-        if cell == self.cell {
+        if Some(cell) == self.cell {
             return false;
         }
-        self.cell = cell;
-        self.keep(&HashSet::new());
+        self.cell = Some(cell);
+        self.retire_all();
         true
     }
 
@@ -858,7 +862,7 @@ impl Pictures {
         while let Ok((key, cell, built)) = self.done.try_recv() {
             self.pending.remove(&key);
             // Built at a cell the window has since left: asked for again.
-            if cell != (0, 0) && cell != self.cell {
+            if cell.is_some() && cell != self.cell {
                 self.retired
                     .extend(built.iter().flat_map(|built| built.kitty.iter()));
                 continue;
