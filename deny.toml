@@ -1,6 +1,6 @@
-# What `cargo deny check` holds the dependency graph to. The graph is the
-# release targets' normal and build edges, the one the shipped binaries link
-# and the one the `no C toolchain` job reads.
+# The release targets, as in `[workspace.metadata.dist]`; `package.rs` keeps the
+# two lists equal. Bans run with `--exclude-dev`, as the `no C toolchain` job
+# reads only normal and build edges.
 
 [graph]
 targets = [
@@ -10,20 +10,14 @@ targets = [
     "x86_64-pc-windows-msvc",
 ]
 all-features = true
-exclude-dev = true
 
 [advisories]
 yanked = "deny"
 ignore = [
-    # Unmaintained, through syntect, the settled highlighter; no upgrade exists.
-    # https://rustsec.org/advisories/RUSTSEC-2025-0141
-    { id = "RUSTSEC-2025-0141", reason = "bincode is unmaintained and has no successor version; it reaches vigia only through syntect" },
-    # https://rustsec.org/advisories/RUSTSEC-2024-0320,
-    # https://github.com/trishume/syntect/pull/526
-    { id = "RUSTSEC-2024-0320", reason = "yaml-rust is unmaintained; syntect declined the fork in trishume/syntect#526" },
+    { id = "RUSTSEC-2025-0141", reason = "bincode is unmaintained with no successor, and reaches vigia only through syntect: https://rustsec.org/advisories/RUSTSEC-2025-0141" },
+    { id = "RUSTSEC-2024-0320", reason = "yaml-rust is unmaintained, and syntect declined the fork: https://github.com/trishume/syntect/pull/526" },
 ]
 
-# Every licence the graph needs, from `cargo deny list`, and no more.
 [licenses]
 allow = [
     "0BSD",

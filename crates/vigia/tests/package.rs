@@ -3728,7 +3728,7 @@ fn deny_policy() {
     let manifest = repo_file("Cargo.toml");
     let dist = manifest
         .split_once("[workspace.metadata.dist]")
-        .map(|(_, rest)| rest)
+        .map(|(_, rest)| rest.split("\n[").next().unwrap_or_default())
         .expect("a dist table");
     assert_eq!(
         toml_array(&deny, "targets"),
@@ -3737,7 +3737,8 @@ fn deny_policy() {
     );
     let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
     assert!(
-        ci.contains("cargo deny check advisories licenses bans sources"),
+        ci.contains("cargo deny check advisories licenses sources")
+            && ci.contains("cargo deny --exclude-dev check bans"),
         "ci.yml does not run the full dependency check"
     );
     assert!(

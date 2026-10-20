@@ -77,7 +77,8 @@ cargo test --release --test budgets --features vigia/pdf           # a release g
 cargo clippy --workspace --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps   # the docs, with the warnings CI refuses
 cargo fmt --all
-cargo deny check            # advisories, licences, banned crates and sources; cargo install cargo-deny --locked
+cargo deny check advisories licenses sources   # cargo install cargo-deny --locked
+cargo deny --exclude-dev check bans             # no crate that needs a C toolchain, outside dev-dependencies
 ```
 
 To look at every picture state beside ordinary code edits, build the scene bed and run `vigia` on what it prints in another pane:

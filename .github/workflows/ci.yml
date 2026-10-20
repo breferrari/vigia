@@ -397,7 +397,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
-      - run: cargo deny check advisories licenses bans sources
+      - run: cargo deny check advisories licenses sources
+      - run: cargo deny --exclude-dev check bans
 
   musl:
     name: static musl binary
