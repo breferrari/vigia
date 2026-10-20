@@ -890,12 +890,16 @@ fn names(keys: &str, token: &str) -> bool {
     })
 }
 
-/// The gestures `README.md`'s two tables teach, as the cells a reader meets there.
+/// The gestures the key and mouse tables of `README.md` and `docs/KEYS.md`
+/// teach, as the cells a reader meets there.
 fn readme_gestures() -> Vec<String> {
-    let readme = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md"),
-    )
-    .expect("README.md is where the crate says it is");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let readme = ["README.md", "docs/KEYS.md"]
+        .map(|name| {
+            std::fs::read_to_string(root.join(name))
+                .unwrap_or_else(|e| panic!("read {name}: {e}"))
+        })
+        .join("\n");
 
     // Each table follows a bold caption. A row is `| cell | cell |`, and the left
     // cell is what a reader looks for.
@@ -933,7 +937,7 @@ fn readme_gestures() -> Vec<String> {
     }
     assert!(
         out.len() > 10,
-        "README.md's key and mouse tables parsed to {} rows, so this gate is \
+        "the key and mouse tables of README.md and docs/KEYS.md parsed to {} rows, so this gate is \
          reading the wrong thing and would pass over anything",
         out.len()
     );

@@ -6,7 +6,7 @@
 
 *Portuguese: a watchman, the one who keeps watch. At sea, also a porthole.*
 
-[![crates.io](https://img.shields.io/crates/v/vigia?style=for-the-badge&logo=rust&color=39c5cf&labelColor=0d1117)](https://crates.io/crates/vigia) [![downloads](https://img.shields.io/crates/d/vigia?style=for-the-badge&color=3fb950&labelColor=0d1117)](https://crates.io/crates/vigia) [![ci](https://img.shields.io/github/actions/workflow/status/breferrari/vigia/ci.yml?branch=main&style=for-the-badge&label=ci&color=3fb950&labelColor=0d1117)](https://github.com/breferrari/vigia/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT-e3b341?style=for-the-badge&labelColor=0d1117)](LICENSE) [![rust](https://img.shields.io/badge/rust-1.89+-f85149?style=for-the-badge&logo=rust&labelColor=0d1117)](https://www.rust-lang.org)
+[![crates.io](https://img.shields.io/crates/v/vigia?style=for-the-badge&logo=rust&color=39c5cf&labelColor=0d1117)](https://crates.io/crates/vigia) [![downloads](https://img.shields.io/crates/d/vigia?style=for-the-badge&color=3fb950&labelColor=0d1117)](https://crates.io/crates/vigia) [![ci](https://img.shields.io/github/actions/workflow/status/breferrari/vigia/ci.yml?branch=main&style=for-the-badge&label=ci&color=3fb950&labelColor=0d1117)](https://github.com/breferrari/vigia/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-MIT-e3b341?style=for-the-badge&labelColor=0d1117)](https://github.com/breferrari/vigia/blob/main/LICENSE) [![rust](https://img.shields.io/crates/msrv/vigia?style=for-the-badge&logo=rust&label=rust&color=f85149&labelColor=0d1117)](https://crates.io/crates/vigia)
 
 **Your agent writes in one pane. `vigia` watches in the pane beside it, and carries your words back.**
 
@@ -28,6 +28,7 @@ It shows the working-tree diff live, as the agent writes it. Click a line, type 
 |---|---|
 | 🤖 **For the pane beside the agent** | Zero input. It follows the newest change and scrolls to it on its own |
 | ✍️ **Talk back to a line** | Click a line number, type, `Enter`. Your agent gets the file, the line and your words |
+| 🖼️ **Pictures, not bytes** | A changed image, SVG or PDF shows its old and new pictures side by side (from 1.2.0, unreleased) |
 | 🕰️ **Look back without leaving** | `B` stands the pane anywhere in the branch's history, and back |
 | 🪶 **Cheap enough to leave open for a week** | Zero wakeups while idle. Under 5% memory drift over 24 hours |
 | 📐 **Fits half a laptop screen** | Legible at 40 columns, because that is the actual pane you have |
@@ -38,46 +39,70 @@ It shows the working-tree diff live, as the agent writes it. Click a line, type 
 
 ---
 
-## 🚀 Your first five minutes
+<a id="talk-back"></a>
 
-**1. Install it and point it at a repo.**
+## ✍️ Talk back to the line
 
-```sh
-cargo install vigia
-vigia                                        # the tree you are in
-```
-
-No Rust toolchain? Use Homebrew or a prebuilt installer, under [Other installs](#other-installs) below. Leave it in the pane beside your agent. There is nothing to configure and nothing to press.
-
-**2. Let it follow.** As your agent writes, files appear in the pinned list at the top and the diff scrolls itself to whatever landed last. The sparkline says *when*, the heat strip says *where in the file*, the counters say *how much*. You are meant to glance, not to read.
-
-**3. Say something about a line.** Click any line number in the diff and a box opens under it. Type one sentence, press `Enter`.
+You see a line you want changed. Click its line number, type one sentence, press `Enter`.
 
 ```
-  41 +      self.deadline = Instant::now() + DEBOUNCE;
+  40 +          self.deadline = Instant::now() + DEBOUNCE;
      ✎ should this reset on every event, or just the first?
 ```
 
-The note goes to the agent anchored to that file and that line. Its answer arrives on a row under yours. This needs [one registration](#notes), once, for every project you will ever open.
+1. **The pane writes the note first.** Each note is a file in a directory kept for this worktree under your state directory, never inside the worktree or `.git`. So a note survives a restart of the pane or the agent, and two repositories never see each other's notes.
+2. **Then it hands the note to the agent.** The footer says `sent` when a registered agent session took it, and `noted` when none did and the note is waiting for the agent to look. `sent` means the session took the line. It does not mean the agent has read it. If the agent is waiting on a permission prompt, the note queues and is handled once you answer (observed with Claude Code 2.1.304).
+3. **The agent gets the file, the line, your words and the code around it**, as plain text:
 
-**4. Look back when you need to.** `B` opens a list of every place the pane can stand: the live tree, the branch point, or any commit behind it. Pick one and the whole pane, counts and all, moves there. `Esc` and you are back.
+   ```
+   vigia note on src/engine/watch.rs:40
 
-**5. Forget the rest.** Press `?` and every gesture is on screen. Press `m` and every on/off setting is. Neither moves a row.
+   should this reset on every event, or just the first?
 
-<a id="other-installs"></a>
+     37 |     }
+     38 |     fn coalesce(&mut self, ev: Event) -> Option<Frame> {
+     39 |         if self.pending.is_empty() {
+   > 40 |             self.deadline = Instant::now() + DEBOUNCE;
+     41 |         }
+     42 |         self.pending.push(ev);
+     43 |         None
 
-<details>
-<summary><b>Other installs: Homebrew, prebuilt binaries, <code>--version</code></b></summary>
+   Resolve it with the vigia MCP server: resolve(id: "65e47ff14944b-79fa-0", note: "<one line saying what you did>").
+   ```
 
-<br>
+4. **The agent fixes the line and resolves the note** with one line saying what it did. That line appears under your note, and then the note leaves. If the agent needs to ask you something, it can `reply` instead and leave the note open.
 
-Homebrew, on macOS and Linux:
+`vigia` calls no model, summarises nothing and judges nothing. It carries your words, and the agent answers.
+
+**How it reaches the agent.** `vigia mcp` is an MCP server with three tools, `notes`, `reply` and `resolve`. Two hooks do the rest: `vigia mcp register` records a running Claude Code session so `Enter` can post the note straight into it, and `vigia mcp pending` puts one line in front of your next prompt when a note is waiting.
+
+| | MCP server | Posted into a running session | Line before your next prompt |
+|---|---|---|---|
+| **Claude Code** | yes | yes | yes |
+| **Any other MCP client** (Codex, for one) | yes | no | yes, with a prompt hook |
+
+Without the live post, a note waits until the agent next calls `notes` or you send your next prompt.
+
+**How fast.** From `Enter` to the note arriving on the session's socket: 3.4 ms at the median and 21 ms at the slowest, over 32 notes on an Apple M1 Max with a release build. How soon the agent acts on it after that is up to the agent.
+
+**Set it up once**, for every project you open:
 
 ```sh
-brew install breferrari/tap/vigia
+claude mcp add --scope user vigia -- vigia mcp
 ```
 
-A prebuilt binary, with no toolchain at all:
+Then add the three hooks to `~/.claude/settings.json`. [**Notes to the agent**](https://github.com/breferrari/vigia/blob/main/docs/NOTES.md) has the hooks, what each note state means, other agents, and the small print.
+
+---
+
+## 🚀 Install
+
+```sh
+cargo install vigia                          # with a Rust toolchain
+brew install breferrari/tap/vigia            # Homebrew, macOS and Linux
+```
+
+Or a prebuilt binary with no toolchain at all:
 
 ```sh
 # macOS and Linux
@@ -87,40 +112,19 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/breferrari/vigia/releas
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/breferrari/vigia/releases/latest/download/vigia-installer.ps1 | iex"
 ```
 
-```sh
-vigia ~/code/some-repo                       # or any path
-vigia --version                              # or -V. It is the only option there is
-```
+[**Installing**](https://github.com/breferrari/vigia/blob/main/docs/INSTALL.md) covers the release archives, checking a download, and upgrading on Windows while an agent session is open.
 
-Every [release](https://github.com/breferrari/vigia/releases) carries archives for x86-64 Linux, Intel and Apple-silicon macOS, and x86-64 Windows. The Linux build is statically linked against musl, so it runs on any distribution without matching a system libc. `cargo install vigia` (1.1.0) needs Rust 1.89 or newer. Building `main` needs the latest stable, 1.99 or newer.
+## 🧭 Your first five minutes
 
-**Check a download, from 1.2.0 on.** GitHub stores a build attestation for each platform archive in a release, tying it to this repository's release workflow and the commit it built. Download the archive for your platform from the release page and verify it with `gh attestation verify <archive> --repo breferrari/vigia`; an installer fetches the same archive. Each release binary also carries the list of crates it was built from (a `cargo install` build does not), so `cargo audit bin "$(command -v vigia)"` can check an installed copy for known advisories. Archives before 1.2.0 carry neither.
-
-**No C toolchain, on any of those paths.** Every dependency is pure Rust, and CI asserts it on each shipped target rather than claiming it: a `cc`, `cmake` or `bindgen` entering the dependency graph fails the build.
-
-</details>
-
-<details>
-<summary><b>Upgrading on Windows, and <code>Access is denied. (os error 5)</code></b></summary>
-
-<br>
-
-Windows will not let anything replace a running `.exe`, and the `vigia mcp` you register below runs for as long as each agent session does. So an upgrade fails while any session is open, naming only cargo and a path: nothing in the error connects a diff monitor's upgrade to a coding agent that started hours earlier. `cargo install` and the PowerShell installer both write to the same directory, so both fail this way. Move the running binary aside and the upgrade goes through, with every open session still served:
-
-```powershell
-$bin = if ($env:CARGO_HOME) { "$env:CARGO_HOME\bin" } else { "$env:USERPROFILE\.cargo\bin" }
-Move-Item "$bin\vigia.exe" "$bin\vigia.exe.old" -Force
-cargo install vigia
-```
-
-A running process follows its image through a rename, so the servers keep answering and the notes they hold are untouched. **You are not accumulating copies.** The name is always the same one, so an upgrade recycles it rather than adding to it, and `vigia` deletes it the next time one starts and finds nothing holding it, which is the next pane you open or the next session your agent starts. Windows keeps it alive only for as long as a process that began before the upgrade is still running.
-
-**Do not stop the processes instead.** That frees the same path and splits every session that is open: live delivery into the session keeps working, but the agent's MCP server does not come back, and the agent reads a note it no longer has the tools to answer. A failed upgrade tells you what is wrong. That does not.
-
-</details>
+1. **Point it at a repo.** `vigia` watches the tree you are in, or `vigia ~/code/some-repo`. Leave it in the pane beside your agent. There is nothing to configure and nothing to press.
+2. **Let it follow.** As your agent writes, files appear in the pinned list at the top and the diff scrolls to whatever landed last. The sparkline says *when*, the heat strip says *where in the file*, the counters say *how much*.
+3. **Say something about a line.** Click a line number, type, `Enter`, as in [Talk back to the line](#talk-back).
+4. **Look back when you need to.** `B` lists every place the pane can stand: the live tree, the branch point, or any commit behind it. `Esc` and you are back.
+5. **Forget the rest.** `?` puts every gesture on screen, and `m` every on/off setting.
 
 ---
-## 👀 Reading the pane
+
+## 👀 What you see
 
 ```
    header  │  my-repo · main · current ▾ · 3 changed                   +55 -10
@@ -138,319 +142,29 @@ A running process follows its image through a rename, so the servers keep answer
    status  │  q quit · f follow · m config · ? keys   3.1ms frame  25MiB  follow ▶  1/3
 ```
 
-The list is **pinned**, so the signals stay on screen while you read the diff under them. Press `r` on a pane of 139 columns or more and it moves *beside* the diff instead, as a left rail, so a path sits against its own numbers rather than across a void that grows with the pane. It costs the diff real width, which is why you ask for it rather than the pane deciding: `r` again puts it back, and below 139 the key does nothing. The pane drawn above is narrower than that, and the stacked layout is the default at every width.
+Each row answers one question: the caret says where you are, the pulse `●` which file was written last, the note mark whose turn it is, the heat strip **where** in the file the change is, the sparkline **when** it changed, and the counters **how much**. The diff is syntax highlighted, and the words that changed inside a line are lit brighter than the line around them.
 
-Press `s` and the diff shows **only the file the caret is on**. Scrolling stops at that file's two ends instead of carrying on past them into the next one, and the scrollbar measures the file rather than the whole changeset, so you are keeping one position in your head instead of two. It is follow's companion: `f` decides which file the pane goes to on its own, `s` decides how much of the rest of the tree your own scrolling reaches once it is there. `n`, `p`, the digits, a click on a listed file and follow itself all still move between files, and `s` again gives the whole diff back.
+**A changed picture shows as pictures** (from 1.2.0, unreleased). A changed image, SVG or PDF draws its old and new versions side by side, with the changed pixels marked. Terminals that draw Kitty graphics, Sixel or iTerm2 images (kitty, Ghostty, iTerm2, WezTerm, foot, Windows Terminal) draw them sharp. Everywhere else they draw in half-blocks, which need 24-bit colour. PDFs need a release binary or Homebrew: a `cargo install` build shows a changed PDF as binary.
 
-Press `a` and the pane adds **what is staged**, as a second run beside the first. Two labelled lists share the top panel, unstaged above staged, and every staged row draws its status letter in green so the two never blur together. The mark costs no width, so asking for the staged run never shortens a filename. It exists because `vigia` shows the working tree against the index, so an agent that stages its own work would otherwise leave the pane empty, which reads exactly like a clean tree. A file staged and then edited again appears in both runs, once for each diff, because they are two different changes. `a` again puts it back, and even with it off a blank pane says where the work went: `no unstaged changes · 3 staged`.
+[**Reading the pane**](https://github.com/breferrari/vigia/blob/main/docs/READING.md) explains every signal, how a file finds its language, and what the pane never selects.
 
-Every file gets the same row in both regions:
-
-| | | Answers |
-|---|---|---|
-| `▸` | **caret** | 📍 *where you are.* The diff below is inside this file |
-| `M` | **kind** | modified, added, deleted, renamed |
-| `src/…` | **path** | which file. How brightly it is drawn is how recently it changed, and it is a link you can click |
-| `●` | **pulse** | ⚡ the file written last |
-| `✎` `↳` `✓` | **note mark** | 📝 your note is here, and where it stands |
-| green `M` | **staged** | 📦 this row is what the index holds, not the working tree (`a`) |
-| `■■■■` | **heat strip** | 🗺️ **where** in the file the change is |
-| `__▁▂▆█` | **sparkline** | ⏱️ **when** it changed, over the last two minutes |
-| `+42 -7` | **counters** | 📊 **how much**, in lines |
-
-They exist separately because a glance can only ask one question. You read the one you came for and ignore the rest.
-
-<details>
-<summary><b>📝 The note mark is <i>whose turn it is</i></b></summary>
-
-`✎` is a note you left that the agent has not answered. `↳` is one it has answered and you have not resolved, and it is the only one of the three that means the pane is waiting on **you**: it draws the same arrow the agent's reply draws under your line. `✓` is one just resolved, and it stays for as long as the note's departure does.
-
-A file with several notes shows the one that matters most, so an answer beats a note still waiting and a resolved one never hides either. The shape is what carries the state, not the colour, so all three still read on a terminal with `NO_COLOR` set. And the slice of the heat strip the note sits in is tinted, so on a long file you can see roughly where in it the conversation is without opening it.
-
-The column is kept on every row whether or not the file has a note, so nothing slides sideways when one arrives. It is the last thing dropped before the counters as the pane narrows, which puts it ahead of the pulse: a file that just changed says so in three other ways, and a file holding a conversation says so in one.
-
-</details>
-
-<details>
-<summary><b>🗺️ The heat strip is <i>where</i></b></summary>
-
-<br>
-
-Cut the file into equal slices, top to bottom, twelve of them on an ordinary pane, and twenty-four or forty-eight on one wide enough to spare the columns, and colour each one by what happened inside it: **green** for lines added, **red** for removed, and a third colour where both. It is a map of the file you are *not* looking at, so a strip lit only at its right end says the change is at the bottom and you have not scrolled there yet. Brighter means more lines in that slice.
-
-A slice nothing touched is still drawn, in a dark track colour, because a strip with holes in it would be a different shape per file and you could not compare two at a glance. On a narrow pane adjacent slices are summed and reclassified rather than dropped, so it stays a whole file at every width.
-
-</details>
-
-<details>
-<summary><b>⏱️ The sparkline is <i>when</i></b></summary>
-
-<br>
-
-Twelve columns across the last two minutes, so each column is ten seconds, oldest on the left. A taller column is more bytes moving around that ten seconds, and a busier one is a hotter colour: on a terminal with 24-bit colour the height and the ink climb the same ramp together, so the shape reads at a glance and the colour confirms it. Every column always covers the whole two minutes between them: a narrow pane draws six columns of twenty seconds rather than the last minute, and a pane wide enough to spare the room draws twenty-four of five.
-
-**Around, rather than in.** A save is a point event, so the raw samples are zero almost everywhere and drawing them gives you a spike train on a flat line rather than a graph. What the column draws is a **level**: the bytes near it, weighted by a six-second kernel that looks both ways, which is what reading a series of point events as a density means.
-
-It is scaled **across every tracked file**, not against the row's own maximum, and that is the whole point: a row scaled to itself would draw full height the moment it was the busiest thing *it* had ever been, and you could not tell the file an agent is hammering from the file it touched once. A column with no writes draws a flat track `_` rather than nothing, for the same reason the heat strip draws its empty slices.
-
-</details>
-
-<details>
-<summary><b>⚡ The pulse, the caret, and what is <i>not</i> a selection</b></summary>
-
-<br>
-
-The dot marks the file written last, and it moves when another file is written, so it **cuts rather than fades**. The path's own brightness is the same signal, wider and slower: every file in the newest burst draws brightest, and the file that just changed, one that changed recently, and one that has not, are three intensities of the same colour.
-
-The caret `▸` is a different claim, and the only one about you: the diff below is inside this file. It is a marker, not a cursor. **Nothing on this pane is ever selected**: not the caret, not the row under your pointer. Nothing is remembered because you looked at it, no row becomes special by being pointed at, and the next key means exactly what it would have meant, unless you have a note box open, which is the one thing here you are inside until you leave it. Dragging the diff washes the rows you cross, and that is the exception that proves it: let go, they are on your clipboard, and the wash is gone. A line you left a note on stays marked, and that is not a selection either: you put it there, it outlives the pane, and it goes when the note does.
-
-The counters lend colour only where it says something: a `-0` stays grey, because a zero is not reporting a removal.
-
-</details>
-
-### 🖍️ The diff itself is highlighted, in every language you write
-
-**217 grammars**, so the languages a 2026 tree is actually made of are coloured rather than plain: TypeScript and TSX, Swift, Kotlin, Dart, Elixir, Julia, Zig, Nim, Crystal, F#, Solidity, Gleam, V, Odin, Elm, PowerShell, SCSS and Sass and Less, Vue and Svelte, TOML, Protobuf, GraphQL, Terraform, Dockerfile, CMake, Nix, and `go.mod` and `.gitignore` and `.env`, beside the C-family and scripting languages you would expect.
-
-<details>
-<summary><b>🖍️ How a file finds its language, and the four it cannot</b></summary>
-
-<br>
-
-The grammars are `bat`'s curated collection, which is the same set that tool highlights with, compiled into one dump the binary carries. Every one of their licences is reproduced in `NOTICE.md`, which ships in the release archives and in the published crate rather than only living here.
-
-**Five steps decide the language**, in order, because an extension alone gets a surprising number of files wrong:
-
-1. **A written rule**, where one extension has more than one honest answer. `.h` is Objective-C, whose grammar is a superset of C, so C headers colour fully and only C++-only constructs go plain. `.m` is Objective-C over MATLAB, `.v` is V over Verilog, `.jsx` borrows the TSX grammar, and `.sass` is Sass.
-2. **The whole file name**, so `Dockerfile`, `CMakeLists.txt` and `go.mod` are found by name. This runs *before* the extension, so `CMakeLists.txt` is CMake rather than plain text.
-3. **The extension**, with a leading-dot retry so `.gitignore` finds a grammar registered as `gitignore`.
-4. **The nearest grammar**, for the four formats below.
-5. **The first line**, which is how an extensionless script with a `#!` gets a language at all, and how a `.ts` file that is really a Qt translation file gets read as the XML it is instead of as TypeScript.
-
-**Four formats have no grammar this stack can carry**, and they draw as their nearest relative rather than as nothing: `.astro` as HTML and `.bicep` as JavaScript, because both upstreams are written in a Sublime Text 4 dialect `syntect` does not implement and both extend exactly those; `.mdx` as Markdown and `.mojo` as Python, which they are supersets of. Carbon has no grammar anywhere in this format, so it draws plain. That step runs *after* the four above, so the day a real grammar lands it wins without anything being deleted.
-
-A file type nothing recognises is not an error. It draws as plain diff text, because a monitor that refused a file it could not colour would have inverted its own job.
-
-</details>
-
-### 🎯 And *what* changed inside the line
-
-A changed line sits on a calm wash of its own colour, and the words that actually changed sit in a **hotter patch of that same colour**. A renamed function in a long line reads as one bright token rather than a whole red line above a whole green one, and you find the edit without reading either line to its end.
-
-The pairing is bounded on purpose. A removed line and the added line under it are compared token by token, and a pair that differs too much is left as two whole lines rather than confettied into unrelated highlights: past that bound there is no shared shape left to point at. The line numbers of a changed row take a slightly darker tone of the same wash, so the gutter reads as its own column without a border being spent on one.
-
-All three are backgrounds, so they need 24-bit colour and they leave together below it. What is left there is what was always there: the `+` and `-` column, and the left bar beside it.
-
----
-
-## ⌨️ Drive it
+## ⌨️ Keys
 
 **Keys**
 
 | | |
 |---|---|
 | `j` `k` `↑` `↓` | scroll a row |
-| `Space` `PgDn` `PgUp` | page |
-| `d` `u` | half a page |
-| `g` `G` | first / last file |
 | `n` `p` `→` `←` | next / previous file |
-| `1` to `6` | jump to that list row |
-| `J` `K` | scroll the pinned list |
 | `f` | follow the newest change, or stop |
-| `r` | list beside the diff, or above it |
 | `s` | one file, or the whole diff |
-| `o` | the file list alone, no diff |
 | `a` | show or hide staged changes |
-| `b` | stand at the branch point |
 | `B` | everywhere else it can stand |
-| `O` | that commit alone, or everything since it |
-| `w` | wrap a long line onto the row below, or clip it |
-| `c` | show or hide note rows |
-| `Enter` `Esc` | in a box: send, or cancel |
-| `m` `Esc` | every on/off setting, in one box |
-| `?` `Esc` | all of this, on screen |
+| `Ctrl+L` | redraw, and send pictures again after a tmux reattach |
+| `?` `Esc` | every gesture, on screen |
 | `q` `Ctrl+C` | quit |
 
-**Mouse**
-
-| | |
-|---|---|
-| wheel | scroll what you point at |
-| drag a bar | move that region |
-| click a track | send it there |
-| click `▲` `▼` | one row, and repeats held |
-| click a file | jump the diff to it |
-| click the position | everywhere it can stand |
-| drag the diff | copy those rows |
-| click a line number | open a note there |
-| click a note's side | take that note back |
-| click `✕` | close the sheet |
-| just point | it marks itself |
-| `Shift`+drag | your terminal selects text |
-
-**`m` opens every on/off setting in one box**, the ones above and the two only the config file sets, with `↑` `↓` to move and `Space` to flip. `Save settings` keeps what you flip for next time, and `Reset to defaults` puts every row back. **`?` draws every gesture on this page**, a page at a time where the pane is small. Both draw over rows that are already there, and `Esc` puts either away.
-
-<details>
-<summary><b>The small print on the keys</b></summary>
-
-<br>
-
-`Ctrl+D` quits too, and `Home` / `End` are aliases for `g` / `G`, `Shift+↑` / `Shift+↓` for `J` / `K`.
-
-**`Ctrl+L` draws the pane again, pictures included.** Press it after you reattach tmux from another terminal, where the pictures would otherwise stay blank.
-
-**`Shift`+drag selects text because your terminal does it, not because `vigia` does.** The pane holds the mouse so the wheel and the scrollbars work, and every terminal keeps a modifier that hands selection back for as long as you hold it: `Shift` on xterm, GNOME Terminal, Konsole, Windows Terminal, kitty and WezTerm, and **`Option`** on iTerm2, checked by hand on Windows Terminal. You get the terminal's own highlight and the terminal's own clipboard, which means it works over SSH and inside tmux. What it copies is what is on screen, so a path the pane had to shorten is copied short.
-
-**Dragging the diff is for that case.** It sends the rows rather than the cells, so a line the pane clipped arrives whole, a line `w` wrapped arrives as one line, and a file heading arrives as its path however short the pane drew it. Let go and it is sent, and the footer says what went. Your terminal has to allow it: the escape it uses is off by default in a few of them, there is no reply to read, and so nothing can promise it arrived.
-
-The digits count **rows on screen**, not files in the repository: `3` is the third row the list is drawing, so it means a different file once you have scrolled the list with `J`. A digit naming a row that is not drawn does nothing at all, and neither does `n` at the last changed file or `p` at the first.
-
-It shows the working tree against the **index**, untracked files included, and it follows whatever changed last until you scroll away. With nothing to show it says so, and says where the work went if it went to the index.
-
-</details>
-
----
-
-<a id="notes"></a>
-
-## ✍️ Notes to the agent
-
-Point at a line number in the diff and it becomes a pencil `✎`. Click it, type one sentence, press `Enter`.
-
-```
-  41 +      self.deadline = Instant::now() + DEBOUNCE;
-     ✎ should this reset on every event, or just the first?
-```
-
-It goes to the agent in the other pane carrying the file, the line and your words. The answer comes back on a row under yours.
-
-**Code in that answer is drawn as code.** A fenced block loses its fences, keeps its indentation where the pane has to wrap it, and takes the same colours the diff above it takes, from the grammar the fence names or the file the note is pinned to. A word in backticks loses them too. A fence means backticks, three or more, closed by at least as many, so a longer fence holds a shorter one whole; an indented block is left as words, because nothing can tell one from a list item that ran on. A fence naming a language the bundled grammars do not have is left uncoloured rather than coloured as the file it is pinned to, which the agent has just said it is not. What you copy is still what the agent wrote, backticks and all.
-
-That is the whole of it. `vigia` calls no model, summarises nothing and judges nothing. It carries your words, and the agent answers.
-
-### What a note says while it waits
-
-Every note draws under its line with one word for where it stands.
-
-| | |
-|---|---|
-| `open` | Sent. The agent has not looked yet |
-| `seen` | The agent has read it |
-| `changed` | You edited the line underneath, so the row draws dim |
-| `gone` | The line left the diff, and the note moved under the file's heading |
-| `adrift` | The whole file left the diff. The footer counts it beside the position as `2 notes · 1 adrift` |
-
-**No state loses a note.** An adrift one is back under its line the moment the file returns. A line's number stays lit while a note is on it, and the file's own row in the list carries `✎` while you are waiting and `↳` once the agent has answered, which is how you find one note in a run of thirty files. `c` hides the note rows without hiding those marks.
-
-**When the agent resolves one**, its answer arrives on a row under the note, holds for a minute, and the note leaves.
-
-**To take one back**, point at the note's left side. The cell under your pointer becomes `✕`, and clicking it withdraws the note whether or not the agent has answered. Emptying the box and pressing `Enter` does the same. A note the agent resolved in the meantime is left alone, because its answer is already on its way to you.
-
-**Where they live.** One directory per worktree under your own state directory: `$XDG_STATE_HOME/vigia/`, or `~/.local/state/vigia/`, and `%LOCALAPPDATA%\vigia\state\` on Windows. Never inside the worktree and never inside `.git`, because a monitor that wrote where it watches would wake itself.
-
-### Setting it up
-
-Two pieces, and both go in your own config rather than in the repository, because `vigia` is yours and so is the pane you run it in.
-
-**1. Give the agent the server.** `vigia mcp` is an MCP server over stdio:
-
-```sh
-claude mcp add --scope user vigia -- vigia mcp
-```
-
-`--scope user` writes `~/.claude.json`, which covers **every project you open on this machine** and stays private to you. Claude Code tells the server which project a session is in, so that one registration finds whichever worktree you are watching, and notes are kept per worktree, so two repositories never see each other's.
-
-The agent gets three tools and one resource:
-
-| | |
-|---|---|
-| `notes` | Lists what is open, each with its line's current number, the line's text and three lines either side, and marks them `seen` |
-| `reply` | Writes a line under a note and leaves it unresolved |
-| `resolve` | Closes one. Its line is required, because that line is what you watch arrive |
-
-The resource is `vigia://notes`, and the server announces every change to the store, so an agent that subscribes hears about a note the moment you send it.
-
-**2. Reach the session already running.** With the server alone your note waits until the agent next looks. Three hooks make it arrive instead, and they go in `~/.claude/settings.json`, which is the same scope as the line above: write them once, and every repository is covered.
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "vigia mcp register" }] }
-    ],
-    "SessionEnd": [
-      { "hooks": [{ "type": "command", "command": "vigia mcp register" }] }
-    ],
-    "UserPromptSubmit": [
-      { "hooks": [{ "type": "command", "command": "vigia mcp pending" }] }
-    ]
-  }
-}
-```
-
-`vigia mcp register` records the session's own socket beside the store when it starts and clears it when it ends. `Enter` then posts the note into that session directly, and a session sitting idle starts a turn on it, so the answer can arrive while you are still looking at the line. The footer says **sent** when a socket took the line and **noted** when nothing live did, so the note is waiting in the store. Nothing is written back, so *sent* is the honest word: it says the line went, never that it arrived.
-
-`vigia mcp pending` works without a socket. It puts one line in front of your next prompt saying what your notes are waiting on: a read, a resolve, or you, once the agent has answered one with `reply` and left it with you. Nothing at all when nothing is pending.
-
-<details>
-<summary><b>Both steps in one command, if you already use <code>mcs</code></b></summary>
-
-<br>
-
-[`mcs`](https://github.com/mcs-cli/mcs) is a package manager for a Claude Code setup. It is not needed for any of the above and nothing here depends on it. If you already keep your setup that way, `techpack.yaml` at the root of this repository is a pack it can install:
-
-```sh
-mcs pack add breferrari/vigia
-mcs sync --global
-```
-
-**Its `--global` is the scope both steps above already use**, under another name: machine-wide for your user, writing the server into `~/.claude.json` and the hooks into `~/.claude/settings.json`. What it adds is doing both at once, installing the binary with them, and putting back whatever moved when you run `mcs sync` again after an upgrade. `mcs doctor` names anything missing and the command that fixes it.
-
-macOS and Linux only, because the pack installs the binary through Homebrew and its hooks are shell scripts. [`docs/TECHPACK.md`](docs/TECHPACK.md) lists every component and what each one is.
-
-</details>
-
-<details>
-<summary><b>Putting the server in the repository instead</b></summary>
-
-<br>
-
-`--scope project` is the one shape here that reaches anybody but you. It writes a `.mcp.json` at the root of the repository, and you commit it, so everyone who clones gets a `vigia` server whether or not they have `vigia` installed:
-
-```json
-{
-  "mcpServers": {
-    "vigia": { "command": "vigia", "args": ["mcp"] }
-  }
-}
-```
-
-Right when the whole team watches its diffs this way, and only then. If it is just you, the user-scoped line above is the one, and it already covers every repository on the machine.
-
-</details>
-
-<details>
-<summary><b>The small print on the hooks</b></summary>
-
-<br>
-
-Both commands are safe to install once and forget, which is what makes them worth putting in your user settings at all: outside a repository, with no store, or with nothing open, they do nothing and say nothing, and a hook installed there runs in every project you open.
-
-The socket is Claude Code's own, exported to hooks from v2.1.224, and v2.1.234 on native Windows. Below those the registration finds nothing to record and `Enter` still writes the note to the store, where the server and the `pending` line both reach it.
-
-A user-scoped server is started from your own config directory rather than from the repository, so what tells it where to look is the project Claude Code names for it. That has been dependable since v2.1.238. On anything older it falls back to its working directory, which for a user-scoped server is not your worktree, and `--scope project` is the shape that works there.
-
-`vigia` is not the session's child and nothing comes back down the socket, so whether the session acted on your note, held it behind a permission prompt or dropped it is not something the pane can tell you. And a note whose line has been removed from the diff arrives carrying its anchor alone, since there is no line left to quote.
-
-</details>
-
-### Other agents
-
-The server and `pending` work with any agent. The live push does not.
-
-- **The server is plain MCP over stdio**, so any client can run it. For Codex: `codex mcp add vigia -- vigia mcp`. Claude Code tells the server which project it is in. Other clients do not, so the server serves the worktree it was started in. If your agent starts somewhere else, set the client's `cwd` for the server to the worktree. The server names the worktree in its handshake, so the agent can see which one it has.
-- **`vigia mcp pending` reads nothing from its hook**, so any prompt hook that passes a command's output to the model can run it. Codex's `UserPromptSubmit` hook is one.
-- **`vigia mcp register` is Claude Code's alone.** It records a socket that only Claude Code opens. Under any other agent a note waits in the store until the agent next calls `notes`, and the footer says **noted**.
+The mouse works too: the wheel scrolls what you point at, a click on a file jumps to it, and dragging the diff copies those rows. [**Keys and mouse**](https://github.com/breferrari/vigia/blob/main/docs/KEYS.md) has every key and gesture.
 
 ---
 
@@ -471,21 +185,6 @@ Budgets, not hopes. Each one has a test that fails when it is missed. Every regr
 | 📐 | **Narrow panes** | Legible at 40 columns |
 | 🚪 | **Clean exit** | Terminal restored on every exit it can observe: the quit key, `Ctrl+C`, an error, a panic, or the first kill from outside |
 
-<details>
-<summary><b>The numbers behind them</b></summary>
-
-<br>
-
-The scrollbar beside the diff is **row-exact**: it spans the screen's rows over the diff's total rows and sits at the rows above it. Counting every changed file's height turned out to cost **8.76ms** where materialising the same diffs costs **442.71ms**, so the bar says where the end is rather than approximating it. A file the agent is still writing keeps the height it had until the write settles, two seconds after the last one, and is counted once then.
-
-That count is incremental too: a file that has not changed since the last tick is proved unchanged by a `stat` rather than read again, which is **1.29ms against 12.90ms** over a hundred files.
-
-The frame time in the status bar is a promise rather than a diagnostic: it is the p99 of the last 128 frames, against the 16ms this is gated at. The memory beside it is read once a frame and costs about **240ns**, a syscall against a 16ms budget.
-
-</details>
-
----
-
 ## 🎨 Make it yours
 
 A palette, a colour depth, which drawing glyphs your font carries, how a changed image is drawn (from 1.2.0, unreleased), what the pane opens as, and whether it looks for updates. Every one has a default, and the defaults are what ships.
@@ -495,69 +194,30 @@ VIGIA_THEME=dark vigia          # ansi, dark, light or system, or a path to your
 NO_COLOR=1 vigia                # every ladder collapses to something readable
 ```
 
-**[`docs/CONFIG.md`](docs/CONFIG.md)** is the whole of it: the six ladders (the pictures one from 1.2.0, unreleased) and what wins at each rung, the config file and its keys, and how to write a theme. **[`docs/THEME.md`](docs/THEME.md)** names every colour the pane draws.
+[**Configuration**](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) is the whole of it, and [**Theme**](https://github.com/breferrari/vigia/blob/main/docs/THEME.md) names every colour the pane draws.
 
 ---
 
-## 🧱 Built with
+## 📚 Documentation
 
 | | |
 |---|---|
-| [ratatui](https://github.com/ratatui/ratatui) + [crossterm](https://github.com/crossterm-rs/crossterm) | The TUI, and Windows plus cross-platform mouse |
-| [gix](https://github.com/GitoxideLabs/gitoxide) | Pure Rust git. Diffs in process, no subprocess per change |
-| [notify](https://github.com/notify-rs/notify) | Native filesystem events, which is what *no polling timer* requires |
-| [syntect](https://github.com/trishume/syntect) | Syntax highlighting, pure Rust, so no C toolchain in CI |
-| [two-face](https://codeberg.org/CosmicHarper/two-face) | The 217 grammars, [bat](https://github.com/sharkdp/bat)'s curated set |
-| [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a note or a message can be seen arriving |
-| [ratatui-textarea](https://github.com/ratatui/ratatui-textarea) | The note box: its text, its caret, its undo |
-| [fancy-regex](https://github.com/fancy-regex/fancy-regex) | The `hide` pattern |
-| [image](https://github.com/image-rs/image) | Reads a changed image's format and size: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, QOI and TGA (from 1.2.0, unreleased) |
-| [ratatui-image](https://github.com/ratatui/ratatui-image) | Draws a changed image's pictures, as half-blocks or a terminal image protocol (from 1.2.0, unreleased) |
-| [resvg](https://github.com/linebender/resvg) | Draws a changed SVG's pictures (from 1.2.0, unreleased) |
-| [svgtypes](https://github.com/linebender/svgtypes) | Reads an SVG's size for its size line (from 1.2.0, unreleased) |
-| [hayro](https://github.com/LaurenzV/hayro) | Draws a changed PDF's pictures (from 1.2.0, unreleased) |
-| [hayro-syntax](https://github.com/LaurenzV/hayro) | Reads a PDF's page size for its size line (from 1.2.0, unreleased) |
-| [skrifa](https://github.com/googlefonts/fontations) | Finds an installed font that can draw an SVG's text (from 1.2.0, unreleased) |
+| [Notes to the agent](https://github.com/breferrari/vigia/blob/main/docs/NOTES.md) | Setting up notes, what each state means, other agents |
+| [Reading the pane](https://github.com/breferrari/vigia/blob/main/docs/READING.md) | Every signal on screen, highlighting, changes inside a line |
+| [Keys and mouse](https://github.com/breferrari/vigia/blob/main/docs/KEYS.md) | Every key and gesture, and the small print |
+| [Installing](https://github.com/breferrari/vigia/blob/main/docs/INSTALL.md) | Every install path, checking a download, upgrading on Windows |
+| [Configuration](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) | The config file, its keys, colour depth, glyphs and themes |
+| [Theme](https://github.com/breferrari/vigia/blob/main/docs/THEME.md) | Every colour the pane draws |
+| [Built with](https://github.com/breferrari/vigia/blob/main/docs/ARCHITECTURE.md) | The dependencies, what each one does, and the numbers behind the promises |
+| [mcs pack](https://github.com/breferrari/vigia/blob/main/docs/TECHPACK.md) | Installing the notes setup with `mcs` |
 
-The last rows draw changed images, which arrives in 1.2.0.
+These pages track `main`. For a released version, browse its tag.
 
-Three of those earn their place by what they *do not* add. `fancy-regex` is already in the graph under `syntect`, so the `hide` pattern costs the binary nothing. `tachyonfx` schedules nothing, which is what keeps *no polling timer* this program's own rule to keep rather than a dependency's. `two-face` builds the grammar dump at compile time and is absent from every shipped graph.
-
-Everything is pure Rust on purpose: a genuinely static Linux binary needs no cross toolchain, and macOS and Windows are plain tier-1 targets.
+**About the picture at the top.** It is a mockup drawn with `VIGIA_THEME=dark`, not a screenshot, and everything in it draws in the real pane. One difference: the real header shows your worktree's name where the picture says `vigia`.
 
 ## 🗺️ Status
 
-`🚧` **Early, and released.** The install lines above are live. The surface is one optional path, `--version`, and the word `mcp` for the notes server, on purpose. The work now is pictures: a changed image shown as what changed, which lands in 1.2.0.
-
-| | Phase | | Release |
-|---|---|---|---|
-| ✅ | **1. Core engine** | Watch, coalesce, diff, incremental re-diff. No UI | released |
-| ✅ | **2. Minimum monitor** | The TUI: follow mode, scroll, mouse, layout, clean exit | released |
-| ✅ | **3. Glanceability** | Sparklines, heat bars, live counters, the status bar, theming | released |
-| ✅ | **4. The artifacts tell the truth** | README, mockup, spec and tracker agree with each other | released |
-| ✅ | **6. Measured, not assumed** | Claims that outran their evidence get the measurement that settles them | released |
-| ✅ | **7. Distribution** | crates.io, Homebrew tap, prebuilt binaries | released |
-| ✅ | **7.5. Notes to the agent** | Pin a note to a line, and the agent beside you reads it | released |
-| ✅ | **8. Look and feel** | Layout, colour, keys, chrome: the polish a first user actually sees | released |
-| 🔨 | **9. Pictures** | A changed image, SVG or PDF shows what changed, in any terminal | 1.2.0 |
-| ⬜ | **10. Current Rust** | The code uses what the newest stable Rust offers | 1.2.0 |
-| ⬜ | **11. Off the paint** | Work that grows with a file or a repository moves off drawing the screen | 1.3.0 |
-| ⬜ | **12. Correct at the edges** | Every file, path, terminal, theme and note is drawn and reported right | 1.4.0 |
-| ⬜ | **13. Testable by construction** | Every gesture and table can be tested, and cannot drift from the code it describes | internal |
-| ⬜ | **14. The instruments** | Releases and the project's own tooling keep working without anyone having to remember a step | internal |
-
-Built in the open, spec first. [`SPEC.md`](SPEC.md) is the source of truth and is written *before* the code, so it is the honest place to see where this is going and to argue with it. [`ROADMAP.md`](ROADMAP.md) is the live state, issue linked. [`CHANGELOG.md`](CHANGELOG.md) is every released version and what moved in it.
-
-<details>
-<summary><b>🖼️ About that picture at the top</b></summary>
-
-<br>
-
-**It is a mockup drawn with `VIGIA_THEME=dark`, not a screenshot**, and everything in it draws in the real pane: the header with its position token, the blank row under it, the pinned list, the counters in green and red, the sparklines, the heat bars, the caret and the bold path that goes with it, the pulse, the scrollbar with its step buttons, the tinted rows with their left bars and their gutter tones, the highlighted diff, the note box open on a line, and the status bar.
-
-One difference: the real header shows your worktree's name where the picture says `vigia`, because at 40 columns the tree's name is the useful fact.
-
-</details>
+Released, and built in the open, spec first. [`ROADMAP.md`](https://github.com/breferrari/vigia/blob/main/ROADMAP.md) is the live plan, [`SPEC.md`](https://github.com/breferrari/vigia/blob/main/SPEC.md) the contract it is built against, and [`CHANGELOG.md`](https://github.com/breferrari/vigia/blob/main/CHANGELOG.md) every released version.
 
 ## 🏷️ The name
 
@@ -569,12 +229,12 @@ It is also the verb, third person. So `vigia .` reads as a sentence.
 
 ## 🤝 Contributing
 
-Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code. Some things this project will not do, such as staging, committing and rebasing, AI features of its own, git remote operations, or a GUI. [`ROADMAP.md`](ROADMAP.md#non-goals-permanent) lists them.
+Issues and pull requests are welcome, and a plain bug report needs two lines: what you expected, what happened. [`CONTRIBUTING.md`](https://github.com/breferrari/vigia/blob/main/CONTRIBUTING.md) has the rest, including the one real ask: `SPEC.md` is read before code. Some things this project will not do, such as staging, committing and rebasing, AI features of its own, git remote operations, or a GUI. [`ROADMAP.md`](https://github.com/breferrari/vigia/blob/main/ROADMAP.md#non-goals-permanent) lists them.
 
 ---
 
 <div align="center">
 
-**MIT** · Built in the open · [SPEC](SPEC.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [Issues](https://github.com/breferrari/vigia/issues)
+**MIT** · Built in the open · [SPEC](https://github.com/breferrari/vigia/blob/main/SPEC.md) · [ROADMAP](https://github.com/breferrari/vigia/blob/main/ROADMAP.md) · [CHANGELOG](https://github.com/breferrari/vigia/blob/main/CHANGELOG.md) · [Issues](https://github.com/breferrari/vigia/issues)
 
 </div>
