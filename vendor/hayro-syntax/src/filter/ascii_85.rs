@@ -58,7 +58,6 @@ pub(crate) fn decode(data: &[u8]) -> Option<Vec<u8>> {
         Some(())
     };
 
-    // Grown within the decode limit rather than sized up front.
     let mut decoded = Vec::new();
     let mut group = Vec::with_capacity(5);
 

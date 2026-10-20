@@ -7,3 +7,6 @@
 # a committed one silently becomes the thing the next run compares against.
 *.snap.new
 *.pending-snap
+# A vendored crate built on its own.
+/vendor/*/target
+/vendor/*/Cargo.lock

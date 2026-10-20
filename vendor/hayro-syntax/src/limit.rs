@@ -118,7 +118,8 @@ pub(crate) fn spend(bytes: u64) -> bool {
 
 /// Make room in `out` for `more` bytes, or say they would pass the limit.
 /// Capacity grows only to powers of two and never past what is left, so the
-/// largest buffer a growth copies from is under half the limit.
+/// largest buffer a growth copies from is a power of two under the limit: at
+/// most half of it, when the limit is a power of two.
 pub(crate) fn room(out: &mut Vec<u8>, more: usize) -> bool {
     let need = out.len().saturating_add(more);
     if !admits(need as u64) {

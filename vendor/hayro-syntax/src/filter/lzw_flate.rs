@@ -62,6 +62,7 @@ pub(crate) mod flate {
         apply_predictor(decoded, &params)
     }
 
+    #[cfg(feature = "std")]
     pub(crate) use fallback::capacity;
 
     /// Ported from <https://github.com/mozilla/pdf.js/blob/master/src/core/flate_stream.js>
@@ -76,9 +77,10 @@ pub(crate) mod flate {
 
         /// Whether inflating `data` stopped at the decode limit, and the most
         /// capacity its output reached.
+        #[cfg(feature = "std")]
         pub(crate) fn capacity(data: &[u8]) -> (bool, usize) {
             let mut stream = FlateStream::new(data);
-            while !stream.eof {
+            while !stream.eof && stream.pos < stream.data.len() {
                 stream.read_block();
             }
             (stream.over, stream.output.capacity())
@@ -868,7 +870,7 @@ fn apply_predictor(data: Vec<u8>, params: &PredictorParams) -> Option<Vec<u8>> {
 
             // Unlike the eight-bit path, which undoes the rows in place, this
             // one writes a second buffer, so both are held at once.
-            if !crate::limit::admits((data.len() + num_rows * row_len) as u64) {
+            if !crate::limit::admits((data.capacity() + num_rows * row_len) as u64) {
                 return None;
             }
             let zero_row = vec![0; row_len];
