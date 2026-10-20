@@ -36,6 +36,8 @@ pub struct FrameStats {
     pub derived: u64,
     /// Bytes read on the frame path to score binaries as renames.
     pub paired_bytes: u64,
+    /// Status walks: each [`Frame::advance`] that ran.
+    pub walks: u64,
 }
 
 /// A working-tree fingerprint that costs no read: size and modification time.
@@ -466,6 +468,7 @@ impl<'w> Frame<'w> {
         // the life of the process, so a walk and the draw after it share one.
         self.worktree.invalidate_filter();
         self.worktree.renew_pair_budget();
+        self.stats.walks += 1;
         let paired_before = self.worktree.pair_bytes();
         let mut walk = self.worktree.changes_at(&self.standing, options)?;
         for change in &mut walk {

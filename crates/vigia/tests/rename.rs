@@ -151,3 +151,39 @@ fn pairs_sent_again_after_scores_restart() {
     pictures.score_pairs(&frame);
     assert_eq!(answers(&mut pictures), 1, "the pair was not sent again");
 }
+
+#[test]
+fn unpaired_score_no_walk() {
+    // A score under half pairs nothing, so nothing is walked again.
+    let scratch = Scratch::new("rename-no-walk");
+    scratch.write("a.txt", "a\n");
+    scratch.commit_all("initial");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        },
+        Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let walks = frame.stats().walks;
+    assert!(!pictures.pair(&mut frame, vec![((1, 2), 10)]).expect("pair"));
+    assert_eq!(
+        frame.stats().walks,
+        walks,
+        "a score that pairs nothing walked"
+    );
+    assert!(
+        pictures
+            .pair(&mut frame, vec![((3, 4), 59_000)])
+            .expect("pair")
+    );
+    assert_eq!(
+        frame.stats().walks,
+        walks + 1,
+        "a score that pairs did not walk"
+    );
+}

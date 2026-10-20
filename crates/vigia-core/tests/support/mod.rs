@@ -680,6 +680,7 @@ pub fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
         deferred: after.deferred - before.deferred,
         derived: after.derived - before.derived,
         paired_bytes: after.paired_bytes - before.paired_bytes,
+        walks: after.walks - before.walks,
     }
 }
 
