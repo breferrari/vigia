@@ -107,12 +107,13 @@ fn thread_cpu() -> Option<Duration> {
 }
 
 /// This thread's cycles so far, converted at the highest rate calibration
-/// measured. Cycles count at a fixed rate while the thread runs (not
-/// guaranteed; `cycle_clock_direction` checks it), so a slice the thread lost
-/// time in reads a lower rate, and the highest is at most the true one: it
-/// reads as no less CPU than ran, and no overshoot is
-/// excused by the conversion. `None` where the rate could not be measured,
-/// which counts every frame's wall time as its own. `GetThreadTimes` steps at
+/// measured. Cycles count at a fixed rate while the thread runs, so a slice
+/// the thread lost time in reads a lower rate, and the highest is at most the
+/// true one: it reads as no less CPU than ran, and no overshoot is excused by
+/// the conversion. Microsoft's `QueryThreadCycleTime` page says not to convert
+/// cycles to time at all; `cycle_clock_direction` checks that this one holds.
+/// `None` where the rate could not be measured, which counts every frame's
+/// wall time as its own. `GetThreadTimes` steps at
 /// 15.625ms, too coarse to judge one frame.
 #[cfg(windows)]
 fn thread_cpu() -> Option<Duration> {
