@@ -2409,6 +2409,53 @@ mod tests {
 
     use super::*;
 
+    /// The watch thread forwards every tick, not only the first.
+    #[test]
+    fn watch_forwards_ticks() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let dir =
+            std::env::temp_dir().join(format!("vigia-forward-{}-{stamp}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(out.status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "x\n").expect("write");
+        git(&["add", "a.txt"]);
+        git(&["commit", "-q", "-m", "initial"]);
+        let (tx, rx) = mpsc::channel();
+        spawn_watch(dir.clone(), tx, None);
+        // Written until it ticks, since the watch arms on its own thread.
+        let ticked = |round: usize| {
+            for attempt in 0..10 {
+                std::fs::write(dir.join("a.txt"), format!("{round} {attempt}\n")).expect("write");
+                let deadline = Instant::now() + std::time::Duration::from_secs(1);
+                while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+                    match rx.recv_timeout(left) {
+                        Ok(Wake::Tick(_)) => return true,
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+            }
+            false
+        };
+        let first = ticked(0);
+        let second = first && ticked(1);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(first, "the watch never ticked");
+        assert!(second, "the watch stopped after its first tick");
+    }
+
     #[test]
     fn a_relative_worktree_root_still_names_the_folder() {
         // `vigia .` is the invocation the tool is named after, and it headered the
