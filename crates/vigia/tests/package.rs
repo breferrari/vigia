@@ -4043,17 +4043,17 @@ fn release_attested() {
         .collect();
     assert_eq!(
         attesting,
-        ["build-local-artifacts"],
+        ["host"],
         "the attestation scopes reach other jobs"
     );
-    let build = jobs
+    let host = jobs
         .iter()
-        .find(|(job, _)| job == "build-local-artifacts")
+        .find(|(job, _)| job == "host")
         .map(|(_, block)| block.as_str())
-        .expect("dist's build job");
+        .expect("dist's host job");
     assert!(
-        build.contains("uses: actions/attest@"),
-        "the build job attests nothing"
+        host.contains("uses: actions/attest@"),
+        "the host job attests nothing"
     );
     let signing: Vec<&str> = jobs
         .iter()
@@ -4062,11 +4062,23 @@ fn release_attested() {
         .collect();
     assert_eq!(
         signing,
-        ["build-local-artifacts", "custom-publish-crates-io"],
+        ["host", "custom-publish-crates-io"],
         "an OIDC token reaches a job that neither attests nor publishes"
     );
     assert!(
-        build.contains("Install cargo-auditable"),
+        jobs.iter()
+            .any(|(job, block)| job == "build-local-artifacts"
+                && block.contains("Install cargo-auditable")),
         "the build job builds without cargo-auditable"
     );
+    // No job that can sign as this repository runs a script fetched unpinned.
+    for (job, block) in &jobs {
+        let signs = block.contains("\"id-token\": \"write\"")
+            || block.contains("\"attestations\": \"write\"");
+        assert!(
+            !signs
+                || !(block.contains("curl ") || block.contains("| sh") || block.contains("| iex")),
+            "job `{job}` holds a signing scope and runs a fetched script"
+        );
+    }
 }

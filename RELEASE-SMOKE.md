@@ -52,7 +52,8 @@ macOS, Linux: the binary lands on PATH, and `vigia --version` prints the release
 with 217 syntaxes). A surprise here is a packaging change, not drift.
 - [ ] musl artifact: `ldd` reports no shared libraries. CI enforces the static claim,
 and you check it here again because this is the artifact, not the build.
-- [ ] `gh attestation verify <archive> --repo breferrari/vigia` passes on one downloaded archive, and `cargo audit bin` on the unpacked macOS and Linux binaries lists their crates.
+- [ ] `cargo audit bin` on the unpacked macOS and Linux binaries reports `cargo auditable` data, not a fallback scan.
+- [ ] Before announcing the release: `gh attestation verify <archive> --repo breferrari/vigia` passes on one downloaded release archive. A rehearsal attests nothing, so this is the first place the attestation can be seen.
 
 ## 3. Run it against a real repository, not a fixture
 

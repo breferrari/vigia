@@ -329,6 +329,9 @@ ci = ["github"]
 # defaults to the tag `dry-run`, meaning build everything and publish nothing.
 dispatch-releases = true
 github-attestations = true
+# Attested in the host job, which runs only on a real release and installs
+# nothing from an unpinned script.
+github-attestations-phase = "host"
 cargo-auditable = true
 # The release workflow's actions, pinned to the commits every other workflow
 # uses, so a moved tag cannot change what the release runs.

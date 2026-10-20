@@ -5,19 +5,19 @@ rules:
   # The workflow-level `contents: write` dist grants for the release.
   excessive-permissions:
     ignore: ["release.yml:18"]
-  # dist's own expressions in its generated steps; 147 is its cargo-auditable
+  # dist's own expressions in its generated steps; 143 is its cargo-auditable
   # install.
   template-injection:
-    ignore: ["release.yml:83", "release.yml:138", "release.yml:147", "release.yml:150", "release.yml:154", "release.yml:211", "release.yml:261", "release.yml:292"]
+    ignore: ["release.yml:83", "release.yml:134", "release.yml:143", "release.yml:146", "release.yml:150", "release.yml:203", "release.yml:257", "release.yml:293"]
   # dist's build container, named by tag in its generated job.
   unpinned-images:
     ignore: ["release.yml:114"]
   # dist calls the custom publish job with `secrets: inherit`, and spells the
   # call as a path.
   secrets-inherit:
-    ignore: ["release.yml:345"]
+    ignore: ["release.yml:346"]
   self-repository:
-    ignore: ["release.yml:345"]
+    ignore: ["release.yml:346"]
   # Trusted publishing is its own change on the roadmap.
   use-trusted-publishing:
     ignore: ["publish-crates-io.yml:122"]
