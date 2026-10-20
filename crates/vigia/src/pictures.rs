@@ -257,7 +257,8 @@ pub struct Built {
     pub profiles_differ: bool,
     /// The ids of its Kitty images, which the terminal holds until told to drop them.
     pub kitty: Vec<u32>,
-    /// The bytes the terminal stores for those images: their pixels, unpacked.
+    /// What those images hold: their unpacked pixels in the terminal, or the
+    /// base64 transmit this process keeps for each, whichever is more.
     pub stored: u64,
     /// Which page of a PDF was drawn, and whether the page count changed.
     pub page_note: Option<String>,
@@ -531,9 +532,9 @@ pub fn scaled_cell(queried: Cell, current: Cell, then: &Window, now: &Window) ->
 /// `base` at `cell`.
 pub fn picker_at(base: &Picker, cell: Cell) -> Picker {
     // Deprecated in `ratatui-image` `=12.0.0-rc.3`, with no other way to a
-    // size. It drops the queried capabilities and background, and vigia reads
-    // neither: Kitty is built with compression and shared memory off, Sixel
-    // and iTerm2 read only the font size and tmux, and no background is set.
+    // size. It drops the queried capabilities and background: the worker reads
+    // compression from the queried picker, shared memory stays off, Sixel and
+    // iTerm2 read only the font size and tmux, and no background is set.
     #[allow(deprecated)]
     let mut picker = Picker::from_fontsize(cell.into());
     picker.set_protocol_type(base.protocol_type());
@@ -871,16 +872,9 @@ impl Pictures {
             }
         }
         let paths: HashSet<&str> = shown.iter().map(|key| key.path.as_str()).collect();
-        let stale: Vec<Arc<Key>> = self
-            .built
-            .iter()
-            .filter(|(key, ready)| {
-                !shown.contains(*key)
-                    && (ready.0.kitty.is_empty() || paths.contains(key.path.as_str()))
-            })
-            .map(|(key, _)| Arc::clone(key))
-            .collect();
-        self.retire_where(|key, _| stale.contains(key));
+        self.retire_where(|key, built| {
+            !shown.contains(key) && (built.kitty.is_empty() || paths.contains(key.path.as_str()))
+        });
         self.evict(shown);
     }
 
@@ -888,19 +882,28 @@ impl Pictures {
     /// what the terminal holds for this pane is within [`KITTY_HELD`].
     fn evict(&mut self, shown: &HashSet<Arc<Key>>) {
         let mut held: u64 = self.built.values().map(|ready| ready.0.stored).sum();
-        while held > KITTY_HELD {
-            let Some(oldest) = self
-                .built
-                .iter()
-                .filter(|(key, ready)| !shown.contains(*key) && ready.0.stored > 0)
-                .min_by_key(|(key, _)| self.seen.get(*key).copied().unwrap_or(0))
-                .map(|(key, _)| Arc::clone(key))
-            else {
-                return;
-            };
-            held -= self.built[&oldest].0.stored;
-            self.retire_where(|key, _| *key == oldest);
+        if held <= KITTY_HELD {
+            return;
         }
+        let mut off: Vec<(u64, u64, Arc<Key>)> = self
+            .built
+            .iter()
+            .filter(|(key, ready)| !shown.contains(*key) && ready.0.stored > 0)
+            .map(|(key, ready)| {
+                let seen = self.seen.get(key).copied().unwrap_or(0);
+                (seen, ready.0.stored, Arc::clone(key))
+            })
+            .collect();
+        off.sort_unstable_by_key(|(seen, _, _)| *seen);
+        let mut doomed = HashSet::new();
+        for (_, stored, key) in off {
+            if held <= KITTY_HELD {
+                break;
+            }
+            held -= stored;
+            doomed.insert(key);
+        }
+        self.retire_where(|key, _| doomed.contains(key));
     }
 
     /// Drop each picture `doomed` names, and owe the deletes of its Kitty images.
@@ -1052,9 +1055,9 @@ impl Pictures {
     }
 }
 
-/// The most a pane keeps in the terminal's image store, in unpacked pixel
-/// bytes. kitty and Ghostty each store 320 MB of image data per screen and
-/// evict the oldest past it, which would leave a kept picture blank.
+/// The most a pane's kept Kitty pictures may hold, by [`Built::stored`].
+/// kitty and Ghostty each store 320 MB of image data per screen and evict the
+/// oldest past it, which would leave a kept picture blank.
 const KITTY_HELD: u64 = 64 * 1024 * 1024;
 
 /// The most an image may be, in pixels on a side, before its decode is refused.
@@ -1791,7 +1794,12 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
         };
         if let Some(id) = id {
             kitty.push(id);
-            stored += pixels * 4;
+            // An uncompressed transmit is base64 of the pixels, four bytes to three.
+            stored += if compress {
+                pixels * 4
+            } else {
+                pixels * 16 / 3
+            };
         }
         panels.push((slot, protocol));
     }
