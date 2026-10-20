@@ -5,8 +5,8 @@
 mod support;
 
 use support::{
-    Scratch, changes_sorted, icon_ops, icon_pdf, locked_pdf, open_locked_pdf, pdf, pdf_holding,
-    pdf_with, pdf_xref_stream, pdf_xref_stream_with, zlib_zeros,
+    Scratch, changes_sorted, icon_ops, icon_pdf, locked_pdf, open_locked_pdf, pdf, pdf_doc,
+    pdf_holding, pdf_with, pdf_xref_stream, pdf_xref_stream_with, zlib_zeros,
 };
 use vigia_core::{FileDiff, Format};
 
@@ -106,6 +106,28 @@ fn pdf_named_driver_draws() {
     scratch.write("icon.pdf", icon_pdf(2));
     let side = Some((Format::Pdf, 24, 24));
     assert_eq!(sizes(&diff_of(&scratch, "icon.pdf")), Some((side, side)));
+}
+
+#[test]
+fn pdf_named_driver_cut_binary() {
+    // A side that gives no size falls back to what an unnamed PDF shows.
+    let scratch = Scratch::new("pdf-driver-cut");
+    scratch.write(".gitattributes", "*.pdf diff=astextplain\n");
+    let whole = pdf_doc(
+        &[(24, 24, &icon_ops(1))],
+        "",
+        1,
+        &[b"<< /Length 3 >>\nstream\n\x00\x01\x02\nendstream"],
+        "",
+    );
+    scratch.write("icon.pdf", &whole);
+    scratch.commit_all("initial");
+    scratch.write("icon.pdf", [&whole[..60], b"\0\0\0"].concat());
+    let diff = diff_of(&scratch, "icon.pdf");
+    assert!(
+        diff.binary && diff.picture.is_none(),
+        "a PDF under a driver that gave no size was not binary: {diff:?}"
+    );
 }
 
 #[test]

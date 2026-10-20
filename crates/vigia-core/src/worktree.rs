@@ -748,8 +748,8 @@ impl Worktree {
             return Ok(FileDiff::without_hunks(change.path.clone(), None));
         }
 
-        let (diff, driver) = self.diff_attribute(change)?;
-        if let Some((mut picture, cost)) = self.drawn_svg(change, svg, diff, driver) {
+        let diff = self.diff_attribute(change)?;
+        if let Some((mut picture, cost)) = self.drawn_vector(change, svg, diff) {
             let mut drawn = hunk::compute(change.path.clone(), &[], &[], Some(false));
             drawn.bytes = cost;
             self.stamp(change, &mut picture);
@@ -824,23 +824,20 @@ impl Worktree {
     }
 
     /// The picture of a changed SVG or PDF, and the bytes read to learn it:
-    /// none when an attribute says how to diff it, or a side gives no size. A
-    /// PDF's attribute that names a driver says nothing here: no textconv
-    /// runs, so its text diff would be its raw bytes.
-    fn drawn_svg(
+    /// none when an attribute says how to diff it, or a side gives no size.
+    fn drawn_vector(
         &self,
         change: &FileChange,
         svg: bool,
         diff: Option<bool>,
-        driver: bool,
     ) -> Option<(Picture, u64)> {
-        if !svg {
+        if !svg || diff.is_some() {
             return None;
         }
         let mut cost = 0;
-        let picture = if picture::svg_named(&change.path) && diff.is_none() {
+        let picture = if picture::svg_named(&change.path) {
             self.svg_picture(change, &mut cost)
-        } else if picture::pdf_named(&change.path) && (diff.is_none() || driver) {
+        } else if picture::pdf_named(&change.path) {
             self.pdf_picture(change, &mut cost)
         } else {
             return None;
@@ -1091,8 +1088,8 @@ impl Worktree {
             return Ok(hunk::FileSpan::default());
         }
 
-        let (diff, driver) = self.diff_attribute(change)?;
-        if let Some((_, cost)) = self.drawn_svg(change, svg, diff, driver) {
+        let diff = self.diff_attribute(change)?;
+        if let Some((_, cost)) = self.drawn_vector(change, svg, diff) {
             let mut drawn = hunk::measure(&[], &[], Some(false));
             drawn.bytes = cost;
             return Ok(drawn);
@@ -1128,18 +1125,24 @@ impl Worktree {
         hunk::is_binary(&window).then_some(window)
     }
 
-    /// What `.gitattributes` says about diffing `change`, and whether it names
-    /// a driver. See [`Filter::diff_attribute`].
-    fn diff_attribute(&self, change: &FileChange) -> Result<(Option<bool>, bool)> {
-        let (diff, driver, cleaned) =
-            self.with_filter(|filter| filter.diff_attribute(&change.path))?;
+    /// What `.gitattributes` says about diffing `change`: as text, never as
+    /// text, or nothing. See [`Filter::diff_attribute`].
+    fn diff_attribute(&self, change: &FileChange) -> Result<Option<bool>> {
+        use crate::filter::Diff;
+        let (diff, cleaned) = self.with_filter(|filter| filter.diff_attribute(&change.path))?;
         // A stored pointer against the content it stands for does not diff. Git
         // runs no clean filter on a symlink.
         let pointer = change.before.is_some() && change.after == Some(Side::Worktree);
-        Ok(if cleaned && pointer && !change.maybe_symlink {
-            (Some(false), false)
-        } else {
-            (diff, driver)
+        if cleaned && pointer && !change.maybe_symlink {
+            return Ok(Some(false));
+        }
+        Ok(match diff {
+            None => None,
+            Some(Diff::Unset) => Some(false),
+            Some(Diff::Set) => Some(true),
+            // No textconv runs here, so a PDF's driver would diff its bytes.
+            Some(Diff::Driver) if picture::pdf_named(&change.path) => None,
+            Some(Diff::Driver) => Some(true),
         })
     }
 

@@ -20,6 +20,17 @@ pub(crate) struct Filter {
     lfs: bool,
 }
 
+/// A path's `diff` attribute.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Diff {
+    /// `diff`: diff it as text.
+    Set,
+    /// `-diff`, or `binary`: never as text.
+    Unset,
+    /// `diff=<driver>`: as text, through a driver.
+    Driver,
+}
+
 impl Filter {
     /// Assemble a pipeline from the repository's configuration and attributes.
     pub(crate) fn new(repo: &gix::Repository) -> Result<Self> {
@@ -54,10 +65,9 @@ impl Filter {
         })
     }
 
-    /// What `rela_path`'s attributes say about diffing it: `diff` set, unset or
-    /// silent, whether it names a driver, and whether Git LFS stores it as a
-    /// pointer.
-    pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<(Option<bool>, bool, bool)> {
+    /// What `rela_path`'s attributes say about diffing it, if anything, and
+    /// whether Git LFS stores it as a pointer.
+    pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<(Option<Diff>, bool)> {
         let Filter {
             stack,
             objects,
@@ -74,17 +84,17 @@ impl Filter {
             .at_path(Path::new(rela_path), None, &*objects)
             .map_err(|source| Error::filter(rela_path, source))?;
         entry.matching_attributes(&mut outcome);
-        let (mut diff, mut driver, mut cleaned) = (None, false, false);
+        let (mut diff, mut cleaned) = (None, false);
         for found in outcome.iter_selected() {
             match (found.assignment.name.as_str(), found.assignment.state) {
                 ("filter", gix::attrs::StateRef::Value(name)) => cleaned = name.as_bstr() == "lfs",
-                ("diff", gix::attrs::StateRef::Unset) => diff = Some(false),
-                ("diff", gix::attrs::StateRef::Set) => diff = Some(true),
-                ("diff", gix::attrs::StateRef::Value(_)) => (diff, driver) = (Some(true), true),
+                ("diff", gix::attrs::StateRef::Unset) => diff = Some(Diff::Unset),
+                ("diff", gix::attrs::StateRef::Set) => diff = Some(Diff::Set),
+                ("diff", gix::attrs::StateRef::Value(_)) => diff = Some(Diff::Driver),
                 _ => {}
             }
         }
-        Ok((diff, driver, cleaned))
+        Ok((diff, cleaned))
     }
 
     /// `content`, as git would store it for `rela_path`.
