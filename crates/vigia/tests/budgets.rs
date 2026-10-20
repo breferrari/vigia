@@ -3404,11 +3404,6 @@ fn pdf_stream_bound() {
         builds
     };
     let first = round();
-    eprintln!(
-        "note: a page of 20 MB of content built in p50 {:?}, max {:?}, off the paint",
-        first.percentile(0.5),
-        first.percentile(1.0)
-    );
     // The build runs on the worker, which this thread's CPU clock cannot see,
     // so a breach is retried once and never attributed.
     holds_p99_rounds(
@@ -3527,10 +3522,6 @@ fn pdf_frame_read() {
         read < 1024 * 1024,
         "the first frame read {read} bytes of five 16 MiB PDFs, more than their headers"
     );
-    paint(&mut frame, &mut app, &mut highlighter);
-    // Read once more when they settle, as every file read inside the margin is.
-    settle(&mut frame);
-
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
@@ -3565,6 +3556,11 @@ fn pdf_frame_read() {
         String::new,
         &mut cold,
     );
+    // The long-lived pane only now, so its worker's builds run beside none of
+    // the cold samples.
+    paint(&mut frame, &mut app, &mut highlighter);
+    // Read once more when they settle, as every file read inside the margin is.
+    settle(&mut frame);
     let mut timed = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
         time_cpu(|| {
             paint(frame, app, highlighter);
@@ -3652,7 +3648,10 @@ fn pdf_cold_paint(scratch: &Scratch, pane: Rect) -> (usize, u64, Duration, Durat
     // Nothing on screen, so the worker skips what it has queued; its job in
     // flight finishes here rather than beside the next timed frame.
     pictures.attach(&mut [], &frame);
-    pictures.settle(support::ceiling(Duration::from_secs(60)));
+    assert!(
+        pictures.settle(support::ceiling(Duration::from_secs(60))),
+        "a fresh pane's worker did not finish"
+    );
     let stats = frame.stats();
     (
         sized,

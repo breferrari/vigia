@@ -579,5 +579,11 @@ fn picture_cold_start(scratch: &Scratch, path: &str, pane: Rect) -> Duration {
             .any(|row| matches!(row, Row::Picture { ready: None, .. })),
         "the first frame held no rows for the pictures"
     );
+    // Its worker finishes here, not beside the next run.
+    pictures.attach(&mut [], &frame);
+    assert!(
+        pictures.settle(support::ceiling(Duration::from_secs(60))),
+        "a cold start's worker did not finish"
+    );
     first
 }
