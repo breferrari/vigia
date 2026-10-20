@@ -974,7 +974,8 @@ fn a_breach_with_no_cpu_clock_is_treated_as_ours() {
 }
 
 /// Windows' cycle clock reads busy spins as at least nine tenths, and at most
-/// twice, the time `GetThreadTimes` charged the same spins. A rate calibrated
+/// twice, the time `GetThreadTimes` charged the same spins, once a second has
+/// been charged. A rate calibrated
 /// too high reads low against the thread's own clock; a spin preempted by the
 /// rest of the suite does not.
 #[cfg(windows)]
@@ -984,20 +985,24 @@ fn cycle_clock_direction() {
         support::cycle_rate().is_some(),
         "the cycle rate was not measured"
     );
-    // One judgement over summed spins: `GetThreadTimes` charges whole ticks,
-    // so a short or retried comparison would pass on its noise.
+    // `GetThreadTimes` charges whole ticks, so the judgement waits for a second
+    // of them: two ticks of error are then 3% of it.
+    const JUDGED: Duration = Duration::from_secs(1);
     let (mut wall, mut cpu, mut charged) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
-    for _ in 0..2 {
+    for _ in 0..6 {
         let before = support::thread_times().expect("GetThreadTimes failed");
         let (one_wall, one_cpu) = time_cpu(|| support::spin_for(Duration::from_secs(1)));
         charged += support::thread_times().expect("GetThreadTimes failed") - before;
         wall += one_wall;
         cpu += one_cpu;
+        if charged >= JUDGED {
+            break;
+        }
     }
     eprintln!("cycle clock: wall {wall:?}, cycles {cpu:?}, GetThreadTimes {charged:?}");
     assert!(
-        charged >= COARSE_TICK * FLOOR_TICKS,
-        "the spins of {wall:?} were charged only {charged:?}, too few ticks to judge"
+        charged >= JUDGED,
+        "busy spins of {wall:?} were charged only {charged:?}, too little to judge"
     );
     let ratio = cpu.as_secs_f64() / charged.as_secs_f64();
     assert!(
