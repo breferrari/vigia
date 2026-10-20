@@ -330,6 +330,10 @@ pub fn box_route(event: &Event, over: Option<Rect>) -> BoxRoute {
         Event::Key(key) => match key.code {
             KeyCode::Enter if !key.modifiers.contains(KeyModifiers::ALT) => BoxRoute::Send,
             KeyCode::Esc => BoxRoute::Cancel,
+            // The redraw, which keeps the box and what it holds.
+            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                BoxRoute::Through
+            }
             _ => BoxRoute::Edit(Input::from(*key)),
         },
         Event::Paste(text) => BoxRoute::Paste(text.clone()),

@@ -733,7 +733,7 @@ impl Pictures {
         self.retire_where(|key, _| !shown.contains(key));
     }
 
-    /// Drop each picture `drop` names, and owe the deletes of its Kitty images.
+    /// Drop each picture `doomed` names, and owe the deletes of its Kitty images.
     fn retire_where(&mut self, doomed: impl Fn(&Arc<Key>, &Built) -> bool) {
         let retired = &mut self.retired;
         self.built.retain(|key, ready| {
@@ -751,7 +751,8 @@ impl Pictures {
     }
 
     /// Retire every kept Kitty picture, so it is built again and sent under a
-    /// new id: a terminal attached since it was sent never received it.
+    /// new id: a terminal attached since it was sent never received it. Each
+    /// call decodes every such picture again.
     pub fn refresh(&mut self) {
         self.retire_where(|_, built| !built.kitty.is_empty());
     }

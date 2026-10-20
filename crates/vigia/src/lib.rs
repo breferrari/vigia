@@ -1379,7 +1379,9 @@ impl Shell {
         }
         if action == Action::Refresh {
             self.pictures.refresh();
-            let _ = self.session.screen().clear();
+            if let Err(e) = self.session.screen().clear() {
+                self.app.warn(e.to_string());
+            }
         }
         if !matches!(action, Action::Redraw | Action::Refresh) {
             self.deselect();
@@ -2577,7 +2579,7 @@ mod tests {
         let shipped = source.split("#[cfg(test)]").next().expect("split");
         assert!(
             shipped.contains(
-                "if action == Action::Refresh {\n            self.pictures.refresh();\n            let _ = self.session.screen().clear();\n        }"
+                "if action == Action::Refresh {\n            self.pictures.refresh();\n            if let Err(e) = self.session.screen().clear() {"
             ),
             "`Ctrl+L` no longer retires the Kitty pictures and clears the screen"
         );

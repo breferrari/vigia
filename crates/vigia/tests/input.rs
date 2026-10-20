@@ -2403,6 +2403,19 @@ fn ctrl_l_maps_refresh() {
     assert_ne!(
         action_for(&press(KeyCode::Char('l')), Regions::default()),
         Some(Action::Refresh),
-        "`l` alone redraws"
+        "plain `l` maps to the redraw"
     );
+}
+
+#[test]
+fn ctrl_l_through_box() {
+    // The box takes every key but the redraw, which passes to the pane.
+    assert_eq!(
+        box_route(&with(KeyModifiers::CONTROL, KeyCode::Char('l')), None),
+        BoxRoute::Through
+    );
+    assert!(matches!(
+        box_route(&press(KeyCode::Char('l')), None),
+        BoxRoute::Edit(_)
+    ));
 }
