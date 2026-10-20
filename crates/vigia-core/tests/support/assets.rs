@@ -61,6 +61,18 @@ pub fn encoded(format: image::ImageFormat, width: u32, height: u32, seed: u8) ->
     encode_image(&gradient(width, height, seed), format)
 }
 
+/// A PNG of `width` by `height`, and the same with its last pixel changed,
+/// as an edit that leaves most of the file's bytes alone.
+pub fn edited_png(width: u32, height: u32) -> (Vec<u8>, Vec<u8>) {
+    let image = gradient(width, height, 1);
+    let mut edited = image.clone();
+    edited.put_pixel(width - 1, height - 1, image::Rgba([255, 0, 0, 255]));
+    (
+        encode_image(&image, image::ImageFormat::Png),
+        encode_image(&edited, image::ImageFormat::Png),
+    )
+}
+
 /// A phone-sized screenshot as a PNG, its colours from `accent`.
 pub fn screen_png(accent: u8) -> Vec<u8> {
     let image = image::RgbaImage::from_fn(1170, 2532, |x, y| {

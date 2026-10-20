@@ -34,6 +34,8 @@ pub struct FrameStats {
     pub deferred: u64,
     /// Values [`Frame::diff_with`] derived from a diff, each once per diff.
     pub derived: u64,
+    /// Bytes read on the frame path to score binaries as renames.
+    pub paired_bytes: u64,
 }
 
 /// A working-tree fingerprint that costs no read: size and modification time.
@@ -463,6 +465,8 @@ impl<'w> Frame<'w> {
         // The clean filter is rebuilt by the walk's first read rather than kept for
         // the life of the process, so a walk and the draw after it share one.
         self.worktree.invalidate_filter();
+        self.worktree.renew_pair_budget();
+        let paired_before = self.worktree.pair_bytes();
         let mut walk = self.worktree.changes_at(&self.standing, options)?;
         for change in &mut walk {
             files.push(change?);
@@ -485,6 +489,8 @@ impl<'w> Frame<'w> {
             }
             hidden += walk.hidden();
         }
+
+        self.stats.paired_bytes += self.worktree.pair_bytes() - paired_before;
 
         // Nothing above this line mutated the frame's picture of the worktree, which
         // is what makes a failed walk leave the previous frame intact.
@@ -623,6 +629,18 @@ impl<'w> Frame<'w> {
                 cached.derived = None;
             }
         }
+    }
+
+    /// The pairs of a removal and an addition this frame could not afford to
+    /// score as a rename, for the picture worker.
+    pub fn unscored_pairs(&self) -> Vec<crate::Candidate> {
+        self.worktree.unscored_pairs()
+    }
+
+    /// File a rename score the worker found, by its pair. The next advance
+    /// pairs by it.
+    pub fn learn_pair(&mut self, key: crate::PairKey, score: u64) {
+        self.worktree.learn_pair(key, score);
     }
 
     /// Draw a changed SVG as pictures, or diff it as text, as a pane that can

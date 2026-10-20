@@ -679,6 +679,7 @@ pub fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
         evicted: after.evicted - before.evicted,
         deferred: after.deferred - before.deferred,
         derived: after.derived - before.derived,
+        paired_bytes: after.paired_bytes - before.paired_bytes,
     }
 }
 
