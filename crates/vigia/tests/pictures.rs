@@ -31,6 +31,8 @@ struct Pane {
     history: History,
     width: u16,
     height: u16,
+    /// What the pane wrote outside its cells: Kitty transmits and deletes.
+    wire: String,
 }
 
 impl Pane {
@@ -51,6 +53,7 @@ impl Pane {
             history: History::new(),
             width,
             height,
+            wire: String::new(),
         }
     }
 
@@ -96,7 +99,17 @@ impl Pane {
                 .settle(support::ceiling(Duration::from_secs(60))),
             "the pictures were not built"
         );
+        self.view(frame);
+        self.wire.push_str(&self.pictures.output(usize::MAX));
         self.view(frame)
+    }
+
+    /// Everything written outside the cells since the last call, with what is
+    /// owed now.
+    fn sent(&mut self) -> String {
+        let mut wire = std::mem::take(&mut self.wire);
+        wire.push_str(&self.pictures.output(usize::MAX));
+        wire
     }
 
     fn scroll(&mut self, frame: &mut Frame, rows: isize) {
@@ -827,11 +840,16 @@ fn kitty_placement() {
     let view = pane.settled(&mut frame);
     let (_, _, kind, panels) = sized(&view).expect("a size line");
     assert_eq!((kind, panels), (Kind::Three, 3));
+    assert_eq!(
+        kitty_ids(&pane.sent()).len(),
+        3,
+        "each panel's image is not sent once"
+    );
     let first = pane.draw(&view);
     assert_eq!(
         cells_with(&first, "\x1b_G"),
-        3,
-        "each panel's image is not sent once, in one cell"
+        0,
+        "a transmit was drawn into a cell"
     );
     let placed = cells_with(&first, &PLACEHOLDER.to_string());
     let slots: usize = sized_slots(&view).iter().map(|(w, r)| w * r).sum();
@@ -874,12 +892,12 @@ fn scrolled_kitty_placement() {
         shown.first().is_some_and(|(part, _)| *part > 0) && shown.len() < rows,
         "the picture is not cut by the top of the pane: {shown:?}"
     );
-    let drawn = pane.draw(&view);
     assert_eq!(
-        cells_with(&drawn, "\x1b_G"),
+        kitty_ids(&pane.sent()).len(),
         3,
         "a picture cut by the top was not sent"
     );
+    let drawn = pane.draw(&view);
     let placed_rows = drawn
         .buffer()
         .content()
@@ -946,17 +964,16 @@ fn sized_slots(view: &View) -> Vec<(usize, usize)> {
         .unwrap_or_default()
 }
 
-/// The id a Kitty transmit names, from its `i=` key.
-fn kitty_ids(backend: &TestBackend) -> Vec<u32> {
-    backend
-        .buffer()
-        .content()
-        .iter()
-        .filter_map(|cell| {
-            let at = cell.symbol().find("a=T")?;
-            let head = &cell.symbol()[..at];
-            head.rsplit("i=").next()?.split(',').next()?.parse().ok()
+/// The ids the Kitty transmits in `wire` name, from their `i=` key.
+fn kitty_ids(wire: &str) -> Vec<u32> {
+    wire.match_indices("i=")
+        .filter(|(at, _)| {
+            wire[*at..]
+                .split(',')
+                .nth(1)
+                .is_some_and(|key| key == "a=T")
         })
+        .filter_map(|(at, _)| wire[at + 2..].split(',').next()?.parse().ok())
         .collect()
 }
 
@@ -972,9 +989,9 @@ fn kitty_kept_off_screen() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let view = pane.settled(&mut frame);
+    pane.settled(&mut frame);
     assert_eq!(
-        kitty_ids(&pane.draw(&view)).len(),
+        kitty_ids(&pane.sent()).len(),
         3,
         "three images were not sent"
     );
@@ -999,12 +1016,12 @@ fn kitty_kept_off_screen() {
 
     pane.scroll(&mut frame, -150);
     let back = pane.settled(&mut frame);
-    let drawn = pane.draw(&back);
     assert_eq!(
-        cells_with(&drawn, "\x1b_G"),
+        kitty_ids(&pane.sent()).len(),
         0,
         "a picture that came back was sent again"
     );
+    let drawn = pane.draw(&back);
     assert!(
         cells_with(&drawn, &PLACEHOLDER.to_string()) > 0,
         "the picture that came back is not placed"
@@ -1014,7 +1031,7 @@ fn kitty_kept_off_screen() {
     pane.scroll(&mut frame, 150);
     pane.settled(&mut frame);
     pane.pictures.retire_all();
-    let deletes = pane.pictures.retired();
+    let deletes = pane.sent();
     assert_eq!(
         deletes.matches("a=d").count(),
         3,
@@ -1028,15 +1045,15 @@ fn kitty_deleted_on_leave() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let view = pane.settled(&mut frame);
-    let sent = kitty_ids(&pane.draw(&view));
+    pane.settled(&mut frame);
+    let sent = kitty_ids(&pane.sent());
     assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
 
     // The image is reverted, so its file leaves the diff.
     scratch.checkout("screen.png");
     frame.advance().expect("advance");
     pane.view(&mut frame);
-    let deletes = pane.pictures.retired();
+    let deletes = pane.sent();
     for id in &sent {
         assert!(
             deletes.contains(&format!("a=d,d=I,i={id},q=2")),
@@ -1051,8 +1068,8 @@ fn kitty_deleted_on_edit() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let view = pane.settled(&mut frame);
-    let sent = kitty_ids(&pane.draw(&view));
+    pane.settled(&mut frame);
+    let sent = kitty_ids(&pane.sent());
     assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
     assert_eq!(
         pane.pictures.retired(),
@@ -1068,7 +1085,7 @@ fn kitty_deleted_on_edit() {
     frame.advance().expect("advance");
     let edited = pane.settled(&mut frame);
     pane.draw(&edited);
-    let deletes = pane.pictures.retired();
+    let deletes = pane.sent();
     for id in &sent {
         assert!(
             deletes.contains(&format!("a=d,d=I,i={id},q=2")),
@@ -1080,8 +1097,11 @@ fn kitty_deleted_on_edit() {
 
 #[test]
 fn protocol_hidden_under_sheet() {
+    // A Kitty image is sent outside the cells, so what the sheet must hold back
+    // is its placement.
+    let placed = PLACEHOLDER.to_string();
     for (protocol, sequence) in [
-        (ProtocolType::Kitty, "\x1b_G"),
+        (ProtocolType::Kitty, placed.as_str()),
         (ProtocolType::Sixel, "\x1bP"),
     ] {
         let (scratch, mut pane) = protocol_pane(&format!("pictures-sheet-{protocol:?}"), protocol);
@@ -1098,10 +1118,10 @@ fn protocol_hidden_under_sheet() {
             "a {protocol:?} image was drawn under the sheet, which cannot hide it"
         );
         let open = pane.draw(&view);
-        assert_eq!(
-            cells_with(&open, sequence),
-            3,
-            "the {protocol:?} images were not drawn once the sheet closed"
+        let drawn = cells_with(&open, sequence);
+        assert!(
+            drawn >= 3,
+            "the {protocol:?} images were not drawn once the sheet closed: {drawn}"
         );
     }
 }
@@ -1147,11 +1167,11 @@ fn kitty_deleted_on_quit() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let view = pane.settled(&mut frame);
-    let sent = kitty_ids(&pane.draw(&view));
+    pane.settled(&mut frame);
+    let sent = kitty_ids(&pane.sent());
     assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
     pane.pictures.retire_all();
-    let deletes = pane.pictures.retired();
+    let deletes = pane.sent();
     for id in &sent {
         assert!(
             deletes.contains(&format!("a=d,d=I,i={id},q=2")),
@@ -1484,11 +1504,11 @@ fn kitty_resent_on_refresh() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let view = pane.settled(&mut frame);
-    let mut sent = kitty_ids(&pane.draw(&view));
+    pane.settled(&mut frame);
+    let mut sent = kitty_ids(&pane.sent());
     assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
     assert!(
-        kitty_ids(&pane.draw(&view)).is_empty(),
+        kitty_ids(&pane.sent()).is_empty(),
         "a second draw sent the images again"
     );
     let mut every: Vec<u32> = sent.clone();
@@ -1496,7 +1516,7 @@ fn kitty_resent_on_refresh() {
         // Twice before a paint, which owes each delete once.
         pane.pictures.refresh();
         pane.pictures.refresh();
-        let deletes = pane.pictures.retired();
+        let deletes = pane.sent();
         for id in &sent {
             assert_eq!(
                 deletes.matches(&format!("a=d,d=I,i={id},q=2")).count(),
@@ -1504,8 +1524,8 @@ fn kitty_resent_on_refresh() {
                 "press {press}: image {id} was not deleted once: {deletes:?}"
             );
         }
-        let view = pane.settled(&mut frame);
-        sent = kitty_ids(&pane.draw(&view));
+        pane.settled(&mut frame);
+        sent = kitty_ids(&pane.sent());
         assert_eq!(
             sent.len(),
             3,

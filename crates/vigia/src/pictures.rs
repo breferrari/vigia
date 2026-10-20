@@ -1,7 +1,7 @@
 //! The pictures of a changed image: where they go on the pane, and how they are
 //! built off the paint and kept while they are on screen. `SPEC.md` §11.1.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
@@ -260,6 +260,9 @@ pub struct Built {
     /// Bytes those images hold: their unpacked pixels in the terminal, or, sent
     /// uncompressed, the larger base64 transmit this process keeps for each.
     pub stored: u64,
+    /// Its Kitty images' transmits, taken out of the panels as they were built,
+    /// for the pane to write a frame's share at a time.
+    pub transmit: String,
     /// Which page of a PDF was drawn, and whether the page count changed.
     pub page_note: Option<String>,
     /// The sizes found for sides the frame path left unsized, by their stamp.
@@ -565,6 +568,10 @@ pub struct Pictures {
     tick: u64,
     /// The frame's walk that kept pictures were last checked against.
     walked: u64,
+    /// Transmits not yet written, oldest first, each with how much of it is.
+    outbox: VecDeque<(Arc<Key>, String)>,
+    /// How much of the first transmit is written.
+    written: usize,
     /// Whether a delete has to pass through tmux.
     tmux: bool,
     /// Where the picker goes, until it has been given.
@@ -640,6 +647,7 @@ fn undecoded() -> Built {
         profiles_differ: false,
         kitty: Vec::new(),
         stored: 0,
+        transmit: String::new(),
         page_note: None,
         sizes: Vec::new(),
         bar: None,
@@ -744,6 +752,8 @@ impl Pictures {
             seen: HashMap::new(),
             tick: 0,
             walked: 0,
+            outbox: VecDeque::new(),
+            written: 0,
             tmux: false,
             picker: Some(picked),
             cell: None,
@@ -939,14 +949,25 @@ impl Pictures {
     /// Drop each picture `doomed` names, and owe the deletes of its Kitty images.
     fn retire_where(&mut self, doomed: impl Fn(&Arc<Key>, &Built) -> bool) {
         let (retired, seen) = (&mut self.retired, &mut self.seen);
+        let mut dropped_keys = Vec::new();
         self.built.retain(|key, ready| {
             let dropped = doomed(key, &ready.0);
             if dropped {
                 retired.extend(&ready.0.kitty);
                 seen.remove(key);
+                dropped_keys.push(Arc::clone(key));
             }
             !dropped
         });
+        if !dropped_keys.is_empty() {
+            // The one part way out is finished, so its delete parses.
+            let started = usize::from(self.written > 0);
+            let mut at = 0;
+            self.outbox.retain(|(key, _)| {
+                at += 1;
+                at <= started || !dropped_keys.contains(key)
+            });
+        }
     }
 
     /// Retire every kept picture, for a pane about to leave the terminal.
@@ -987,16 +1008,74 @@ impl Pictures {
                     .extend(built.iter().flat_map(|built| built.kitty.iter()));
                 continue;
             }
-            if let Some(built) = built {
+            if let Some(mut built) = built {
                 self.found.extend(&built.sizes);
+                let transmit = std::mem::take(&mut built.transmit);
+                if !transmit.is_empty() {
+                    self.outbox.push_back((Arc::clone(&key), transmit));
+                }
                 self.built.insert(key, Ready(Arc::new(built)));
             }
         }
     }
 
-    /// The built picture for `key`, if it is ready.
+    /// The built picture for `key`, if it is ready: built, and its transmit
+    /// written whole.
     pub fn get(&self, key: &Key) -> Option<Ready> {
+        if self.outbox.iter().any(|(sending, _)| **sending == *key) {
+            return None;
+        }
         self.built.get(key).cloned()
+    }
+
+    /// Whether a transmit is still waiting to be written.
+    pub fn sending(&self) -> bool {
+        !self.outbox.is_empty()
+    }
+
+    /// What to write before the next frame: the deletes owed, when no image is
+    /// part way out, then up to `budget` bytes of transmits, in whole chunks and
+    /// at least one.
+    pub fn output(&mut self, budget: usize) -> String {
+        use ratatui_image::picker::cap_parser::Parser;
+        let (_, escape, end) = Parser::tmux_start_escape_end(self.tmux);
+        let close = format!("{escape}\\{end}");
+        let mut out = String::new();
+        loop {
+            if self.written == 0 {
+                out.push_str(&self.retired());
+            }
+            let Some((_, transmit)) = self.outbox.front() else {
+                return out;
+            };
+            let rest = &transmit[self.written..];
+            let mut take = 0;
+            for (at, _) in rest.match_indices(close.as_str()) {
+                let upto = at + close.len();
+                // At least one chunk a frame, or nothing would ever finish.
+                if (take > 0 || !out.is_empty()) && out.len() + upto > budget {
+                    break;
+                }
+                take = upto;
+            }
+            if take == 0 {
+                if !out.is_empty() {
+                    return out;
+                }
+                take = rest.len();
+            }
+            out.push_str(&rest[..take]);
+            if take == rest.len() {
+                self.outbox.pop_front();
+                self.written = 0;
+            } else {
+                self.written += take;
+                return out;
+            }
+            if out.len() >= budget {
+                return out;
+            }
+        }
     }
 
     /// How many built pictures are kept.
@@ -1102,6 +1181,10 @@ impl Pictures {
         }
     }
 }
+
+/// The most of the Kitty transmits waiting that one frame writes. `SPEC.md`
+/// §11.1 sets it against the terminal's read rate.
+pub const TRANSMIT_FRAME: usize = 64 * 1024;
 
 /// The most a pane's kept Kitty pictures may hold, by [`Built::stored`].
 /// kitty and Ghostty each store 320 MB of image data per screen and evict the
@@ -1651,6 +1734,23 @@ fn panel(
     Some((sliced, None))
 }
 
+/// The transmit of a Kitty panel, taken by drawing it once off screen: the
+/// crate sends an image only on its first draw, so every later one places it.
+fn taken(protocol: &SlicedProtocol, slot: Slot) -> String {
+    use ratatui::widgets::Widget;
+    let area = ratatui::layout::Rect::new(0, 0, slot.width.max(1), slot.rows.max(1));
+    let mut scratch = ratatui::buffer::Buffer::empty(area);
+    ratatui_image::sliced::SlicedImage::new(protocol, (0, 0).into()).render(area, &mut scratch);
+    let first = scratch.content().first().map_or("", |cell| cell.symbol());
+    first
+        .find(PLACEHOLDER)
+        .map_or(first, |at| &first[..at])
+        .to_owned()
+}
+
+/// What kitty draws a placed image's cells as.
+const PLACEHOLDER: char = '\u{10EEEE}';
+
 /// A slot's half-block grid: two pixels to a cell's height.
 fn grid_of(slot: Slot) -> (u32, u32) {
     (u32::from(slot.width), u32::from(slot.rows) * 2)
@@ -1784,6 +1884,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
     let mut panels = Vec::new();
     let mut kitty = Vec::new();
     let mut stored = 0;
+    let mut transmit = String::new();
     // A page drawn alone takes the first slot, after its bar, as an added or
     // deleted image does.
     let (slots, paints): (Vec<Slot>, &[(Side, Paint)]) = match (alone, job.key.shape.slots.first())
@@ -1841,6 +1942,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
             return undecoded();
         };
         if let Some(id) = id {
+            transmit.push_str(&taken(&protocol, slot));
             kitty.push(id);
             // An uncompressed transmit is base64 of the pixels, four bytes to three.
             stored += if compress {
@@ -1857,6 +1959,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
         profiles_differ,
         kitty,
         stored,
+        transmit,
         page_note: page,
         sizes: Vec::new(),
         bar: alone,
@@ -2001,6 +2104,81 @@ mod tests {
         assert!(
             pictures.get(&edited).is_none(),
             "the picture staging replaced was kept"
+        );
+    }
+
+    #[test]
+    fn transmit_spread() {
+        let mut pictures = Pictures::unpicked(
+            Inks {
+                canvas: (0, 0, 0),
+                changed: (255, 0, 0),
+            },
+            Box::new(|| {}),
+        );
+        let key = |n: u64| {
+            Arc::new(Key {
+                path: format!("{n}.png"),
+                before: Some(n),
+                after: Some(n + 1),
+                shape: Shape {
+                    kind: Kind::Three,
+                    rows: 1,
+                    slots: Vec::new(),
+                },
+            })
+        };
+        // Forty 4 KB chunks, the crate's shape, about 165 KB.
+        let chunk = format!("\x1b_Gq=2,m=1;{}\x1b\\", "A".repeat(4096));
+        let image = chunk.repeat(40);
+        for n in 0..2 {
+            pictures.built.insert(
+                key(n),
+                Ready(Arc::new(Built {
+                    kitty: vec![9],
+                    stored: 1,
+                    ..undecoded()
+                })),
+            );
+            pictures.outbox.push_back((key(n), image.clone()));
+        }
+        assert!(pictures.get(&key(0)).is_none(), "a picture part sent drew");
+
+        let first = pictures.output(TRANSMIT_FRAME);
+        assert!(
+            first.len() <= TRANSMIT_FRAME,
+            "a frame wrote {} bytes",
+            first.len()
+        );
+        assert!(first.ends_with("\x1b\\"), "a frame stopped inside a chunk");
+        assert_eq!(
+            first.len() % chunk.len(),
+            0,
+            "a frame wrote part of a chunk"
+        );
+
+        // Retired part way out: it finishes, and only then is its delete written.
+        pictures.retire_where(|key, _| key.path == "0.png");
+        pictures.retire_where(|key, _| key.path == "1.png");
+        let mut wire = first;
+        while pictures.sending() {
+            let frame = pictures.output(TRANSMIT_FRAME);
+            assert!(
+                frame.len() <= TRANSMIT_FRAME + 64,
+                "a frame wrote {} bytes",
+                frame.len()
+            );
+            wire.push_str(&frame);
+        }
+        wire.push_str(&pictures.output(TRANSMIT_FRAME));
+        let delete = wire
+            .find("\x1b_Ga=d")
+            .expect("the delete was never written");
+        // Exactly the first image, whole, then its delete: the second never began.
+        assert_eq!(
+            delete,
+            image.len(),
+            "a delete came inside an image, or the unstarted one was sent"
         );
     }
 
@@ -2837,6 +3015,7 @@ mod tests {
             profiles_differ,
             kitty: Vec::new(),
             stored: 0,
+            transmit: String::new(),
             page_note: None,
             sizes: Vec::new(),
             bar: None,

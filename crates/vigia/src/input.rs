@@ -603,6 +603,8 @@ pub struct Deadlines {
     pub settling: Option<Duration>,
     /// When the motion still running on the pane is done, if one is.
     pub arriving: Option<Instant>,
+    /// When the next frame's share of a Kitty transmit is due, while one waits.
+    pub sending: Option<Instant>,
     /// When the next note that is leaving has its rows dropped.
     pub departing: Option<Instant>,
     /// When the note box Esc sent away has its rows dropped.
@@ -620,6 +622,7 @@ pub fn patience(due: Deadlines, now: Instant) -> Option<Duration> {
         due.ageing,
         due.settling,
         due.arriving.map(since),
+        due.sending.map(since),
         due.departing.map(since),
         due.closing.map(since),
     ]

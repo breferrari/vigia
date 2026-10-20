@@ -1177,7 +1177,8 @@ struct Shell {
 impl Drop for Shell {
     fn drop(&mut self) {
         self.pictures.retire_all();
-        self.write_retired();
+        // The whole of an image part way out, so the deletes after it parse.
+        self.write_pictures(usize::MAX);
         use std::io::Write;
         let _ = self.session.screen().backend_mut().flush();
     }
@@ -1193,17 +1194,17 @@ impl Shell {
         }
     }
 
-    /// Send the Kitty deletes owed. A failed write leaves the images to the
-    /// terminal's own quota.
-    fn write_retired(&mut self) {
+    /// Send the Kitty deletes owed and up to `budget` bytes of transmits. A
+    /// failed write leaves the images to the terminal's own quota.
+    fn write_pictures(&mut self, budget: usize) {
         use std::io::Write;
-        let retired = self.pictures.retired();
-        if !retired.is_empty() {
+        let out = self.pictures.output(budget);
+        if !out.is_empty() {
             let _ = self
                 .session
                 .screen()
                 .backend_mut()
-                .write_all(retired.as_bytes());
+                .write_all(out.as_bytes());
         }
     }
 
@@ -1298,6 +1299,8 @@ impl Shell {
                 // The effect says when it is finished, so the clock is asked for a
                 // frame only while one is running and goes untimed the moment none is.
                 arriving: self.effects_running().then(|| now + ARRIVING_FRAME),
+                // A frame's share of the transmits waiting goes out with each paint.
+                sending: self.pictures.sending().then(|| now + ARRIVING_FRAME),
                 // The frame after a departure ends is the one that drops its rows.
                 departing: self.ledger.ends_in(),
                 // And the frame after the box has left is the one that drops its.
@@ -2264,9 +2267,9 @@ impl Shell {
             self.elsewhere,
             &self.root,
         );
-        // Before the draw, so the terminal drops the Kitty images of pictures that
-        // left the screen.
-        self.write_retired();
+        // Before the draw, so the terminal has dropped and received what the
+        // cells below place.
+        self.write_pictures(pictures::TRANSMIT_FRAME);
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.

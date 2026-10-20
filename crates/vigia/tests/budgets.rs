@@ -3730,6 +3730,8 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
         "note: three pictures of a 1170x2532 pair built in {:?}, off the paint",
         building.elapsed()
     );
+    // The frames that write the transmits, before the frames this times.
+    let _ = pictures.output(usize::MAX);
     let view = paint(&mut frame, &mut app, &mut highlighter, &mut pictures);
     let built = view
         .rows
