@@ -11,8 +11,9 @@
 // saved bytes back and never checks anything out, so uncommitted work cannot be
 // lost, and a clean tree makes any leftover change visible. Each row prints as
 // its mutation finishes. At `--limit` minutes (default 30) of wall time the run
-// stops, restores the file, and lists what did not run. Exit 0 all killed, 1 any
-// survived or broke, 2 aborted, 3 stopped at the limit.
+// stops, restores the file, and lists what did not run; the limit covers the
+// unmutated runs too. Exit 0 all killed, 1 any survived or broke, 2 aborted, 3
+// stopped at the limit with nothing survived.
 
 import { createHash } from "node:crypto";
 import { execSync, spawn } from "node:child_process";
@@ -52,16 +53,31 @@ for (const m of battery) {
 // The caller's shell, since cmd.exe on Windows may not resolve what Git Bash does.
 const shell = process.env.SHELL || true;
 let running = null;
-// The whole process tree, since a shell's children outlive the shell.
+// The whole process tree, since a shell's children outlive the shell. It may
+// already be gone, which is not an error.
 const stop = (child) => {
-	if (process.platform === "win32") execSync(`taskkill /T /F /PID ${child.pid}`, { stdio: "ignore" });
-	else process.kill(-child.pid, "SIGKILL");
+	try {
+		if (process.platform === "win32") execSync(`taskkill /T /F /PID ${child.pid}`, { stdio: "ignore" });
+		else process.kill(-child.pid, "SIGKILL");
+	} catch {}
 };
+let restore = null;
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+	process.on(signal, () => {
+		if (running) stop(running);
+		restore?.();
+		process.exit(2);
+	});
+}
 // Run `line` until it exits or the limit passes. `status` is null when the limit
 // stopped it.
 function test(line) {
 	return new Promise((resolve) => {
-		const child = spawn(line, { shell, detached: process.platform !== "win32" });
+		const child = spawn(line, {
+			shell,
+			detached: process.platform !== "win32",
+			stdio: ["ignore", "pipe", "pipe"],
+		});
 		running = child;
 		let stdout = "";
 		let stderr = "";
@@ -75,7 +91,8 @@ function test(line) {
 		child.on("close", (status) => {
 			clearTimeout(timer);
 			running = null;
-			resolve({ status: late ? null : status, stdout, stderr });
+			// A child killed by a signal has no code, and that is a failure.
+			resolve({ late, status: status ?? 1, stdout, stderr });
 		});
 	});
 }
@@ -83,21 +100,13 @@ function test(line) {
 // command that never ran is one of those.
 for (const line of new Set(battery.map(commandOf))) {
 	const baseline = await test(line);
-	if (baseline.status === null) abort(`the limit passed during the unmutated run of: ${line}`);
+	if (baseline.late) abort(`the limit passed during the unmutated run of: ${line}`);
 	if (baseline.status !== 0) {
 		const said = `${baseline.stdout}${baseline.stderr}`.trim().split("\n").slice(-20).join("\n");
 		abort(`the test command is red on the unmutated tree:\n${said}`);
 	}
 }
 
-let restore = null;
-for (const signal of ["SIGINT", "SIGTERM"]) {
-	process.on(signal, () => {
-		if (running) stop(running);
-		restore?.();
-		process.exit(2);
-	});
-}
 
 let allKilled = true;
 for (const [at, m] of battery.entries()) {
@@ -121,10 +130,10 @@ for (const [at, m] of battery.entries()) {
 	const left = dirty();
 	if (left) abort(`${m.name}: the tree is not clean after the restore:\n${left}`);
 
-	if (run.status === null) {
+	if (run.late) {
 		for (const unrun of battery.slice(at)) console.log(`UNRUN     ${unrun.name}`);
 		console.log(`mutate: stopped at the ${minutes}-minute limit, ${battery.length - at} of ${battery.length} not run`);
-		process.exit(3);
+		process.exit(allKilled ? 3 : 1);
 	}
 	const output = `${run.stdout}\n${run.stderr}`;
 	const failed = [...output.matchAll(/^test (\S+) \.\.\. FAILED/gm)].map((hit) => hit[1]);

@@ -5,7 +5,7 @@ mod support;
 use std::io::Cursor;
 
 use image::{ImageFormat, RgbaImage};
-use support::{Scratch, ceiling, changes_sorted, encoded, lfs_pointer, png};
+use support::{Scratch, changes_sorted, encoded, lfs_pointer, png};
 use vigia_core::{FileDiff, Format, ImageSide, Origin, Picture};
 
 /// The diff of the one change at `rela`.
@@ -594,7 +594,7 @@ fn lfs_object_fifo() {
         let _ = tx.send(worktree.diff(change).expect("diff").picture);
     });
     // Detached on purpose: a thread parked in `open` never returns.
-    let picture = match rx.recv_timeout(ceiling(Duration::from_secs(10))) {
+    let picture = match rx.recv_timeout(support::ceiling(Duration::from_secs(10))) {
         Ok(picture) => picture,
         Err(mpsc::RecvTimeoutError::Timeout) => {
             panic!("the diff is still inside an open of the fifo")

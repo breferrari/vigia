@@ -481,37 +481,6 @@ jobs:
         env:
           VIGIA_BUDGET_SLACK: "3"
 
-  # **The one check branch protection should require, and the reason it exists is
-  # an instrument that reported green while nothing had run**
-  # ([#236](https://github.com/breferrari/vigia/issues/236)).
-  #
-  # `gh pr checks --watch --fail-fast` exited 0 on a PR whose matrix had not
-  # started. It treats "every check currently attached to the head SHA is terminal
-  # and none failed" as done, and it cannot know more are about to attach. Three
-  # deliberate properties lined up to make that reachable: the jobs above skip on
-  # drafts, so a `skipped` check is normal here and indistinguishable from a
-  # passing one to anything counting failures; a second workflow also triggers on
-  # `pull_request`, so the PR is never checkless, which is the one state a human
-  # would notice; and pushing and marking ready in quick succession fires two runs,
-  # the second cancelling the first, which opens the window.
-  #
-  # This collapses the class rather than narrowing it. A cancelled run fails it, a
-  # skipped matrix fails it, a matrix job that never ran fails it, and a check list
-  # that does not *contain* it is visibly incomplete rather than quietly green.
-  # `SPEC.md` §7's rule reaching the review surface: a gate that cannot fail is
-  # indistinguishable from one that cannot be reached.
-  #
-  # **`if: always()` is what makes it a gate rather than a summary.** Without it
-  # the job inherits `needs`'s own skipping, so the one check that is supposed to
-  # notice an absent matrix would go absent with it, which is the failure it
-  # exists to catch wearing the fix's clothes.
-  #
-  # It carries no draft guard and still runs on a draft, so the required check
-  # always reports rather than going absent. What it must not do is judge a
-  # draft's skips as failure: that turned the check red on every push to a
-  # draft, and a draft cannot be merged in any case, so the run it would be
-  # protecting cannot happen. `ready_for_review` is in this workflow's trigger
-  # list so the full matrix runs the moment the work is claimed finished.
   # **Mutation testing of what the pull request changed.** cargo-mutants
   # mutates only the lines in the diff, and tests each mutant against its own
   # package's suite under the `mutants` nextest profile, which kills a hung test
@@ -553,6 +522,14 @@ jobs:
           cargo mutants --in-diff pr.diff --test-tool nextest -j 2 --no-shuffle \
             --shard "${{ matrix.shard }}/$SHARDS"
           status=$?
+          # 2 is a missed mutant and 3 a timeout, which this job reports and does
+          # not fail on yet. Anything else, such as a red baseline, fails it.
+          case "$status" in 0|2|3) exit 0 ;; *) exit "$status" ;; esac
+      # Its own step, so a shard cut off by the timeout still reports.
+      - name: summary
+        if: always()
+        shell: bash
+        run: |
           count() { [ -f "mutants.out/$1.txt" ] && wc -l < "mutants.out/$1.txt" || echo 0; }
           {
             echo "### mutants, shard ${{ matrix.shard }} of $SHARDS"
@@ -565,9 +542,6 @@ jobs:
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-          # 2 is a missed mutant and 3 a timeout, which this job reports and does
-          # not fail on yet. Anything else, such as a red baseline, fails it.
-          case "$status" in 0|2|3) exit 0 ;; *) exit "$status" ;; esac
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -575,6 +549,37 @@ jobs:
           path: mutants.out/
           if-no-files-found: ignore
 
+  # **The one check branch protection should require, and the reason it exists is
+  # an instrument that reported green while nothing had run**
+  # ([#236](https://github.com/breferrari/vigia/issues/236)).
+  #
+  # `gh pr checks --watch --fail-fast` exited 0 on a PR whose matrix had not
+  # started. It treats "every check currently attached to the head SHA is terminal
+  # and none failed" as done, and it cannot know more are about to attach. Three
+  # deliberate properties lined up to make that reachable: the jobs above skip on
+  # drafts, so a `skipped` check is normal here and indistinguishable from a
+  # passing one to anything counting failures; a second workflow also triggers on
+  # `pull_request`, so the PR is never checkless, which is the one state a human
+  # would notice; and pushing and marking ready in quick succession fires two runs,
+  # the second cancelling the first, which opens the window.
+  #
+  # This collapses the class rather than narrowing it. A cancelled run fails it, a
+  # skipped matrix fails it, a matrix job that never ran fails it, and a check list
+  # that does not *contain* it is visibly incomplete rather than quietly green.
+  # `SPEC.md` §7's rule reaching the review surface: a gate that cannot fail is
+  # indistinguishable from one that cannot be reached.
+  #
+  # **`if: always()` is what makes it a gate rather than a summary.** Without it
+  # the job inherits `needs`'s own skipping, so the one check that is supposed to
+  # notice an absent matrix would go absent with it, which is the failure it
+  # exists to catch wearing the fix's clothes.
+  #
+  # It carries no draft guard and still runs on a draft, so the required check
+  # always reports rather than going absent. What it must not do is judge a
+  # draft's skips as failure: that turned the check red on every push to a
+  # draft, and a draft cannot be merged in any case, so the run it would be
+  # protecting cannot happen. `ready_for_review` is in this workflow's trigger
+  # list so the full matrix runs the moment the work is claimed finished.
   # The suites that read a document, on one platform, for a pull request that
   # changed only documents. `package.rs::docs_suites_named` holds this list to
   # the tests that read a document at the repository root or under `docs/`.
