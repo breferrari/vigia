@@ -17,8 +17,7 @@ log="$1"
 target="$2"
 filter="$3"
 
-ran=$(sed -n 's/^test result: [A-Za-z]*\. \([0-9][0-9]*\) passed; \([0-9][0-9]*\) failed;.*/\1 \2/p' "$log" |
-  awk '{ n += $1 + $2 } END { print n + 0 }')
+ran=$(awk '/^test result:/ { n += $4 + $6 } END { print n + 0 }' "$log")
 
 if [ "$ran" -eq 0 ]; then
   echo "::error::filter '$filter' ran no test in target '$target'"

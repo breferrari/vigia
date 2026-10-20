@@ -115,24 +115,17 @@ jobs:
           case "$iterations" in ''|*[!0-9]*) echo "iterations must be a positive integer" >&2; exit 1;; esac
           [ "$iterations" -ge 1 ] || { echo "iterations must be >= 1" >&2; exit 1; }
 
-          # Fails before any iteration is paid for when the filter names no
-          # test in this target.
-          listed=$(cargo test --release --test "$IN_TARGET" "$IN_TEST" -- --exact --list 2>/dev/null | grep -c ': test$' || true)
-          if [ "$listed" -eq 0 ]; then
-            echo "::error::filter '$IN_TEST' ran no test in target '$IN_TARGET'"
-            exit 1
-          fi
-
           fail=0
           mkdir -p failures
           for i in $(seq 1 "$iterations"); do
-            if cargo test --release --test "$IN_TARGET" \
-                 "$IN_TEST" -- --exact --nocapture > "failures/run-$i.log" 2>&1; then
-              sh .github/scripts/tests-ran.sh "failures/run-$i.log" "$IN_TARGET" "$IN_TEST" || exit 1
+            passed=true
+            cargo test --release --test "$IN_TARGET" \
+              "$IN_TEST" -- --exact --nocapture > "failures/run-$i.log" 2>&1 || passed=false
+            sh .github/scripts/tests-ran.sh "failures/run-$i.log" "$IN_TARGET" "$IN_TEST" || exit 1
+            if "$passed"; then
               printf 'run %3d/%s  pass\n' "$i" "$iterations"
               rm -f "failures/run-$i.log"
             else
-              sh .github/scripts/tests-ran.sh "failures/run-$i.log" "$IN_TARGET" "$IN_TEST" || exit 1
               fail=$((fail + 1))
               printf 'run %3d/%s  FAIL\n' "$i" "$iterations"
               # The breach line is the measurement. Surface it inline so the
