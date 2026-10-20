@@ -243,6 +243,9 @@ fn text_rename_left_to_gix() {
         &[("a.txt", old.into_bytes())],
         &[("b.txt", new.into_bytes())],
     );
-    let changes = changes_sorted(&scratch.worktree());
-    assert_eq!(kind_of(&changes, "b.txt"), &ChangeKind::Added);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    // Not scored at all: neither side is binary.
+    assert_eq!(scored(&mut frame), 0, "a text pair was scored");
+    assert_eq!(kind_of(frame.files(), "b.txt"), &ChangeKind::Added);
 }

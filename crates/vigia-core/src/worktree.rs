@@ -86,6 +86,8 @@ pub struct Worktree {
     unscored: RefCell<Vec<rename::Candidate>>,
     /// Candidate bytes scored, for the tests that bound a frame.
     pair_bytes: Cell<u64>,
+    /// Whether each side version a walk weighed is binary, by its stamp.
+    binaries: RefCell<HashMap<u64, bool>>,
 }
 
 impl Worktree {
@@ -125,6 +127,7 @@ impl Worktree {
             pair_budget: Cell::new(rename::FRAME_BUDGET),
             unscored: RefCell::new(Vec::new()),
             pair_bytes: Cell::new(0),
+            binaries: RefCell::new(HashMap::new()),
         })
     }
 
@@ -485,6 +488,37 @@ impl Worktree {
             }
         };
         let removed: Vec<_> = removed.into_iter().filter_map(sized).collect();
+        // Whether a side is binary, from its first bytes, once per version.
+        let binary = |at: usize, stamp: u64| -> bool {
+            if let Some(&known) = self.binaries.borrow().get(&stamp) {
+                return known;
+            }
+            let change = &changes[at];
+            let head = match (change.kind == ChangeKind::Removed, change.after) {
+                (true, _) => change
+                    .before
+                    .and_then(|id| self.blob(id, &change.path).ok()),
+                (false, Some(Side::Blob(id))) => self.blob(id, &change.path).ok(),
+                (false, _) => {
+                    use std::io::Read;
+                    let mut head = Vec::new();
+                    std::fs::File::open(self.workdir.join(&change.path))
+                        .and_then(|file| {
+                            file.take(hunk::BINARY_SNIFF_LEN as u64)
+                                .read_to_end(&mut head)
+                        })
+                        .ok()
+                        .map(|_| head)
+                }
+            };
+            let found = head.is_some_and(|head| hunk::is_binary(&head));
+            let mut binaries = self.binaries.borrow_mut();
+            if binaries.len() >= PAIRS_KEPT {
+                binaries.clear();
+            }
+            binaries.insert(stamp, found);
+            found
+        };
         let added: Vec<_> = added.into_iter().filter_map(sized).collect();
         let mut weighed: Vec<Weighed> = removed
             .iter()
@@ -499,6 +533,12 @@ impl Worktree {
                 })
             })
             .collect();
+        // `gix` scored every pair with no binary side.
+        weighed.retain(|pair| {
+            self.pair_scores.borrow().contains_key(&pair.key)
+                || binary(pair.to, pair.key.1)
+                || binary(pair.from, pair.key.0)
+        });
         // The cheapest first, so the budget goes furthest.
         weighed.sort_by_key(|pair| pair.bytes);
         // Each side read once in this walk, however many pairs it is in.
