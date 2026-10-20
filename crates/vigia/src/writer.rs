@@ -38,6 +38,11 @@ const THREAD: &str = "vigia-writer";
 /// How long a dropped writer goes on writing what it was handed.
 const STOP_WAIT: Duration = Duration::from_millis(200);
 
+/// The most one write hands a descriptor that may block: Linux reports room
+/// while fewer than this many bytes are queued.
+#[cfg(unix)]
+const SHARED_PIECE: usize = 256;
+
 /// The most a fresh frame buffer reserves, so one large picture does not set
 /// the size of every buffer after it.
 const BUFFER_CAP: usize = 64 * 1024;
@@ -234,7 +239,11 @@ impl Sink {
         if self.pending.is_empty() {
             return Ok(());
         }
-        let size = self.shared.last.load(Ordering::Acquire).min(BUFFER_CAP);
+        let size = if frame {
+            self.shared.last.load(Ordering::Acquire).min(BUFFER_CAP)
+        } else {
+            0
+        };
         let bytes = std::mem::replace(&mut self.pending, Vec::with_capacity(size));
         let Some(queue) = self.queue.as_ref() else {
             return Err(io::Error::from(io::ErrorKind::BrokenPipe));
@@ -291,8 +300,8 @@ fn write_out(out: &mut impl Out, bytes: &[u8], shared: &Shared, wakes: &Wakes) -
 #[cfg(unix)]
 pub struct Tty {
     file: std::fs::File,
-    /// Standard output itself, because its device could not be opened again:
-    /// written blocking, on this thread, as on Windows.
+    /// Standard output itself, because its device could not be opened again.
+    /// Its open file is the shell's, so its blocking flag is left as it is.
     blocking: bool,
 }
 
@@ -340,12 +349,13 @@ impl Tty {
 impl Out for Tty {
     fn write_some(&mut self, bytes: &[u8], wait: Duration) -> io::Result<usize> {
         use rustix::event::{PollFd, PollFlags, Timespec, poll};
-        if self.blocking {
-            return match self.file.write(bytes) {
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => Ok(0),
-                written => written,
-            };
-        }
+        // A shared descriptor may block. `POLLOUT` promises only some room, so
+        // a small piece keeps a block short; nothing bounds it.
+        let bytes = if self.blocking {
+            &bytes[..bytes.len().min(SHARED_PIECE)]
+        } else {
+            bytes
+        };
         let mut fds = [PollFd::new(&self.file, PollFlags::OUT)];
         let timeout = Timespec::try_from(wait.min(POLL)).expect("under a second");
         match poll(&mut fds, Some(&timeout)) {

@@ -211,12 +211,12 @@ impl Session {
     /// For an escape that draws nothing and so owns no cell. It could not go
     /// through the painter in any case: `ratatui`'s `set_stringn` drops a
     /// grapheme containing a control character, which is `SPEC.md` §11.2 B8's
-    /// finding. Written through the backend rather than a second handle on
-    /// stdout, so it cannot interleave with a frame mid-flush.
+    /// finding. Queued on the writer after the frames before it, so it cannot
+    /// interleave with one.
     ///
     /// # Errors
     ///
-    /// The write or the flush fails.
+    /// The writer has stopped.
     pub fn send(&mut self, sequence: &str) -> io::Result<()> {
         self.sends.send(sequence.as_bytes())
     }

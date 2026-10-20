@@ -415,6 +415,11 @@ fn resize_while_held() {
 fn locked_terminal() {
     // The terminal's device cannot be opened again by name: the pane writes
     // through the standard output it was given instead of refusing to start.
+    // SAFETY: no arguments, no failure.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("locked_terminal: root opens a locked device, so the fallback cannot be reached");
+        return;
+    }
     let (scratch, home) = (tall("writer-locked"), TempDir::new("writer-locked-home"));
     let script = pty::Script {
         locked: true,
@@ -422,7 +427,12 @@ fn locked_terminal() {
     };
     let (mut child, mut master) = pty::start(pane(&scratch, &home), &script);
     let seen = reader(master.try_clone().expect("the terminal's other end"), None);
-    std::thread::sleep(Duration::from_secs(2));
+    let until = Instant::now() + Duration::from_secs(10);
+    while !text(&seen).contains(FRAME_END) && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Past the startup queries, which would read the key as their answer.
+    std::thread::sleep(Duration::from_secs(1));
     master.write_all(b"q").expect("press q");
     let status = child.exited_unread(Duration::from_secs(3));
     assert!(
@@ -474,6 +484,51 @@ fn output_lost() {
 
 fn text_of(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+#[test]
+fn query_skipped() {
+    // A terminal that answers the background query and then reads nothing
+    // while the first frame waits: the picture query is not sent at all, since
+    // it would land inside that frame.
+    let (scratch, home) = (
+        wide("writer-unasked", 280),
+        TempDir::new("writer-unasked-home"),
+    );
+    let mut command = pane(&scratch, &home);
+    command.env_remove("VIGIA_PICTURES");
+    let script = pty::Script {
+        size: Some((300, 100, 3000, 2000)),
+        ..script()
+    };
+    let (mut child, mut master) = pty::start(command, &script);
+    let mut seen = Vec::new();
+    let mut buffer = [0u8; 65536];
+    let until = Instant::now() + Duration::from_secs(10);
+    while !String::from_utf8_lossy(&seen).contains("\x1b]11;?") && Instant::now() < until {
+        if let Ok(read) = master.read(&mut buffer) {
+            seen.extend_from_slice(&buffer[..read]);
+        }
+    }
+    master
+        .write_all(b"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\")
+        .expect("answer");
+    // Past the writer's wait for the first frame, unread.
+    std::thread::sleep(Duration::from_millis(1500));
+    let rest = reader(master.try_clone().expect("the terminal's other end"), None);
+    std::thread::sleep(Duration::from_secs(2));
+    master.write_all(b"q").expect("press q");
+    let _ = child.exited_unread(Duration::from_secs(3));
+    let mut shown = String::from_utf8_lossy(&seen).into_owned();
+    shown.push_str(&text(&rest));
+    assert!(
+        shown.contains(FRAME_END),
+        "the pane never drew, so this proves nothing"
+    );
+    assert!(
+        !shown.contains("\x1b_Gi=31"),
+        "the picture query went out though the first frame had not reached the terminal"
+    );
 }
 
 #[test]

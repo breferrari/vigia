@@ -1241,14 +1241,9 @@ impl Shell {
     /// Send the Kitty deletes owed. A failed write leaves the images to the
     /// terminal's own quota.
     fn write_retired(&mut self) {
-        use std::io::Write;
         let retired = self.pictures.retired();
         if !retired.is_empty() {
-            let _ = self
-                .session
-                .screen()
-                .backend_mut()
-                .write_all(retired.as_bytes());
+            let _ = self.session.send(&retired);
         }
     }
 
@@ -2340,6 +2335,11 @@ impl Shell {
         let threshold = writer.last_frame().clamp(SKIP_FLOOR, SKIP_CEILING);
         let stale = forced_at(self.held_since, writer.unwritten()).is_some_and(|at| now >= at);
         if writer.backlogged(threshold) && !stale {
+            // Past the ceiling the forced draw waits, so the wake has to come as
+            // the backlog falls back under it, not only under the threshold.
+            if writer.unwritten() > SKIP_CEILING {
+                writer.backlogged(SKIP_CEILING);
+            }
             self.held_since.get_or_insert(now);
             self.settle_marks(&chrome, painted);
             return Ok(());
