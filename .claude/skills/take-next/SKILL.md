@@ -59,7 +59,7 @@ First, the script makes sure that the whole board arrived. A truncated fetch cau
 3. The mark on each roadmap row agrees with the state of its issue, and the issue exists.
 4. Each open issue has a milestone.
 5. The open bullets in `SPEC.md` §10 are printed for you to read. A bullet with ordering words (*before*, *first*, *until*, *blocked*) and no issue is a blocker. File an issue for it. Then decide whether it is in scope or goes first. Do this before you plan.
-6. The roadmap and the tracker agree on which phases exist. Each open milestone with work has a `## Phase <n>` section of the same title, and each phase section with open rows has an open milestone. The check also prints the section `next.sh` takes.
+6. The roadmap and the tracker agree on which phases exist. Each open milestone with work has a `## Phase <n>` section of the same title, and each `## Phase` section with an open row on an open issue has an open milestone. A section that is not a phase, such as a block the reader placed before one, has no milestone and is not compared. The check also prints the section `next.sh` takes.
 7. Each issue, open or closed, has a roadmap row.
 8. Given an issue number, no worktree, branch or plan comment names it.
 

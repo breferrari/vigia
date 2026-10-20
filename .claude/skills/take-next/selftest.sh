@@ -244,11 +244,10 @@ out=$(flight 29)
 out=$(pre 2>&1 | grep -c '^8\.')
 [ "$out" = 0 ] && ok "no issue, no comparison 8" || no "no issue, no comparison 8" "0" "$out"
 
-# Comparison 6 in both directions. The roadmap above is all done, so the second
-# case's phase is open only once a row is added for it.
+# Comparison 6 in both directions.
 milestones() { # json -> the comparison-6 DRIFT lines
   printf '%s' "$1" > "$FIX/ms.json"
-  board 3 > "$FIX/issues.json"
+  board 3 | jq '.[1].state = "OPEN"' > "$FIX/issues.json"
   PREFLIGHT_SPEC_FILE="$FIX/spec.md" \
   PREFLIGHT_ROADMAP_FILE="$FIX/roadmap6.md" \
   PREFLIGHT_ISSUES_FILE="$FIX/issues.json" \

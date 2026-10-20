@@ -15,13 +15,13 @@
 # reading and never counted.
 #
 # Test seams (test-only, never set in a real run): PREFLIGHT_SPEC_FILE,
-# PREFLIGHT_ROADMAP_FILE, PREFLIGHT_ISSUES_FILE and PREFLIGHT_MILESTONES_FILE substitute local files for
-# the ref's copies and for the tracker fetch, so a mutation ("delete an
-# invariant row", "flip a row's mark", "hand it a board at the cap") can prove
-# each comparison fires. A drift check that cannot report "no drift" has not
-# been tested, and neither has one that cannot report drift. Comparison 8 has
-# two more: PREFLIGHT_REFS_FILE for the worktrees and branches, and
-# PREFLIGHT_COMMENTS_FILE for the issue's comments.
+# PREFLIGHT_ROADMAP_FILE, PREFLIGHT_ISSUES_FILE and PREFLIGHT_MILESTONES_FILE
+# substitute local files for the ref's copies and for the tracker fetch, so a
+# mutation ("delete an invariant row", "flip a row's mark", "hand it a board at
+# the cap") can prove each comparison fires. A drift check that cannot report
+# "no drift" has not been tested, and neither has one that cannot report drift.
+# Comparison 8 has two more: PREFLIGHT_REFS_FILE for the worktrees and
+# branches, and PREFLIGHT_COMMENTS_FILE for the issue's comments.
 #
 # Usage: preflight.sh [issue]. Comparison 8 runs only when given the issue.
 set -u
@@ -164,15 +164,14 @@ elif [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
 fi
 if [ -f "$tmp/ms.json" ]; then
   jq '[.[] | select(.state == "OPEN") | {number, title}]' "$tmp/issues.json" > "$tmp/open.json"
-  step1=$(NEXT_ROADMAP_FILE="$tmp/roadmap.md" NEXT_ISSUES_FILE="$tmp/open.json" sh "$(dirname "$0")/next.sh" | sed -n 's/^section: //p' | tr -d '\r')
-  say "  step 1 takes from: ${step1:-<no eligible section>}"
-  awk '/^## Shelf/ { exit } /^## Phase [0-9]/ { print substr($0, 4) }' "$tmp/roadmap.md" | tr -d '\r' > "$tmp/phases.txt"
-  # A phase whose rows are not all done, by the same rule step 1 reads.
-  awk '/^## Shelf/ { exit } /^## / { s = substr($0, 4); next } /^\| *(⬜|🔨) *\|/ && s ~ /^Phase [0-9]/ { print s }' "$tmp/roadmap.md" | tr -d '\r' | LC_ALL=C sort -u > "$tmp/phases-open.s"
-  jq -r '.[] | .title' "$tmp/ms.json" | tr -d '\r' | LC_ALL=C sort > "$tmp/ms-all.s"
+  # The phases with open rows, by the rule step 1 itself reads.
+  NEXT_ROADMAP_FILE="$tmp/roadmap.md" NEXT_ISSUES_FILE="$tmp/open.json" sh "$(dirname "$0")/next.sh" --rows | tr -d '\r' > "$tmp/rows.tsv"
+  say "  step 1 takes from: $(cut -f1 "$tmp/rows.tsv" | head -n 1 | sed 's/^$/<no eligible section>/')"
+  cut -f1 "$tmp/rows.tsv" | grep '^Phase [0-9]' | LC_ALL=C sort -u > "$tmp/phases-open.s"
+  awk '/^## Shelf/ { exit } /^## Phase [0-9]/ { print substr($0, 4) }' "$tmp/roadmap.md" | tr -d '\r' | LC_ALL=C sort > "$tmp/phases.s"
+  jq -r '.[].title' "$tmp/ms.json" | tr -d '\r' | LC_ALL=C sort > "$tmp/ms-all.s"
   jq -r '.[] | select(.open_issues > 0) | .title' "$tmp/ms.json" | tr -d '\r' | LC_ALL=C sort > "$tmp/ww.s"
-  LC_ALL=C sort "$tmp/phases.txt" > "$tmp/or.s"
-  LC_ALL=C comm -23 "$tmp/ww.s" "$tmp/or.s" | sed 's/^/  DRIFT milestone with work and no roadmap section: /' > "$tmp/ms-drift.out"
+  LC_ALL=C comm -23 "$tmp/ww.s" "$tmp/phases.s" | sed 's/^/  DRIFT milestone with work and no roadmap section: /' > "$tmp/ms-drift.out"
   LC_ALL=C comm -23 "$tmp/phases-open.s" "$tmp/ms-all.s" | sed 's/^/  DRIFT roadmap phase with open rows and no open milestone: /' >> "$tmp/ms-drift.out"
   if [ -s "$tmp/ms-drift.out" ]; then
     cat "$tmp/ms-drift.out"

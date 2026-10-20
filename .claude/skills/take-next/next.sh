@@ -11,8 +11,9 @@
 # A row names its issue in its last cell. Some rows cite a second issue in their
 # task prose, so the last link on the line is the one read.
 #
-# Usage: next.sh [--ranked]
+# Usage: next.sh [--ranked | --rows]
 #   --ranked  print every eligible section in take order, not only the first
+#   --rows    print every eligible row as `section<TAB>issue`, in order
 #
 # Test seams: NEXT_ROADMAP_FILE substitutes a file for the roadmap, and
 # NEXT_ISSUES_FILE a JSON array of `{number, title}` for the open issues.
@@ -48,10 +49,10 @@ awk -F'\t' '
     if (n in open) print section "\t" n
   }' "$tmp/open.tsv" "$tmp/roadmap.md" > "$tmp/rows.tsv"
 
-if [ "${1:-}" = "--ranked" ]; then
-  cut -f1 "$tmp/rows.tsv" | awk '!seen[$0]++'
-  exit 0
-fi
+case "${1:-}" in
+  --rows) cat "$tmp/rows.tsv"; exit 0 ;;
+  --ranked) cut -f1 "$tmp/rows.tsv" | awk '!seen[$0]++'; exit 0 ;;
+esac
 
 section=$(cut -f1 "$tmp/rows.tsv" | head -n 1)
 if [ -z "$section" ]; then
