@@ -475,6 +475,43 @@ struct Job {
     key: Arc<Key>,
     sources: Sources,
     formats: (Option<Format>, Option<Format>),
+    /// The cell size in pixels to build at, or `(0, 0)` for the queried one,
+    /// as a job sent before the picker was given carries.
+    cell: Cell,
+}
+
+/// A cell's width and height in pixels.
+pub type Cell = (u16, u16);
+
+/// A window's size in cells and in pixels, as `crossterm::terminal::window_size`
+/// reports it.
+pub type Window = ratatui::crossterm::terminal::WindowSize;
+
+/// The cell `queried` at the query, scaled by how the window's pixels per cell
+/// moved from `then` to `now`. `None` when either reports no pixels. The
+/// window's own count is not the cell: padding is in it.
+pub fn scaled_cell(queried: Cell, then: &Window, now: &Window) -> Option<Cell> {
+    let axis = |cell: u16, px_then: u16, cells_then: u16, px_now: u16, cells_now: u16| {
+        let num = u64::from(cell) * u64::from(px_now) * u64::from(cells_then);
+        let den = u64::from(px_then) * u64::from(cells_now);
+        (den > 0 && num > 0)
+            .then(|| ((num * 2 + den) / (den * 2)).clamp(1, u64::from(u16::MAX)) as u16)
+    };
+    Some((
+        axis(queried.0, then.width, then.columns, now.width, now.columns)?,
+        axis(queried.1, then.height, then.rows, now.height, now.rows)?,
+    ))
+}
+
+/// `base` at `cell`. `from_fontsize` is deprecated in `ratatui-image`
+/// `=12.0.0-rc.3` and has no replacement that takes a size; it drops the
+/// queried capabilities and background, and vigia reads neither: Kitty is
+/// built with compression and shared memory off, and no background is set.
+pub fn picker_at(base: &Picker, cell: Cell) -> Picker {
+    #[allow(deprecated)]
+    let mut picker = Picker::from_fontsize(cell.into());
+    picker.set_protocol_type(base.protocol_type());
+    picker
 }
 
 /// Built pictures, kept while their image is on screen, and the worker that
@@ -487,13 +524,18 @@ pub struct Pictures {
     shown: Arc<Mutex<HashSet<Arc<Key>>>>,
     jobs: mpsc::Sender<Job>,
     /// Each finished job, with `None` for one skipped.
-    done: mpsc::Receiver<(Arc<Key>, Option<Built>)>,
+    done: mpsc::Receiver<(Arc<Key>, Cell, Option<Built>)>,
     /// Kitty images whose picture is gone, waiting to be deleted.
     retired: Vec<u32>,
     /// Whether a delete has to pass through tmux.
     tmux: bool,
     /// Where the picker goes, until it has been given.
     picker: Option<mpsc::Sender<Picker>>,
+    /// The cell size pictures are built at now.
+    cell: Cell,
+    /// The cell the query found, and the window it was found in once told;
+    /// `None` for half-blocks, whose grid is no cell's.
+    queried: Option<(Cell, Option<Window>)>,
     /// How many images this cache's worker has decoded.
     decoded: Arc<AtomicU64>,
     /// Sizes the worker found since [`Pictures::found_sizes`] last took them.
@@ -609,10 +651,20 @@ impl Pictures {
         let _ = std::thread::Builder::new()
             .name(WORKER.to_owned())
             .spawn(move || {
-                let Ok(picker) = picker.recv() else {
+                let Ok(base) = picker.recv() else {
                     return;
                 };
+                let queried = (base.font_size().width, base.font_size().height);
+                let mut resized: Option<(Cell, Picker)> = None;
                 for job in inbox {
+                    let picker = if job.cell == queried || job.cell == (0, 0) {
+                        &base
+                    } else {
+                        if resized.as_ref().is_none_or(|(cell, _)| *cell != job.cell) {
+                            resized = Some((job.cell, picker_at(&base, job.cell)));
+                        }
+                        &resized.as_ref().expect("set above").1
+                    };
                     let wanted = still.lock().map_or(
                         true,
                         |shown: std::sync::MutexGuard<'_, HashSet<Arc<Key>>>| {
@@ -622,13 +674,13 @@ impl Pictures {
                     // Everything one picture takes, decode to encode: a file an
                     // agent wrote must not be able to close the pane.
                     let built = wanted.then(|| {
-                        vigia_core::caught(|| build(&job, inks, &picker)).unwrap_or_else(undecoded)
+                        vigia_core::caught(|| build(&job, inks, picker)).unwrap_or_else(undecoded)
                     });
                     // Before the send, so a caller that has the picture sees
                     // what it cost.
                     counted.fetch_add(DECODED.take(), Ordering::Relaxed);
                     vigia_core::armed(Stage::Worker);
-                    if outbox.send((job.key, built)).is_err() {
+                    if outbox.send((job.key, job.cell, built)).is_err() {
                         break;
                     }
                     if let Ok(wake) = wake.lock() {
@@ -645,6 +697,8 @@ impl Pictures {
             retired: Vec::new(),
             tmux: false,
             picker: Some(picked),
+            cell: (0, 0),
+            queried: None,
             decoded,
             found: Vec::new(),
             asked: HashSet::new(),
@@ -724,8 +778,35 @@ impl Pictures {
     pub fn pick(&mut self, picker: Picker) {
         if let Some(picked) = self.picker.take() {
             self.tmux = picker.tmux_detected();
+            self.cell = (picker.font_size().width, picker.font_size().height);
+            let protocol = picker.protocol_type() != ProtocolType::Halfblocks;
+            self.queried = protocol.then_some((self.cell, None));
             let _ = picked.send(picker);
         }
+    }
+
+    /// Follow the window to `window`: the first call after [`Pictures::pick`]
+    /// is the window the cell was queried in, and each later one rebuilds the
+    /// pictures on screen when the cell it scales to differs. Always scaled from
+    /// that first window, so a size gone and come back is the queried one.
+    /// Whether the cell changed.
+    pub fn window_sized(&mut self, window: Window) -> bool {
+        let Some((queried, then)) = self.queried.as_mut() else {
+            return false;
+        };
+        let Some(then) = then else {
+            *then = Some(window);
+            return false;
+        };
+        let Some(cell) = scaled_cell(*queried, then, &window) else {
+            return false;
+        };
+        if cell == self.cell {
+            return false;
+        }
+        self.cell = cell;
+        self.keep(&HashSet::new());
+        true
     }
 
     /// Keep the pictures in `shown`, and retire the Kitty images of the rest.
@@ -774,8 +855,14 @@ impl Pictures {
 
     /// Take in what the worker finished since the last call.
     fn collect(&mut self) {
-        while let Ok((key, built)) = self.done.try_recv() {
+        while let Ok((key, cell, built)) = self.done.try_recv() {
             self.pending.remove(&key);
+            // Built at a cell the window has since left: asked for again.
+            if cell != (0, 0) && cell != self.cell {
+                self.retired
+                    .extend(built.iter().flat_map(|built| built.kitty.iter()));
+                continue;
+            }
             if let Some(built) = built {
                 self.found.extend(&built.sizes);
                 self.built.insert(key, Ready(Arc::new(built)));
@@ -830,6 +917,7 @@ impl Pictures {
                     picture.before.map(|side| side.format),
                     picture.after.map(|side| side.format),
                 ),
+                cell: self.cell,
             };
             if self.jobs.send(job).is_ok() {
                 self.pending.insert(Arc::clone(key));
@@ -1618,6 +1706,59 @@ fn build(job: &Job, inks: Inks, picker: &Picker) -> Built {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scaled_cell_ratio() {
+        let window = |columns, rows, width, height| Window {
+            rows,
+            columns,
+            width,
+            height,
+        };
+        let then = window(100, 30, 1000, 600);
+        assert_eq!(scaled_cell((10, 20), &then, &then), Some((10, 20)));
+        assert_eq!(
+            scaled_cell((10, 20), &then, &window(100, 30, 1500, 900)),
+            Some((15, 30))
+        );
+        // A queried cell of 9 by 19 in a window whose own count says 10 by 20.
+        assert_eq!(
+            scaled_cell((9, 19), &then, &window(100, 30, 2000, 1200)),
+            Some((18, 38))
+        );
+        assert_eq!(
+            scaled_cell((10, 20), &then, &window(100, 30, 1049, 600)),
+            Some((10, 20)),
+            "rounded, not cut"
+        );
+        assert_eq!(
+            scaled_cell((10, 20), &then, &window(100, 30, 1051, 600)),
+            Some((11, 20))
+        );
+        assert_eq!(
+            scaled_cell((1, 1), &then, &window(100, 30, 1, 1)),
+            Some((1, 1))
+        );
+        assert_eq!(scaled_cell((10, 20), &then, &window(100, 30, 0, 0)), None);
+        assert_eq!(scaled_cell((10, 20), &window(100, 30, 0, 600), &then), None);
+    }
+
+    #[test]
+    fn picker_parity() {
+        // If `ratatui-image` drops `from_fontsize`, this and the build fail.
+        for protocol in [
+            ProtocolType::Kitty,
+            ProtocolType::Sixel,
+            ProtocolType::Iterm2,
+        ] {
+            let mut base = Picker::halfblocks();
+            base.set_protocol_type(protocol);
+            let at = picker_at(&base, (17, 33));
+            assert_eq!(at.protocol_type(), base.protocol_type());
+            assert_eq!(at.tmux_detected(), base.tmux_detected());
+            assert_eq!((at.font_size().width, at.font_size().height), (17, 33));
+        }
+    }
     use image::Rgb;
 
     #[test]

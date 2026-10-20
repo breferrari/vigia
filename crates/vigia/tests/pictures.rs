@@ -1576,3 +1576,148 @@ fn refresh_without_pictures() {
         "a picture was kept with none on screen"
     );
 }
+
+/// A window of `columns` by `rows` cells and `width` by `height` pixels.
+fn window(columns: u16, rows: u16, width: u16, height: u16) -> vigia::pictures::Window {
+    vigia::pictures::Window {
+        rows,
+        columns,
+        width,
+        height,
+    }
+}
+
+/// The pixel size each Sixel image on screen declares, from its raster attributes.
+fn sixel_sizes(backend: &TestBackend) -> Vec<(u32, u32)> {
+    backend
+        .buffer()
+        .content()
+        .iter()
+        .filter_map(|cell| {
+            let at = cell.symbol().find("\"1;1;")?;
+            let mut parts = cell.symbol()[at + 5..].split(|c: char| !c.is_ascii_digit());
+            Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+        })
+        .collect()
+}
+
+#[test]
+fn cell_follows_resize() {
+    let (scratch, mut pane) = protocol_pane("pictures-cell-resize", ProtocolType::Sixel);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    // The picker's cell is 10 by 20, measured in a window of 100 by 30 cells.
+    assert!(!pane.pictures.window_sized(window(100, 30, 1000, 600)));
+    let view = pane.settled(&mut frame);
+    let small = sixel_sizes(&pane.draw(&view));
+    assert!(
+        pane.pictures.window_sized(window(100, 30, 2000, 1200)),
+        "a doubled cell changed nothing"
+    );
+    assert_eq!(
+        pane.pictures.kept(),
+        0,
+        "the pictures at the old cell were kept"
+    );
+    let view = pane.settled(&mut frame);
+    let large = sixel_sizes(&pane.draw(&view));
+    assert_eq!(small.len(), 3, "three panels were not drawn: {small:?}");
+    for (small, large) in small.iter().zip(&large) {
+        assert_eq!(
+            (large.0, large.1),
+            (small.0 * 2, small.1 * 2),
+            "a panel was not built at the doubled cell"
+        );
+    }
+}
+
+#[test]
+fn resize_round_trip() {
+    // Always scaled from the window the cell was queried in, so a size gone and
+    // come back is the queried one, with no drift from rounding.
+    let (scratch, mut pane) = protocol_pane("pictures-cell-trip", ProtocolType::Sixel);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    pane.pictures.window_sized(window(100, 30, 1000, 600));
+    let view = pane.settled(&mut frame);
+    let queried = sixel_sizes(&pane.draw(&view));
+    // A third of the cell rounds to 3 by 7, which scaled back from there
+    // would be 9 by 21.
+    assert!(pane.pictures.window_sized(window(100, 30, 333, 200)));
+    pane.settled(&mut frame);
+    assert!(pane.pictures.window_sized(window(100, 30, 1000, 600)));
+    let view = pane.settled(&mut frame);
+    assert_eq!(
+        sixel_sizes(&pane.draw(&view)),
+        queried,
+        "the round trip drifted"
+    );
+}
+
+#[test]
+fn same_cell_rebuilds_nothing() {
+    let (scratch, mut pane) = protocol_pane("pictures-cell-same", ProtocolType::Sixel);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    pane.pictures.window_sized(window(100, 30, 1000, 600));
+    pane.settled(&mut frame);
+    for (columns, rows, width, height, why) in [
+        (200, 60, 2000, 1200, "a bigger window at the same cell"),
+        (100, 30, 0, 0, "a window that reports no pixels"),
+    ] {
+        assert!(
+            !pane
+                .pictures
+                .window_sized(window(columns, rows, width, height)),
+            "{why} changed the cell"
+        );
+        assert_eq!(pane.pictures.kept(), 1, "{why} rebuilt the picture");
+    }
+}
+
+#[test]
+fn halfblocks_ignore_cell() {
+    let (scratch, mut pane) = protocol_pane("pictures-cell-halfblocks", ProtocolType::Halfblocks);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    pane.pictures.window_sized(window(100, 30, 1000, 600));
+    pane.settled(&mut frame);
+    assert!(!pane.pictures.window_sized(window(100, 30, 2000, 1200)));
+    assert_eq!(
+        pane.pictures.kept(),
+        1,
+        "half-blocks were rebuilt for a cell they do not use"
+    );
+}
+
+#[test]
+fn stale_build_dropped() {
+    // A build sent before the cell changed lands at the old cell, and is asked
+    // for again rather than drawn.
+    let (scratch, mut pane) = protocol_pane("pictures-cell-stale", ProtocolType::Sixel);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    pane.pictures.window_sized(window(100, 30, 1000, 600));
+    let view = pane.settled(&mut frame);
+    let small = sixel_sizes(&pane.draw(&view));
+    pane.pictures.retire_all();
+    pane.view(&mut frame);
+    assert!(pane.pictures.window_sized(window(100, 30, 2000, 1200)));
+    // The stale build lands and is dropped; its wake asks for it again.
+    pane.settled(&mut frame);
+    let view = pane.settled(&mut frame);
+    let large = sixel_sizes(&pane.draw(&view));
+    assert_eq!(large.len(), small.len());
+    for (small, large) in small.iter().zip(&large) {
+        assert_eq!(
+            (large.0, large.1),
+            (small.0 * 2, small.1 * 2),
+            "a build from before the resize was drawn"
+        );
+    }
+}

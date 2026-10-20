@@ -511,6 +511,10 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     shell.app.draw_pictures(drawn);
     frame.draw_svg(drawn);
     shell.pictures.pick(picker);
+    // The window the cell was measured in, which a later resize is scaled from.
+    if let Ok(window) = ratatui::crossterm::terminal::window_size() {
+        shell.pictures.window_sized(window);
+    }
     if ask {
         // On Windows the query drops a resize that came in during it, and it is
         // sent blind there, so it may have printed.
@@ -1382,6 +1386,11 @@ impl Shell {
             if let Err(e) = self.session.screen().clear() {
                 self.app.warn(format!("redraw: {e}"));
             }
+        }
+        if action == Action::Redraw
+            && let Ok(window) = ratatui::crossterm::terminal::window_size()
+        {
+            self.pictures.window_sized(window);
         }
         if !matches!(action, Action::Redraw | Action::Refresh) {
             self.deselect();
@@ -2583,6 +2592,22 @@ mod tests {
             ),
             "`Ctrl+L` no longer retires the Kitty pictures and clears the screen"
         );
+    }
+
+    #[test]
+    fn resize_follows_cell() {
+        // `Shell` holds a terminal, so the route is read rather than driven.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        for route in [
+            "shell.pictures.pick(picker);\n    // The window the cell was measured in, which a later resize is scaled from.\n    if let Ok(window) = ratatui::crossterm::terminal::window_size() {\n        shell.pictures.window_sized(window);",
+            "if action == Action::Redraw\n            && let Ok(window) = ratatui::crossterm::terminal::window_size()\n        {\n            self.pictures.window_sized(window);",
+        ] {
+            assert!(
+                shipped.contains(route),
+                "the cell no longer follows the window: {route}"
+            );
+        }
     }
 
     #[test]
