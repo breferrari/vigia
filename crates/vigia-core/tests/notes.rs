@@ -7,7 +7,7 @@ use std::fs;
 use std::sync::mpsc;
 use std::time::{Duration, UNIX_EPOCH};
 
-use support::{Scratch, TempDir, budget, ceiling, files_in, linked_file, note, numbered_lines};
+use support::{Scratch, TempDir, budget, files_in, linked_file, note, numbered_lines};
 use vigia_core::{
     Error, FileDiff, Hunk, Line, LineKind, NEAR, Note, Placement, Side, Status, Store, Worktree,
     key, resolve,
@@ -796,7 +796,7 @@ fn a_write_from_another_handle_wakes_the_store_watch() {
         .expect("arm on the root")
         .expect("the root exists, so there is something to watch");
     other.put(&note("w-1", 5, "x", "first")).expect("put");
-    rx.recv_timeout(ceiling(budget(Duration::from_secs(5))))
+    rx.recv_timeout(support::ceiling(budget(Duration::from_secs(5))))
         .expect("the first write, which also created the directory, was reported");
     drop(watch);
 
@@ -810,11 +810,11 @@ fn a_write_from_another_handle_wakes_the_store_watch() {
     other
         .put(&note("w-1", 5, "x", "rewritten"))
         .expect("rewrite");
-    rx.recv_timeout(ceiling(budget(Duration::from_secs(5))))
+    rx.recv_timeout(support::ceiling(budget(Duration::from_secs(5))))
         .expect("a rewrite was reported");
     while rx.try_recv().is_ok() {}
     other.remove("w-1").expect("remove");
-    rx.recv_timeout(ceiling(budget(Duration::from_secs(5))))
+    rx.recv_timeout(support::ceiling(budget(Duration::from_secs(5))))
         .expect("a removal was reported");
     drop(watch);
 }
@@ -930,7 +930,7 @@ fn a_store_watched_through_a_symlinked_root_still_reports_writes() {
     direct
         .put(&note("s-1", 5, "x", "first"))
         .expect("put by the resolved path");
-    rx.recv_timeout(ceiling(budget(Duration::from_secs(5))))
+    rx.recv_timeout(support::ceiling(budget(Duration::from_secs(5))))
         .expect("a write under the resolved spelling was reported");
     drop(watch);
 }

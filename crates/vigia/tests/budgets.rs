@@ -22,7 +22,7 @@ use vigia_core::{
 
 use support::{
     PROSE_EXT, PROSE_SPANS, Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget,
-    ceiling, delta, exclusively_timed, generated, highlight_delta, holds_p99, holds_p99_rounds,
+    delta, exclusively_timed, generated, highlight_delta, holds_p99, holds_p99_rounds,
     prose_generated, settle, settle_spans, time, time_cpu, timed_cpu,
 };
 
@@ -3388,7 +3388,7 @@ fn pdf_stream_bound() {
     let began = Instant::now();
     pictures.attach(&mut view.rows, &frame);
     assert!(
-        pictures.settle(ceiling(Duration::from_secs(60))),
+        pictures.settle(support::ceiling(Duration::from_secs(60))),
         "the picture was not built"
     );
     let took = began.elapsed();
@@ -3597,7 +3597,7 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
     paint(&mut frame, &mut app, &mut highlighter, &mut pictures);
     let building = Instant::now();
     assert!(
-        pictures.settle(ceiling(Duration::from_secs(120))),
+        pictures.settle(support::ceiling(Duration::from_secs(120))),
         "the pictures were not built"
     );
     eprintln!(

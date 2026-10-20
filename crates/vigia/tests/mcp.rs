@@ -20,7 +20,7 @@ use vigia::mcp::{
 use vigia::{VERSION, state_root};
 use vigia_core::{Listing, Note, Registry, Side, Status, Store};
 
-use support::{Scratch, TempDir, budget, ceiling, files_in, note, numbered_lines};
+use support::{Scratch, TempDir, budget, files_in, note, numbered_lines};
 
 const PATH: &str = "src/watch.rs";
 const OTHER: &str = "src/other.rs";
@@ -1020,7 +1020,7 @@ impl Client {
     fn message(&self) -> Value {
         let line = self
             .lines
-            .recv_timeout(ceiling(budget(Duration::from_secs(10))))
+            .recv_timeout(support::ceiling(budget(Duration::from_secs(10))))
             .expect("the server answered in time");
         serde_json::from_str(&line).unwrap_or_else(|e| {
             panic!("stdout carried something that is not a message: {line:?}: {e}")

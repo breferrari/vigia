@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
-use support::{Scratch, ceiling, png};
+use support::{Scratch, png};
 use vigia::pictures::{self, Inks, Pictures, Stage};
 use vigia::{App, Pointing, Row, View, body_layout};
 use vigia_core::{Frame, Highlighter, History, Standing};
@@ -53,7 +53,7 @@ fn view_of(app: &mut App, pictures: &mut Pictures, frame: &mut Frame) -> View {
 fn settled(app: &mut App, pictures: &mut Pictures, frame: &mut Frame) -> View {
     view_of(app, pictures, frame);
     assert!(
-        pictures.settle(ceiling(Duration::from_secs(60))),
+        pictures.settle(support::ceiling(Duration::from_secs(60))),
         "the pictures were not built"
     );
     view_of(app, pictures, frame)
@@ -230,7 +230,7 @@ fn panic_child() {
             let mut pictures = Pictures::new(INKS, Picker::halfblocks(), Box::new(|| {}));
             pictures::panic_next(Stage::Worker);
             let _ = view_of(&mut app, &mut pictures, &mut frame);
-            pictures.settle(ceiling(Duration::from_secs(20)));
+            pictures.settle(support::ceiling(Duration::from_secs(20)));
             println!("survived");
         }
         _ => panic!("the main thread on purpose"),

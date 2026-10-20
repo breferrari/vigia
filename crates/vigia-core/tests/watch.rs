@@ -5,7 +5,7 @@ mod support;
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime};
 
-use support::{Scratch, budget, ceiling};
+use support::{Scratch, budget};
 use vigia_core::{Tick, WatchOptions, Watcher};
 
 /// How long to insist that nothing happens.
@@ -35,7 +35,7 @@ fn tick_within(watcher: &mut Watcher<'_>, timeout: Duration) -> Option<Tick> {
     let guard = std::thread::spawn(move || {
         // Wakes early once the tick has arrived, so a passing test does not
         // pay the whole timeout.
-        if finished.recv_timeout(ceiling(timeout)).is_err() {
+        if finished.recv_timeout(support::ceiling(timeout)).is_err() {
             stop.stop();
         }
     });
