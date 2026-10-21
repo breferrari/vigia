@@ -1444,27 +1444,70 @@ fn lfs_rename_edited() {
 #[test]
 fn lfs_rename_past_budget() {
     // An LFS file past what a walk may compare goes to the worker, which pairs
-    // it only when its bytes are the removed object.
+    // it only when its bytes are the removed object, not when they are close.
     let old = noise(132, 17 * 1024 * 1024);
-    let Some(scratch) = lfs_moved(
-        "rename-lfs-large",
-        &[("a.png", old.clone())],
-        &[("b.png", old)],
-    ) else {
+    for (case, new, git_pairs) in [
+        ("same", old.clone(), true),
+        ("edited", tail_changed(&old, 0.01), false),
+    ] {
+        let Some(scratch) = lfs_moved(
+            &format!("rename-lfs-large-{case}"),
+            &[("a.png", old.clone())],
+            &[("b.png", new)],
+        ) else {
+            return;
+        };
+        let git = git_unstaged(&scratch);
+        assert_eq!(
+            git.contains(&("R a.png".to_owned(), "b.png".to_owned())),
+            git_pairs,
+            "{case}: the fixture is wrong: {git:?}"
+        );
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let pending = frame.unscored_pairs();
+        assert_eq!(pending.len(), 1, "{case}: {pending:?}");
+        assert!(
+            pending[0].exact.is_some(),
+            "{case}: listed as an ordinary pair"
+        );
+        frame.learn_pair(pending[0].key, vigia_core::candidate_score(&pending[0]));
+        frame.advance().expect("advance");
+        let want = if git_pairs {
+            renamed("a.png")
+        } else {
+            ChangeKind::Added
+        };
+        assert_eq!(kind_of(frame.files(), "b.png"), &want, "{case}");
+    }
+}
+
+#[test]
+fn lfs_rename_grown() {
+    // A file of another size than the stored pointer records is never the
+    // object, so it costs no compare.
+    let old = noise(133, 300_000);
+    let mut grown = old.clone();
+    grown.extend(noise(134, 1_000));
+    let Some(scratch) = lfs_moved("rename-lfs-grown", &[("a.png", old)], &[("b.png", grown)])
+    else {
         return;
     };
     let git = git_unstaged(&scratch);
     assert!(
-        git.contains(&("R a.png".to_owned(), "b.png".to_owned())),
+        git.contains(&("A".to_owned(), "b.png".to_owned())),
         "the fixture is wrong: {git:?}"
     );
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    frame.advance().expect("advance");
-    let pending = frame.unscored_pairs();
-    assert_eq!(pending.len(), 1, "{pending:?}");
-    assert!(pending[0].exact.is_some(), "listed as an ordinary pair");
-    frame.learn_pair(pending[0].key, vigia_core::candidate_score(&pending[0]));
-    frame.advance().expect("advance");
-    assert_eq!(kind_of(frame.files(), "b.png"), &renamed("a.png"));
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(kind_of(frame.files(), "b.png"), &ChangeKind::Added);
+    assert_eq!(
+        worktree.lfs_compares(),
+        0,
+        "a compare ran for a size the pointer rules out"
+    );
 }
