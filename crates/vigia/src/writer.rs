@@ -1176,25 +1176,40 @@ mod tests {
         (writer, sink)
     }
 
+    /// Turns of `lanes` past the cap with a frame always waiting, until
+    /// `done` or `most` turns. How many it took.
+    fn starved_turns(lanes: &mut Lanes, done: impl Fn() -> bool, most: usize) -> usize {
+        let mut out = Taken::default();
+        out.room.store(usize::MAX, Ordering::Release);
+        let shared = Shared::default();
+        let wakes = Wakes::none();
+        lanes.starved_since = Instant::now().checked_sub(STARVED * 2);
+        let mut turns = 0;
+        while !done() && turns < most {
+            // As a sink counts them on the way in.
+            shared
+                .unwritten
+                .fetch_add(b"<frame>".len(), Ordering::AcqRel);
+            lanes.take(Job::Frame(b"<frame>".to_vec()));
+            lanes.write_next(&mut out, &shared, &wakes).expect("a turn");
+            turns += 1;
+        }
+        turns
+    }
+
     #[test]
     fn starvation_cap() {
-        // Frames that keep a slow terminal busy: past the cap the upload still
-        // completes, a turn at a time, while the frames go on.
-        let (_writer, mut sink) = slow_writer();
-        let (upload, held) = big_upload(21, 20, 4000);
-        sink.write_all(&[b'f'; 8000]).expect("write");
-        sink.flush().expect("flush");
-        sink.upload(upload).expect("upload");
-        frames(
-            &mut sink,
-            8000,
-            Duration::from_millis(15),
-            Duration::from_millis(2500),
-        );
+        // A frame always waiting, past the cap: the upload takes every other
+        // turn, so its five chunks go in ten.
+        let mut lanes = Lanes::default();
+        let (upload, held) = big_upload(21, 5, 100);
+        lanes.take(Job::Upload(upload));
+        let turns = starved_turns(&mut lanes, &held, 40);
         assert!(
             held(),
-            "frames kept a slow terminal busy and the upload never finished"
+            "frames always waiting and the upload never finished"
         );
+        assert!(turns <= 10, "five chunks past the cap took {turns} turns");
     }
 
     #[test]
@@ -1313,20 +1328,16 @@ mod tests {
     fn starved_on_screen() {
         // Two waiting behind the frames, the older stopped as off screen: the
         // other goes, and the stopped one never finishes.
-        let (_writer, mut sink) = slow_writer();
-        let (older, older_held) = big_upload(31, 20, 4000);
-        let (newer, newer_held) = big_upload(32, 20, 4000);
-        sink.write_all(&[b'f'; 8000]).expect("write");
-        sink.flush().expect("flush");
-        sink.upload(older).expect("upload");
-        sink.upload(newer).expect("upload");
-        sink.delete(31, b"<delete>".to_vec()).expect("delete");
-        frames(
-            &mut sink,
-            8000,
-            Duration::from_millis(15),
-            Duration::from_millis(2500),
-        );
+        let mut lanes = Lanes::default();
+        let (older, older_held) = big_upload(31, 5, 100);
+        let (newer, newer_held) = big_upload(32, 5, 100);
+        lanes.take(Job::Upload(older));
+        lanes.take(Job::Upload(newer));
+        lanes.take(Job::Delete {
+            id: 31,
+            bytes: b"<delete>".to_vec(),
+        });
+        starved_turns(&mut lanes, &newer_held, 40);
         assert!(
             !older_held(),
             "an upload stopped as off screen was finished"
