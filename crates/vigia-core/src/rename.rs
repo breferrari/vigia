@@ -38,10 +38,9 @@ pub struct Candidate {
     pub key: PairKey,
     /// The removed side, then the added side.
     pub sides: Sources,
-    /// For an LFS file in the worktree, the score its pointer takes when its
-    /// bytes are not the removed side's object; it scores in full only when
-    /// they are, as git scores the two pointers.
-    pub exact: Option<u64>,
+    /// For an LFS file in the worktree, its score unless its bytes are the
+    /// removed side's object, which scores in full.
+    pub differ: Option<u64>,
 }
 
 /// Whether git scores a pair of these sizes at all: one whose sizes differ by
@@ -141,7 +140,7 @@ pub fn candidate_score(candidate: &Candidate) -> u64 {
     match (
         read(&candidate.sides.before),
         read(&candidate.sides.after),
-        candidate.exact,
+        candidate.differ,
     ) {
         (Some(old), Some(new), Some(differ)) => {
             if old == new {

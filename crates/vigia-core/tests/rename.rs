@@ -1469,7 +1469,7 @@ fn lfs_rename_past_budget() {
         let pending = frame.unscored_pairs();
         assert_eq!(pending.len(), 1, "{case}: {pending:?}");
         assert!(
-            pending[0].exact.is_some(),
+            pending[0].differ.is_some(),
             "{case}: listed as an ordinary pair"
         );
         frame.learn_pair(pending[0].key, vigia_core::candidate_score(&pending[0]));
