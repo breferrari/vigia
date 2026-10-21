@@ -4763,7 +4763,8 @@ impl Painter<'_> {
                 continue;
             }
             let room = Rect { x, width, ..area };
-            // A Kitty image sent under an overlay is lost.
+            // An image the terminal paints is not cells, so an overlay drawn over it
+            // would not hide it, and a Kitty image sent under one is lost.
             if panel.drawn_by_terminal() && self.covered.is_some_and(|over| over.intersects(room)) {
                 continue;
             }

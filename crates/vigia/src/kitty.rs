@@ -62,22 +62,24 @@ fn transmit(
     out
 }
 
-/// The most of an image [`worth_deflating`] deflates to decide.
+/// The least of an image [`worth_deflating`] deflates to decide.
 const SAMPLE: usize = 64 * 1024;
 
-/// Whether deflating `rgba` pays: a sample from across the image shrinks at
-/// least twice, which a photograph's does not.
-fn worth_deflating(rgba: &[u8]) -> bool {
-    if rgba.len() <= SAMPLE {
+/// Whether deflating `rgba`, `width` pixels a row, pays: a sample from across
+/// the image shrinks at least twice, which a photograph's does not.
+fn worth_deflating(rgba: &[u8], width: u32) -> bool {
+    // Four strips from top to bottom, since a screenshot's first rows are its
+    // flattest, each three rows deep at least, since a row repeats the one
+    // above it far more often than it repeats itself.
+    const STRIPS: usize = 4;
+    let strip = (SAMPLE / STRIPS).max(3 * 4 * width as usize);
+    if rgba.len() <= strip * STRIPS {
         return true;
     }
-    // Strips from top to bottom, since a screenshot's first rows are its
-    // flattest.
-    const STRIPS: usize = 16;
     let step = rgba.len() / STRIPS;
-    let mut sample = Vec::with_capacity(SAMPLE);
+    let mut sample = Vec::with_capacity(strip * STRIPS);
     for i in 0..STRIPS {
-        sample.extend_from_slice(&rgba[i * step..i * step + SAMPLE / STRIPS]);
+        sample.extend_from_slice(&rgba[i * step..i * step + strip]);
     }
     zlib(&sample).len() * 2 <= sample.len()
 }
@@ -92,28 +94,16 @@ fn zlib(raw: &[u8]) -> Vec<u8> {
     encoder.finish().expect("deflate into a Vec")
 }
 
-/// Draw image `id`'s placeholder cells over `area`, an image `size` cells big,
-/// its first `skip` rows above the area. `leading` goes in front of the first
-/// cell, as the transmit does on the frame that sends it.
-fn placeholders(
-    area: Rect,
-    size: Size,
-    id: u32,
-    skip: u16,
-    buf: &mut Buffer,
-    mut leading: Option<&str>,
-) {
+/// Draw image `id`'s placeholder cells over all of `room`, its first `skip`
+/// rows above it. `leading` goes in front of the first cell, as the transmit
+/// does on the frame that sends it.
+fn placeholders(room: Rect, id: u32, skip: u16, buf: &mut Buffer, mut leading: Option<&str>) {
     let [high, r, g, b] = id.to_be_bytes();
     let fg = Color::Rgb(r, g, b);
-    // A position past the table cannot be encoded, so it is left undrawn
-    // rather than drawn at the wrong offset.
-    let most = DIACRITICS.len() as u16;
-    let width = area.width.min(size.width).min(most);
-    let height = area.height.min(size.height).min(most.saturating_sub(skip));
     let mut symbol = String::with_capacity(64);
-    for y in 0..height {
-        for x in 0..width {
-            let Some(cell) = buf.cell_mut((area.left() + x, area.top() + y)) else {
+    for y in 0..room.height {
+        for x in 0..room.width {
+            let Some(cell) = buf.cell_mut((room.left() + x, room.top() + y)) else {
                 continue;
             };
             symbol.clear();
@@ -153,7 +143,7 @@ impl Image {
         tmux: bool,
         inflates: bool,
     ) -> Self {
-        let compress = inflates && worth_deflating(rgba);
+        let compress = inflates && worth_deflating(rgba, pixels.0);
         Self::encoded(rgba, pixels, cells, id, tmux, compress)
     }
 
@@ -188,21 +178,23 @@ impl Image {
     /// Draw it into `area` with its first `above` rows scrolled above the
     /// area's top. The first draw carries the transmit.
     pub fn render(&self, area: Rect, buf: &mut Buffer, above: u16) {
-        let first_cell = (area.x, area.y).into();
-        // Otherwise no cell would carry the transmit, and it would be lost.
-        if area.is_empty()
-            || above >= self.cells.height.min(DIACRITICS.len() as u16)
-            || !buf.area().contains(first_cell)
-        {
-            return;
-        }
+        // A position past the table cannot be encoded, so it is left undrawn
+        // rather than drawn at the wrong offset.
+        let most = DIACRITICS.len() as u16;
         let room = Rect {
-            width: area.width.min(self.cells.width),
-            height: area.height.min(self.cells.height - above),
+            width: area.width.min(self.cells.width).min(most),
+            height: area
+                .height
+                .min(self.cells.height.saturating_sub(above))
+                .min(most.saturating_sub(above)),
             ..area
         };
+        // Otherwise no cell would carry the transmit, and it would be lost.
+        if room.is_empty() || !buf.area().contains((room.x, room.y).into()) {
+            return;
+        }
         let first = (!self.sent.swap(true, Ordering::AcqRel)).then_some(self.transmit.as_str());
-        placeholders(room, self.cells, self.id, above, buf, first);
+        placeholders(room, self.id, above, buf, first);
     }
 }
 
@@ -305,7 +297,7 @@ mod tests {
             false,
         )
         .expect("encode");
-        let mut buf = Buffer::empty(area);
+        let mut buf = Buffer::empty(frame(area));
         let above = -i16::try_from(skip).expect("skip");
         SlicedImage::new(&SlicedProtocol::Kitty(kitty), (0, above).into()).render(area, &mut buf);
         buf
@@ -329,9 +321,14 @@ mod tests {
             tmux,
             compress,
         );
-        let mut buf = Buffer::empty(area);
+        let mut buf = Buffer::empty(frame(area));
         image.render(area, &mut buf, skip);
         buf
+    }
+
+    /// A screen with room around `area`, so a cell drawn outside it shows.
+    fn frame(area: Rect) -> Rect {
+        Rect::new(0, 0, area.right() + 3, area.bottom() + 3)
     }
 
     #[test]
@@ -346,8 +343,17 @@ mod tests {
         ];
         for (width, height, cells) in [(40, 40, Size::new(4, 2)), (300, 200, Size::new(30, 10))] {
             let pixels = image(width, height);
-            for (id, tmux, compress, skip) in cases {
-                let area = Rect::new(0, 0, cells.width, cells.height);
+            // Its own size at the origin, clipped narrower at an offset, and
+            // inside a larger area, as a panel is drawn into the pane.
+            let areas = [
+                Rect::new(0, 0, cells.width, cells.height),
+                Rect::new(5, 3, cells.width - 1, cells.height),
+                Rect::new(2, 1, cells.width + 4, cells.height + 2),
+            ];
+            for ((id, tmux, compress, skip), area) in cases
+                .into_iter()
+                .flat_map(|case| areas.map(|area| (case, area)))
+            {
                 let (theirs, ours) = (
                     theirs(
                         &pixels,
@@ -371,7 +377,7 @@ mod tests {
                 assert_eq!(
                     theirs, ours,
                     "{width}x{height} as id {id:#x}, tmux {tmux}, compressed {compress}, \
-                     {skip} rows above: the cells differ from ratatui-image's"
+                     {skip} rows above, into {area:?}: the cells differ from ratatui-image's"
                 );
             }
         }
@@ -497,13 +503,19 @@ mod tests {
                 image::Rgba([30, 30, 46, 255])
             }
         });
-        assert!(!worth_deflating(&noise), "noise was deflated");
+        assert!(!worth_deflating(&noise, 1000), "noise was deflated");
+        // Every row the same noise: a row alone does not shrink, the image does.
+        let rows: Vec<u8> = noise[..1000 * 4].repeat(400);
         assert!(
-            worth_deflating(screen.as_raw()),
+            worth_deflating(&rows, 1000),
+            "a texture repeated row by row was sent raw"
+        );
+        assert!(
+            worth_deflating(screen.as_raw(), 1000),
             "a flat screen was sent raw"
         );
         assert!(
-            worth_deflating(&noise[..SAMPLE]),
+            worth_deflating(&noise[..SAMPLE], 64),
             "a small image was sent raw"
         );
     }
