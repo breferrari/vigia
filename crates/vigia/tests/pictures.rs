@@ -1098,6 +1098,10 @@ fn kitty_kept_off_screen() {
         "",
         "an image off screen was deleted"
     );
+    assert!(
+        pane.pictures.uploads().1.is_empty(),
+        "an image written whole was stopped when it scrolled off"
+    );
     assert_eq!(
         pane.pictures.kept(),
         1,
