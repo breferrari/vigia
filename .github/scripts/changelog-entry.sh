@@ -100,6 +100,8 @@ replaced=$(printf '%s\n' "$records" | awk -F '\t' '
 named=$(printf '%s\n' "$records" | awk -F '\t' 'NF == 3 { printf ",%s", $1 }')
 
 unknown=0
+# Split on spaces, and never expand a token against the working tree.
+set -f
 for pair in $(printf '%s' "$replaced" | tr ',' ' '); do
     gone=${pair%%=*}
     by=${pair#*=}
@@ -117,6 +119,7 @@ for pair in $(printf '%s' "$replaced" | tr ',' ' '); do
         *) echo "::error::${by} replaces ${gone}, which has no record in this range"; unknown=1 ;;
     esac
 done
+set +f
 
 # One pass decides every record. Kept lines go to stdout prefixed `keep:`, and
 # everything else is a workflow annotation. The trailing `(#n)` references are

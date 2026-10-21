@@ -848,8 +848,10 @@ fn public_prose_denylist() {
         ),
     ];
     // A release summary opens the published notes, so it is held to them first.
-    if let Ok(summary) = std::fs::read_to_string(root.join(".github/release-summary.md")) {
-        files.push((".github/release-summary.md".to_owned(), summary));
+    match std::fs::read_to_string(root.join(".github/release-summary.md")) {
+        Ok(summary) => files.push((".github/release-summary.md".to_owned(), summary)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => panic!("read .github/release-summary.md: {e}"),
     }
     // Every page under docs/, so a new one is covered without an edit here.
     for entry in std::fs::read_dir(root.join("docs"))
