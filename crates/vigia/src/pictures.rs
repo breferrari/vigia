@@ -1021,9 +1021,10 @@ impl Pictures {
     /// written whole at once.
     #[doc(hidden)]
     pub fn written_at_once(&mut self) -> Vec<crate::writer::Upload> {
-        let (uploads, _) = self.uploads();
-        for upload in &uploads {
-            self.uploaded(upload.id);
+        let (mut uploads, _) = self.uploads();
+        for upload in &mut uploads {
+            let written = std::mem::replace(&mut upload.written, Box::new(|| {}));
+            written();
         }
         uploads
     }
@@ -1070,19 +1071,6 @@ impl Pictures {
             }
         }
         (uploads, stopped)
-    }
-
-    /// The writer wrote Kitty image `id` whole.
-    pub fn uploaded(&mut self, id: u32) {
-        for ready in self.built.values() {
-            for (_, panel) in &ready.0.panels {
-                if let Panel::Kitty(image) = panel
-                    && image.id() == id
-                {
-                    image.mark_uploaded();
-                }
-            }
-        }
     }
 
     /// Take in what the worker finished since the last call.

@@ -100,7 +100,15 @@ impl<W: Rearm> Console for Crossterm<W> {
         // Closed and deleted before the alternate screen goes, in whose own
         // store kitty holds it.
         if let Some((id, tmux)) = crate::writer::open_image() {
-            let closed = crate::kitty::cancel(tmux) + &crate::kitty::delete(id, tmux);
+            // Under tmux the terminator above ends tmux's passthrough; this one
+            // goes through it, to the escape tmux had passed on (unverified).
+            let ended = if tmux {
+                "\x1bPtmux;\x1b\x1b\\\x1b\\"
+            } else {
+                ""
+            };
+            let closed =
+                String::from(ended) + &crate::kitty::cancel(tmux) + &crate::kitty::delete(id, tmux);
             let _ = self.out.write_all(closed.as_bytes());
         }
     }

@@ -149,7 +149,7 @@ enum Wake {
     /// A write to the terminal failed, so nothing drawn reaches it any more.
     OutputLost,
     /// A Kitty image's last chunk reached the terminal, so its cells can draw.
-    Uploaded(u32),
+    Uploaded,
 }
 
 /// The backlog below which a frame is always drawn, so a small frame never
@@ -175,8 +175,8 @@ fn writer_wakes(tx: &Sender<Wake>) -> writer::Wakes {
         lost: Box::new(move || {
             let _ = lost.send(Wake::OutputLost);
         }),
-        uploaded: Box::new(move |id| {
-            let _ = uploaded.send(Wake::Uploaded(id));
+        uploaded: Box::new(move || {
+            let _ = uploaded.send(Wake::Uploaded);
         }),
     }
 }
@@ -913,8 +913,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.app.warn(message);
                 }
                 // Deliberately nothing.
-                Wake::Warmed | Wake::Pictured | Wake::Cells => {}
-                Wake::Uploaded(id) => shell.pictures.uploaded(id),
+                Wake::Warmed | Wake::Pictured | Wake::Cells | Wake::Uploaded => {}
                 Wake::OutputLost => {
                     return Err(
                         "the terminal stopped taking output, so nothing could be drawn".into(),

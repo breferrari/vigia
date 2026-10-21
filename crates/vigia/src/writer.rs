@@ -75,6 +75,8 @@ pub struct Upload {
     pub close: Arc<str>,
     /// Whether its escapes pass through tmux.
     pub tmux: bool,
+    /// Called once its last chunk is written.
+    pub written: Box<dyn FnOnce() + Send>,
 }
 
 /// The longest one wait for room to write lasts, so a stop is noticed this soon.
@@ -106,7 +108,7 @@ pub struct Wakes {
     /// A write failed, so nothing the pane draws reaches the terminal any more.
     pub lost: Box<dyn Fn() + Send>,
     /// An image's last chunk was written, so its cells may be drawn.
-    pub uploaded: Box<dyn Fn(u32) + Send>,
+    pub uploaded: Box<dyn Fn() + Send>,
 }
 
 impl Wakes {
@@ -116,7 +118,7 @@ impl Wakes {
         Self {
             cells: Box::new(|| {}),
             lost: Box::new(|| {}),
-            uploaded: Box::new(|_| {}),
+            uploaded: Box::new(|| {}),
         }
     }
 }
@@ -194,7 +196,7 @@ impl Lanes {
     fn take(&mut self, job: Job) {
         match job {
             Job::Frame(bytes) => self.text.push_back(bytes),
-            Job::Upload(upload) if !self.stopping => {
+            Job::Upload(upload) if !self.stopping && !upload.ends.is_empty() => {
                 self.graphics.push_back(Graphic::Upload(upload, 0));
             }
             Job::Upload(_) => {}
@@ -269,7 +271,9 @@ impl Lanes {
                 *sent += 1;
                 if *sent == upload.ends.len() && !shared.stopping() {
                     OPEN.store(0, Ordering::SeqCst);
-                    (wakes.uploaded)(upload.id);
+                    let written = std::mem::replace(&mut upload.written, Box::new(|| {}));
+                    written();
+                    (wakes.uploaded)();
                     self.graphics.pop_front();
                 }
             }
@@ -779,7 +783,7 @@ mod tests {
                     count.fetch_add(1, Ordering::AcqRel);
                 }),
                 lost: Box::new(|| {}),
-                uploaded: Box::new(|_| {}),
+                uploaded: Box::new(|| {}),
             },
         );
         let mut sink = writer.sink();
@@ -873,6 +877,7 @@ mod tests {
             ends: ends.into(),
             close: "\x1b_Gm=0,q=2;\x1b\\".into(),
             tmux: false,
+            written: Box::new(|| {}),
         }
     }
 
@@ -908,8 +913,8 @@ mod tests {
         let writer = Writer::start(
             out.clone(),
             Wakes {
-                uploaded: Box::new(move |id| {
-                    let _ = tx.send(id);
+                uploaded: Box::new(move || {
+                    let _ = tx.send(());
                 }),
                 ..Wakes::none()
             },
@@ -940,7 +945,7 @@ mod tests {
         );
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(2)),
-            Ok(7),
+            Ok(()),
             "the upload was not reported"
         );
     }
@@ -954,8 +959,8 @@ mod tests {
         let writer = Writer::start(
             out.clone(),
             Wakes {
-                uploaded: Box::new(move |id| {
-                    let _ = tx.send(id);
+                uploaded: Box::new(move || {
+                    let _ = tx.send(());
                 }),
                 ..Wakes::none()
             },
@@ -996,6 +1001,7 @@ mod tests {
             ends: vec![len].into(),
             close: "".into(),
             tmux: false,
+            written: Box::new(|| {}),
         })
         .expect("upload");
         out.room.store(100, Ordering::Release);
@@ -1021,8 +1027,8 @@ mod tests {
         let writer = Writer::start(
             out.clone(),
             Wakes {
-                uploaded: Box::new(move |id| {
-                    let _ = tx.send(id);
+                uploaded: Box::new(move || {
+                    let _ = tx.send(());
                 }),
                 ..Wakes::none()
             },
@@ -1045,7 +1051,7 @@ mod tests {
         );
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(2)),
-            Ok(13),
+            Ok(()),
             "the whole upload was not reported"
         );
     }
@@ -1140,7 +1146,7 @@ mod tests {
                 lost: Box::new(move || {
                     let _ = tx.send(());
                 }),
-                uploaded: Box::new(|_| {}),
+                uploaded: Box::new(|| {}),
             },
         );
         let mut sink = writer.sink();

@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use std::num::NonZeroU16;
 
@@ -143,16 +143,19 @@ pub struct Image {
     ends: Arc<[usize]>,
     tmux: bool,
     deflated: bool,
-    /// [`IDLE`], [`QUEUED`] or [`WRITTEN`].
-    state: AtomicU8,
+    /// [`IDLE`], [`QUEUED`] or [`WRITTEN`] in the low bits, and above them
+    /// which upload it is, so a report from one cut off marks no later one.
+    state: Arc<AtomicU64>,
 }
 
 /// Not with the writer.
-const IDLE: u8 = 0;
+const IDLE: u64 = 0;
 /// Handed to the writer and not yet written whole.
-const QUEUED: u8 = 1;
+const QUEUED: u64 = 1;
 /// Written whole, so its cells may be drawn.
-const WRITTEN: u8 = 2;
+const WRITTEN: u64 = 2;
+/// The bits of [`Image::state`] that hold the state.
+const STATE: u64 = 3;
 
 impl Image {
     /// `rgba`, `width` by `height` pixels, as image `id` over `cells`,
@@ -186,53 +189,65 @@ impl Image {
             ends: ends.into(),
             tmux,
             deflated: compress,
-            state: AtomicU8::new(IDLE),
+            state: Arc::new(AtomicU64::new(IDLE)),
         }
     }
 
-    /// Its id.
+    /// The id the terminal knows it by.
     pub fn id(&self) -> u32 {
         self.id
     }
 
     /// Its transmit, once: none if it is already with the writer or written.
     pub fn upload(&self) -> Option<crate::writer::Upload> {
-        let handed = self
-            .state
-            .compare_exchange(IDLE, QUEUED, Ordering::AcqRel, Ordering::Acquire);
-        handed.is_ok().then(|| crate::writer::Upload {
+        let now = self.state.load(Ordering::Acquire);
+        if now & STATE != IDLE {
+            return None;
+        }
+        let queued = (now & !STATE) + 4 + QUEUED;
+        self.state
+            .compare_exchange(now, queued, Ordering::AcqRel, Ordering::Acquire)
+            .ok()?;
+        let state = Arc::clone(&self.state);
+        Some(crate::writer::Upload {
             id: self.id,
             data: Arc::clone(&self.transmit),
             ends: Arc::clone(&self.ends),
             close: cancel(self.tmux).into(),
             tmux: self.tmux,
+            written: Box::new(move || {
+                let _ = state.compare_exchange(
+                    queued,
+                    queued - QUEUED + WRITTEN,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                );
+            }),
         })
     }
 
     /// Whether the terminal has all of it, so its cells place it.
     pub fn uploaded(&self) -> bool {
-        self.state.load(Ordering::Acquire) == WRITTEN
-    }
-
-    /// The writer wrote its last chunk. Not if it was stopped since, and so
-    /// deleted.
-    pub fn mark_uploaded(&self) {
-        let _ = self
-            .state
-            .compare_exchange(QUEUED, WRITTEN, Ordering::AcqRel, Ordering::Acquire);
+        self.state.load(Ordering::Acquire) & STATE == WRITTEN
     }
 
     /// Its upload was cancelled, or never finished: send it again when next
     /// shown.
     pub fn unsent(&self) {
-        let _ = self
-            .state
-            .compare_exchange(QUEUED, IDLE, Ordering::AcqRel, Ordering::Acquire);
+        let now = self.state.load(Ordering::Acquire);
+        if now & STATE == QUEUED {
+            let _ = self.state.compare_exchange(
+                now,
+                now - QUEUED + IDLE,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+        }
     }
 
     /// Whether it is with the writer and not yet written whole.
     pub fn in_flight(&self) -> bool {
-        self.state.load(Ordering::Acquire) == QUEUED
+        self.state.load(Ordering::Acquire) & STATE == QUEUED
     }
 
     /// Whether its transmit is deflated.
@@ -492,11 +507,10 @@ mod tests {
             "the same image was handed over twice"
         );
         image.unsent();
-        assert!(
-            image.upload().is_some(),
-            "a cancelled image was not sent again"
-        );
-        image.mark_uploaded();
+        let again = image
+            .upload()
+            .expect("a cancelled image was not sent again");
+        (again.written)();
         image.unsent();
         assert!(
             image.upload().is_none(),
@@ -515,8 +529,8 @@ mod tests {
 
     #[test]
     fn late_report() {
-        // Written whole just as it was stopped: the late report does not mark
-        // the image held, so it is sent again rather than drawn blank.
+        // The report of an upload stopped since marks nothing: not the image
+        // left idle, and not the upload sent after it.
         let pixels = image(40, 40);
         let image = Image::new(
             pixels.as_raw(),
@@ -526,13 +540,18 @@ mod tests {
             false,
             false,
         );
-        let _ = image.upload().expect("an upload");
+        let first = image.upload().expect("an upload");
         image.unsent();
-        image.mark_uploaded();
-        assert!(!image.uploaded(), "a stopped image was taken as held");
+        (first.written)();
+        assert!(!image.uploaded(), "a stopped upload was taken as held");
+        let second = image.upload().expect("sent again");
+        let first_again = image.upload();
+        assert!(first_again.is_none(), "handed out twice");
+        assert!(!image.uploaded(), "held before its own report");
+        (second.written)();
         assert!(
-            image.upload().is_some(),
-            "a stopped image was not sent again"
+            image.uploaded(),
+            "the upload written whole was not taken as held"
         );
     }
 
