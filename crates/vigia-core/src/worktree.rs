@@ -840,15 +840,14 @@ impl Worktree {
     }
 
     /// Whether a pair waits for room that the next frame makes, by dropping
-    /// a score this frame did not ask for.
+    /// a score this frame did not ask for. Short of full, the room comes with
+    /// the worker's answers instead.
     pub(crate) fn room_coming(&self) -> bool {
         let frame = self.pair_frame.get();
+        let scores = self.pair_scores.borrow();
         self.room_wanted.get()
-            && self
-                .pair_scores
-                .borrow()
-                .values()
-                .any(|dated| dated.frame < frame)
+            && scores.len() >= PAIRS_KEPT
+            && scores.values().any(|dated| dated.frame < frame)
     }
 
     /// Whether this frame's walks had more pairs for the worker than they listed.

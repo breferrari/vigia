@@ -557,3 +557,32 @@ fn record_over_cap() {
         );
     }
 }
+
+#[test]
+fn listed_room_no_wake() {
+    // Short of full, a record whose room is held by pairs listed for the
+    // worker waits for its answers, not for a frame that could drop nothing.
+    let olds: Vec<(String, Vec<u8>)> = (0..15)
+        .map(|n| (format!("old/{n:02}.bin"), noise(500 + n, 300_000)))
+        .collect();
+    let news: Vec<(String, Vec<u8>)> = (0..15)
+        .map(|n| (format!("new/{n:02}.bin"), noise(600 + n, 300_000)))
+        .collect();
+    let scratch = moved("rename-listed-room", &refs(&olds), &refs(&news));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for n in 0..3900u64 {
+        frame.learn_pair((u64::MAX - n, n), 0);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(frame.unscored_pairs().len(), 196, "the fixture is wrong");
+    assert!(
+        frame.pairs_unlisted(),
+        "the worker's answers would not walk again"
+    );
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "a frame that can make no room was asked for"
+    );
+}
