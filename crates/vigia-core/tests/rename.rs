@@ -860,10 +860,11 @@ fn basename_before_cap() {
 
 #[test]
 fn basename_past_limit() {
-    // Git pairs a shared file name before it applies its limit, so past
-    // 1,000 times 1,000 the shared name still pairs.
+    // Git pairs a shared file name before it applies its limit. Past it
+    // still at 1,001 times 1,000, the shared name pairs and nothing else is
+    // weighed.
     let shared = noise(93, 4_000);
-    let files: Vec<(String, Vec<u8>)> = (0..1000)
+    let files: Vec<(String, Vec<u8>)> = (0..1001)
         .map(|n| {
             (
                 format!("old/o{n:04}.txt"),
@@ -872,7 +873,7 @@ fn basename_past_limit() {
         })
         .chain([("old/shared.bin".to_owned(), shared.clone())])
         .collect();
-    let written: Vec<(String, Vec<u8>)> = (0..999)
+    let written: Vec<(String, Vec<u8>)> = (0..1000)
         .map(|n| {
             (
                 format!("new/n{n:04}.txt"),
@@ -1135,4 +1136,71 @@ fn listed_room_no_wake() {
         None,
         "a frame that can make no room was asked for"
     );
+}
+
+#[test]
+fn candidate_slots() {
+    // Git offers each addition every removal in order and keeps four slots,
+    // a better one taking the first worst slot. s1 to s4 tie for y.bin and
+    // s5 takes s1's slot, so once x.bin has s5, y.bin pairs with s2.
+    let lined = |seed: u64, len: usize| -> Vec<u8> {
+        noise(seed, len)
+            .into_iter()
+            .enumerate()
+            .map(|(at, byte)| if at % 40 == 39 { b'\n' } else { byte })
+            .collect()
+    };
+    let (p, q, r, u, v) = (
+        lined(101, 3_600),
+        lined(102, 400),
+        lined(103, 400),
+        lined(104, 1_600),
+        lined(105, 1_800),
+    );
+    let x = [&p[..], &q].concat();
+    let s5 = [&p[..], &r].concat();
+    let y = [&p[..2_400], &u].concat();
+    let w = [&u[..], &p[..600], &v].concat();
+    let removals: Vec<(String, Vec<u8>)> = (1..=4)
+        .map(|n| (format!("s{n}.bin"), w.clone()))
+        .chain([("s5.bin".to_owned(), s5)])
+        .collect();
+    let scratch = moved(
+        "rename-slots",
+        &refs(&removals),
+        &[("x.bin", x), ("y.bin", y)],
+    );
+    let git = git_unstaged(&scratch);
+    assert!(
+        git.contains(&("R s5.bin".to_owned(), "x.bin".to_owned()))
+            && git.contains(&("R s2.bin".to_owned(), "y.bin".to_owned())),
+        "the fixture is wrong: {git:?}"
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..4 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(kind_of(frame.files(), "x.bin"), &renamed("s5.bin"));
+    assert_eq!(kind_of(frame.files(), "y.bin"), &renamed("s2.bin"));
+}
+
+#[test]
+fn intent_to_add_rename() {
+    // `git add -N` leaves a file an addition to `git diff`, which pairs it.
+    let old = noise(106, 4_000);
+    let scratch = moved(
+        "rename-intent",
+        &[("a.bin", old.clone())],
+        &[("b.bin", tail_changed(&old, 0.1))],
+    );
+    scratch.git(&["add", "-N", "b.bin"]);
+    let git = scratch.git(&["diff", "-M", "--name-status"]);
+    assert!(git.starts_with("R"), "the fixture is wrong: {git}");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
 }

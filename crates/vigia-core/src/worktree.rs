@@ -506,12 +506,16 @@ impl Worktree {
             sizes: (u64, u64),
             bytes: u64,
         }
-        let of_kind = |kind: ChangeKind| -> Vec<usize> {
+        let of_kind = |kinds: &[ChangeKind]| -> Vec<usize> {
             (0..changes.len())
-                .filter(|&at| changes[at].kind == kind)
+                .filter(|&at| kinds.contains(&changes[at].kind))
                 .collect()
         };
-        let (removed, added) = (of_kind(ChangeKind::Removed), of_kind(ChangeKind::Added));
+        // An intent-to-add file is an addition to `git diff`.
+        let (removed, added) = (
+            of_kind(&[ChangeKind::Removed]),
+            of_kind(&[ChangeKind::Added, ChangeKind::IntentToAdd]),
+        );
         // Each side's file names, counted over every entry before the budget
         // sizes any, as git counts them.
         let name = |at: usize| changes[at].path.rsplit('/').next().unwrap_or_default();
@@ -536,6 +540,8 @@ impl Worktree {
         let regular = |side: Vec<usize>| -> Vec<usize> {
             side.into_iter().filter(|&at| changes[at].regular).collect()
         };
+        // Every removal, as git lists them, for the candidate slots below.
+        let every_removed = removed.clone();
         let (removed, added) = (regular(removed), regular(added));
         if removed.is_empty() || added.is_empty() {
             return changes;
@@ -756,22 +762,51 @@ impl Worktree {
                     .filter(|at| !used.contains(at))
                     .collect()
             };
-            let mut scored: Vec<_> = score_all(weigh(&left(&removed), &left(&added), false))
+            let known: HashMap<(usize, usize), u64> =
+                score_all(weigh(&left(&removed), &left(&added), false))
+                    .into_iter()
+                    .map(|(score, from, to)| ((from, to), score))
+                    .collect();
+            // Git's four candidate slots for each addition, offered every
+            // removal in order: a slot is taken by the first worst entry, and
+            // only by one strictly better, ranked by score, then same name. A
+            // pair it could not score holds a slot at 0, as git's does.
+            let rank =
+                |slot: &Option<(u64, bool, usize)>| slot.map(|(score, same, _)| (score, same));
+            let mut scored = Vec::new();
+            for to in left(&added) {
+                let mut slots: [Option<(u64, bool, usize)>; rename::CANDIDATES] =
+                    [None; rename::CANDIDATES];
+                for from in left(&every_removed) {
+                    let offered = Some((
+                        known.get(&(from, to)).copied().unwrap_or(0),
+                        name(from) == name(to),
+                        from,
+                    ));
+                    let worst = (1..slots.len()).fold(0, |worst, at| {
+                        if rank(&slots[at]) < rank(&slots[worst]) {
+                            at
+                        } else {
+                            worst
+                        }
+                    });
+                    if rank(&slots[worst]) < rank(&offered) {
+                        slots[worst] = offered;
+                    }
+                }
+                scored.extend(
+                    slots
+                        .into_iter()
+                        .flatten()
+                        .map(|(score, same, from)| (score, same, from, to)),
+                );
+            }
+            // Best first and a tie to the same name, stable over git's layout.
+            scored.sort_by_key(|&(score, same, _, _)| std::cmp::Reverse((score, same)));
+            let scored = scored
                 .into_iter()
-                .filter(|&(score, _, _)| rename::pairs(score))
-                .collect();
-            // Best first, a tie to the same file name, then in the order git
-            // lists them.
-            scored.sort_by_key(|&(score, from, to)| {
-                (std::cmp::Reverse(score), name(from) != name(to), to, from)
-            });
-            // Git keeps an addition's best few removals and weighs no others.
-            let mut kept: HashMap<usize, usize> = HashMap::new();
-            scored.retain(|&(_, _, to)| {
-                let count = kept.entry(to).or_default();
-                *count += 1;
-                *count <= rename::CANDIDATES
-            });
+                .take_while(|&(score, ..)| rename::pairs(score))
+                .map(|(score, _, from, to)| (score, from, to));
             for (_, from, to) in scored {
                 if used.contains(&from) || used.contains(&to) {
                     continue;
@@ -1977,7 +2012,8 @@ fn regular(item: &Item, summary: &Summary) -> bool {
     let on_disk =
         |kind: Option<gix::dir::entry::Kind>| matches!(kind, Some(gix::dir::entry::Kind::File));
     match item {
-        _ if matches!(summary, Summary::IntentToAdd) => false,
+        // Its mode says nothing; sizing reads the disk instead.
+        _ if matches!(summary, Summary::IntentToAdd) => true,
         Item::Modification { entry, .. } => plain_file(entry.mode),
         Item::DirectoryContents { entry, .. } => on_disk(entry.disk_kind),
         Item::Rewrite { dirwalk_entry, .. } => on_disk(dirwalk_entry.disk_kind),
