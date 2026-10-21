@@ -24,6 +24,9 @@ const NAMES: [&str; 8] = [
 ];
 
 /// The attribute rules a case can write, the last removing the file.
+/// The one binary file in the base.
+const BINARY: usize = 5;
+
 const RULES: [&str; 4] = [
     "*.bin binary\n",
     "*.md -diff\n",
@@ -83,9 +86,9 @@ enum Op {
         file: usize,
         seed: u8,
     },
-    /// A binary rename that keeps `keep` of every 12 blocks of 256 bytes.
+    /// The base's binary file renamed, keeping `keep` of every 12 blocks of
+    /// 256 bytes.
     MoveBinary {
-        from: usize,
         to: usize,
         keep: u8,
         seed: u8,
@@ -112,8 +115,8 @@ fn op() -> impl Strategy<Value = Op> {
         2 => file.clone().prop_map(|file| Op::Stage { file }),
         1 => Just(Op::StageAll),
         1 => (file.clone(), any::<u8>()).prop_map(|(file, seed)| Op::Binary { file, seed }),
-        2 => (file.clone(), file.clone(), 0..13u8, any::<u8>())
-            .prop_map(|(from, to, keep, seed)| Op::MoveBinary { from, to, keep, seed }),
+        2 => (file.clone(), 0..13u8, any::<u8>())
+            .prop_map(|(to, keep, seed)| Op::MoveBinary { to, keep, seed }),
         1 => (0..RULES.len()).prop_map(|rule| Op::Attributes { rule }),
         1 => (file, any::<u8>()).prop_map(|(file, seed)| Op::Lfs { file, seed }),
     ]
@@ -262,12 +265,8 @@ fn apply(scratch: &Scratch, op: &Op) {
             git(&scratch.path_of(""), None, &["add", "-A"]);
         }
         Op::Binary { file, seed } => scratch.write(NAMES[file], binary(seed)),
-        Op::MoveBinary {
-            from,
-            to,
-            keep,
-            seed,
-        } => {
+        Op::MoveBinary { to, keep, seed } => {
+            let from = BINARY;
             if from != to
                 && let Ok(bytes) = std::fs::read(scratch.path_of(NAMES[from]))
             {
