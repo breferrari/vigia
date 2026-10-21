@@ -2275,12 +2275,15 @@ fn changelog_summary(
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
     let path = dir.join("CHANGELOG.md");
     std::fs::write(&path, changelog).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+    // A file a trailer could glob to, were the script to expand one.
+    std::fs::write(dir.join("#41"), "").expect("write the glob bait");
     let summary_path = dir.join("release-summary.md");
     if let Some(summary) = summary {
         std::fs::write(&summary_path, summary).expect("write the summary");
     }
 
     let mut child = Command::new("sh")
+        .current_dir(&dir)
         .arg(&script)
         .arg(version)
         .arg("2026-01-01")
@@ -2447,6 +2450,11 @@ fn note_replaces() {
             "replaces-self",
             "Release-note-replaces: #50",
             "replaces itself",
+        ),
+        (
+            "replaces-glob",
+            "Release-note-replaces: #*",
+            "#*, which is not a pull request number",
         ),
     ] {
         let records = format!(
