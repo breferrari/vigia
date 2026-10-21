@@ -19,9 +19,24 @@ use vigia_core::{ChangeKind, ChangeOptions, FileChange, LineKind, Origin, Worktr
 
 /// The paths a case can touch: ASCII, two directories, none equal to another
 /// but for case.
-const NAMES: [&str; 8] = [
-    "d0/a.txt", "d0/b.txt", "d0/c.rs", "d0/d.md", "d1/e.txt", "d1/f.bin", "d1/g.txt", "d1/h.txt",
+const NAMES: [&str; 12] = [
+    "d0/a.txt",
+    "d0/b.txt",
+    "d0/c.rs",
+    "d0/d.md",
+    "d1/e.txt",
+    "d1/f.bin",
+    "d1/g.txt",
+    "d1/h.txt",
+    "d0/new.txt",
+    "d0/moved.bin",
+    "d1/other.txt",
+    "d1/later.rs",
 ];
+
+/// The first `BASE` names are committed in the base; the rest exist only
+/// once an operation writes them, so a move onto one is a rename.
+const BASE: usize = 8;
 
 /// The attribute rules a case can write, the last removing the file.
 /// The one binary file in the base.
@@ -651,7 +666,7 @@ fn run(ops: &[Op], crlf: bool) {
     } else {
         scratch.git(&["config", "core.eol", "lf"]);
     }
-    for (at, name) in NAMES.iter().enumerate() {
+    for (at, name) in NAMES.iter().enumerate().take(BASE) {
         if name.ends_with(".bin") {
             scratch.write(name, binary(at as u8));
         } else {
