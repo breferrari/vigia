@@ -360,6 +360,8 @@ include = ["crates/vigia-core/assets/NOTICE.md"]
 installers = ["shell", "powershell", "homebrew"]
 tap = "breferrari/homebrew-tap"
 publish-jobs = ["homebrew", "./publish-crates-io"]
+# The crates.io job reads the checkout; a called job gets no more than this.
+github-custom-job-permissions = { "publish-crates-io" = { contents = "read", id-token = "write", packages = "write" } }
 targets = [
     "x86_64-unknown-linux-musl",
     "x86_64-apple-darwin",
