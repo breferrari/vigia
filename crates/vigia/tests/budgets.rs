@@ -3319,8 +3319,10 @@ fn pictures_first_draw_large() {
             settled,
         )
     };
-    let best =
-        |was: (Duration, Duration), now: (Duration, Duration)| (was.0.min(now.0), was.1.min(now.1));
+    // The round with the least thread CPU, so wall and CPU are one frame's.
+    let best = |was: (Duration, Duration), now: (Duration, Duration)| {
+        if now.1 < was.1 { now } else { was }
+    };
     let (mut kitty, mut halfblocks) = (
         (Duration::MAX, Duration::MAX),
         (Duration::MAX, Duration::MAX),
