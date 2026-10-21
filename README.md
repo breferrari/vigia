@@ -242,7 +242,7 @@ These pages track `main`. For a released version, browse its tag.
 | Pictures | Terminals |
 |---|---|
 | Sharp | kitty, Ghostty, iTerm2, WezTerm, Rio, foot, Windows Terminal 1.22 and later, xterm with Sixel on |
-| Half-blocks | everything else, given 24-bit colour |
+| Half-blocks | Warp, and everything else, given 24-bit colour |
 
 Inside tmux the picture passes through to the terminal outside it.
 
