@@ -653,7 +653,11 @@ fn run(ops: &[Op], crlf: bool) {
         scratch.git(&["config", "core.eol", "lf"]);
     }
     for (at, name) in NAMES.iter().enumerate() {
-        scratch.write(name, text(at as u8, 12));
+        if name.ends_with(".bin") {
+            scratch.write(name, binary(at as u8));
+        } else {
+            scratch.write(name, text(at as u8, 12));
+        }
     }
     scratch.commit_all("base");
     for op in ops {
