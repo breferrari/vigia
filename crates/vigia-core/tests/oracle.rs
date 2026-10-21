@@ -83,6 +83,13 @@ enum Op {
         file: usize,
         seed: u8,
     },
+    /// A binary rename that keeps `keep` of every 12 blocks of 256 bytes.
+    MoveBinary {
+        from: usize,
+        to: usize,
+        keep: u8,
+        seed: u8,
+    },
     Attributes {
         rule: usize,
     },
@@ -105,9 +112,19 @@ fn op() -> impl Strategy<Value = Op> {
         2 => file.clone().prop_map(|file| Op::Stage { file }),
         1 => Just(Op::StageAll),
         1 => (file.clone(), any::<u8>()).prop_map(|(file, seed)| Op::Binary { file, seed }),
+        2 => (file.clone(), file.clone(), 0..13u8, any::<u8>())
+            .prop_map(|(from, to, keep, seed)| Op::MoveBinary { from, to, keep, seed }),
         1 => (0..RULES.len()).prop_map(|rule| Op::Attributes { rule }),
         1 => (file, any::<u8>()).prop_map(|(file, seed)| Op::Lfs { file, seed }),
     ]
+}
+
+/// 3 KiB with no line break and a NUL, so both sides call it binary.
+fn binary(seed: u8) -> Vec<u8> {
+    (0..3072u32)
+        .map(|at| (at as u8).wrapping_mul(seed | 1).wrapping_add(seed) | 1)
+        .chain([0])
+        .collect()
 }
 
 fn text_line(seed: u8, at: usize) -> String {
@@ -220,22 +237,22 @@ fn apply(scratch: &Scratch, op: &Op) {
             keep,
             seed,
         } => {
-            if from != to {
-                if let Some(lines) = lines_of(from) {
-                    let moved: Vec<String> = lines
-                        .iter()
-                        .enumerate()
-                        .map(|(at, line)| {
-                            if at % 12 < usize::from(keep) {
-                                line.clone()
-                            } else {
-                                text_line(seed, at + 300)
-                            }
-                        })
-                        .collect();
-                    let _ = std::fs::remove_file(scratch.path_of(NAMES[from]));
-                    write_lines(to, &moved);
-                }
+            if from != to
+                && let Some(lines) = lines_of(from)
+            {
+                let moved: Vec<String> = lines
+                    .iter()
+                    .enumerate()
+                    .map(|(at, line)| {
+                        if at % 12 < usize::from(keep) {
+                            line.clone()
+                        } else {
+                            text_line(seed, at + 300)
+                        }
+                    })
+                    .collect();
+                let _ = std::fs::remove_file(scratch.path_of(NAMES[from]));
+                write_lines(to, &moved);
             }
         }
         Op::Stage { file } => {
@@ -244,12 +261,31 @@ fn apply(scratch: &Scratch, op: &Op) {
         Op::StageAll => {
             git(&scratch.path_of(""), None, &["add", "-A"]);
         }
-        Op::Binary { file, seed } => {
-            let bytes: Vec<u8> = (0..64u8)
-                .map(|i| i.wrapping_mul(seed) ^ 0x80)
-                .chain([0, 0])
-                .collect();
-            scratch.write(NAMES[file], bytes);
+        Op::Binary { file, seed } => scratch.write(NAMES[file], binary(seed)),
+        Op::MoveBinary {
+            from,
+            to,
+            keep,
+            seed,
+        } => {
+            if from != to
+                && let Ok(bytes) = std::fs::read(scratch.path_of(NAMES[from]))
+            {
+                let fresh = binary(seed);
+                let moved: Vec<u8> = bytes
+                    .iter()
+                    .enumerate()
+                    .map(|(at, byte)| {
+                        if (at / 256) % 12 < usize::from(keep) {
+                            *byte
+                        } else {
+                            fresh[at % fresh.len()]
+                        }
+                    })
+                    .collect();
+                let _ = std::fs::remove_file(scratch.path_of(NAMES[from]));
+                scratch.write(NAMES[to], moved);
+            }
         }
         Op::Attributes { rule } => {
             if RULES[rule].is_empty() {
