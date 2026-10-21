@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `ready_for_review` is not a default type. take-next waits for the run it
+    # starts.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 env:
@@ -49,7 +52,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
 
   lint:
-    name: fmt
+    name: fmt and dist
     needs: [changes]
     if: needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
@@ -66,6 +69,20 @@ jobs:
           components: rustfmt
       # The members by name: `--all` also formats the forks under `vendor/`.
       - run: cargo fmt -p vigia-core -p vigia -p xtask -- --check
+      # `release.yml` is generated from `[workspace.metadata.dist]` and must match it.
+      - name: the generated release workflow is current
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if curl --proto '=https' --tlsv1.2 -LsSf \
+              https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh \
+              | sh; then
+              break
+            fi
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep $((attempt * 5))
+          done
+          dist generate --check
 
   test:
     name: test (${{ matrix.os }})
@@ -151,6 +168,7 @@ jobs:
   # documents.
   docs:
     name: documents
+    needs: [changes]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -182,7 +200,9 @@ jobs:
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: nextest
+      # A code pull request runs these in the test job.
       - name: the suites that read documents
+        if: needs.changes.outputs.class == 'docs'
         run: |
           set -euo pipefail
           cargo nextest run -p vigia --profile ci --test package --test register --test sheet --test theme_docs

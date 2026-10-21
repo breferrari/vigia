@@ -24,7 +24,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -38,7 +38,12 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: budgets
-        run: cargo test --release --test budgets -- --include-ignored --nocapture
+        run: cargo test --release --test budgets -- --nocapture
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+      # Ignored on pull requests because they take minutes even untimed.
+      - name: the long budgets
+        run: cargo test --release --test budgets -- --ignored --exact rename_frame_refactor pictures_settled_large --nocapture
         env:
           VIGIA_BUDGET_SLACK: "3"
       - name: first paint
@@ -180,27 +185,3 @@ jobs:
           toolchain: stable
       - run: sh .github/scripts/forks.sh
       - run: sh .github/scripts/forks-suite.sh
-
-  # `release.yml` is generated from `[workspace.metadata.dist]` and must match it.
-  dist:
-    name: release workflow current
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          persist-credentials: false
-      - run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if curl --proto '=https' --tlsv1.2 -LsSf \
-              https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh \
-              | sh; then
-              break
-            fi
-            [ "$attempt" -lt 3 ] || exit 1
-            sleep $((attempt * 5))
-          done
-          dist generate --check

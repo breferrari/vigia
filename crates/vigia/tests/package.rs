@@ -3128,3 +3128,97 @@ fn release_attested() {
 #[path = "../../../xtask/src/frames.rs"]
 #[allow(dead_code)]
 mod frames;
+
+/// Each frame picture under `assets/` is exactly what the generator draws from
+/// its snapshot today, every picture there is one the generator knows, and every
+/// docs page that shows one names it with its label. A failure is fixed by
+/// `cargo run -p xtask --bin frames`.
+#[test]
+fn frame_svgs_match() {
+    for frame in frames::FRAMES {
+        let snapshot = repo_file(&format!("{}/{}", frames::SNAPSHOTS, frame.snapshot));
+        let svg = repo_file(&format!("assets/{}", frame.file));
+        assert!(
+            svg == frames::draw(frame, &snapshot),
+            "{} is not what {} draws today; run `cargo run -p xtask --bin frames`",
+            frame.file,
+            frame.snapshot
+        );
+        // A label points at the row whose text it names, so a renderer change
+        // that moves a row cannot leave a label on the wrong one.
+        if !frame.labels.is_empty() {
+            let drawn = frames::drawn_rows(frame, &snapshot);
+            for label in frame.labels {
+                assert!(
+                    drawn
+                        .get(label.row)
+                        .is_some_and(|row| row.contains(label.marker)),
+                    "{}'s {} label points at a row without {:?}",
+                    frame.file,
+                    label.name,
+                    label.marker
+                );
+            }
+        }
+        if let Some(run) = frames::overflow(&svg) {
+            panic!("{} draws past its window: {run}", frame.file);
+        }
+        // XML forbids a double hyphen inside a comment, and a viewer then draws
+        // nothing at all.
+        for comment in svg.split("<!--").skip(1) {
+            let body = comment.split("-->").next().unwrap_or_default();
+            assert!(
+                !body.contains("--"),
+                "{} has a comment no XML parser accepts",
+                frame.file
+            );
+        }
+    }
+    let known: Vec<&str> = frames::FRAMES.iter().map(|frame| frame.file).collect();
+    for entry in std::fs::read_dir(repo_root().join("assets"))
+        .expect("read assets/")
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("frame-") {
+            assert!(
+                known.contains(&name.as_str()),
+                "assets/{name} is a frame the generator no longer draws"
+            );
+        }
+    }
+    // The README links by absolute URL, so crates.io can load it.
+    let mut pages: Vec<(std::path::PathBuf, &str)> = std::fs::read_dir(repo_root().join("docs"))
+        .expect("read docs/")
+        .flatten()
+        .map(|entry| (entry.path(), "../assets/"))
+        .collect();
+    pages.push((
+        repo_root().join("README.md"),
+        "https://raw.githubusercontent.com/breferrari/vigia/main/assets/",
+    ));
+    let readme = std::fs::read_to_string(repo_root().join("README.md")).expect("read README.md");
+    assert_eq!(
+        readme.matches("assets/frame-").count(),
+        readme
+            .matches("https://raw.githubusercontent.com/breferrari/vigia/main/assets/frame-")
+            .count(),
+        "README.md links a frame by a relative path, which crates.io cannot load"
+    );
+    for (path, prefix) in pages {
+        let page = std::fs::read_to_string(&path).unwrap_or_default();
+        for frame in frames::FRAMES {
+            let image = format!("({prefix}{})", frame.file);
+            for (at, _) in page.match_indices(&image) {
+                let alt = page[..at].rsplit("![").next().unwrap_or_default();
+                assert_eq!(
+                    alt.trim_end_matches(']'),
+                    frame.label,
+                    "{} shows {} with alt text that is not its label",
+                    path.display(),
+                    frame.file
+                );
+            }
+        }
+    }
+}
