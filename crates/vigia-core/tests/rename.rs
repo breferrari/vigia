@@ -1761,29 +1761,40 @@ fn exact_rename_by_gix() {
         git_unstaged(&scratch).contains(&want),
         "the fixture is wrong"
     );
+    let unscored = |frame: &Frame, run: &str| {
+        assert_eq!(
+            kind_of(frame.files(), "moved/a.txt"),
+            &renamed("a.txt"),
+            "{run}"
+        );
+        assert_eq!(
+            frame.stats().pairs_scored,
+            0,
+            "{run}: an unchanged move was scored"
+        );
+        assert!(
+            frame.unscored_pairs().is_empty(),
+            "{run}: an unchanged move was listed"
+        );
+    };
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    assert_eq!(kind_of(frame.files(), "moved/a.txt"), &renamed("a.txt"));
-    assert_eq!(
-        frame.stats().pairs_scored,
-        0,
-        "an unchanged move was scored"
-    );
-    assert!(
-        frame.unscored_pairs().is_empty(),
-        "an unchanged move was listed"
-    );
+    unscored(&frame, "unstaged");
     scratch.git(&["add", "-A"]);
-    assert_eq!(
-        kind_of(&staged(&scratch), "moved/a.txt"),
-        &renamed("a.txt"),
-        "staged"
-    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    unscored(&frame, "staged");
     scratch.git(&["commit", "-q", "-m", "move"]);
-    assert_eq!(
-        kind_of(&committed(&scratch), "moved/a.txt"),
-        &renamed("a.txt"),
-        "committed"
-    );
+    let head = scratch.git(&["rev-parse", "HEAD"]);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.stand(vigia_core::Standing::Only {
+        at: gix::ObjectId::from_hex(head.trim().as_bytes()).expect("an id"),
+        named: String::new(),
+    });
+    frame.advance().expect("advance");
+    unscored(&frame, "committed");
 }
