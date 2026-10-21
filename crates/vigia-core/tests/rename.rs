@@ -449,11 +449,14 @@ fn record_over_cap() {
     let scratch = moved("rename-over-cap", &refs(&olds), &refs(&news));
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    let mut quiet = 0;
+    // The worker answers a frame late, so every pair stays listed one frame.
+    let (mut quiet, mut late) = (0, Vec::new());
     for _ in 0..200 {
         frame.advance().expect("advance");
-        let pending = frame.unscored_pairs();
-        if pending.is_empty() {
+        for candidate in std::mem::replace(&mut late, frame.unscored_pairs()) {
+            frame.learn_pair(candidate.key, 0);
+        }
+        if late.is_empty() {
             quiet += 1;
             if quiet == 5 {
                 break;
@@ -461,9 +464,6 @@ fn record_over_cap() {
             continue;
         }
         quiet = 0;
-        for candidate in pending {
-            frame.learn_pair(candidate.key, 0);
-        }
     }
     assert_eq!(quiet, 5, "the frames never stopped listing pairs");
     let scored = frame.stats().pairs_scored;

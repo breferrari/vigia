@@ -87,6 +87,8 @@ pub struct Worktree {
     pair_seen: RefCell<std::collections::HashSet<rename::PairKey>>,
     /// Candidate bytes the current frame may still score.
     pair_budget: Cell<u64>,
+    /// The pairs listed for the picture worker that it has not answered.
+    pair_pending: RefCell<std::collections::HashSet<rename::PairKey>>,
     /// The pairs the last walks could not afford, for the picture worker.
     unscored: RefCell<Vec<rename::Candidate>>,
     /// Candidate bytes scored, for the tests that bound a frame.
@@ -143,6 +145,7 @@ impl Worktree {
             lfs: Cell::new(lfs),
             pair_scores: RefCell::new(HashMap::new()),
             pair_seen: RefCell::new(std::collections::HashSet::new()),
+            pair_pending: RefCell::new(std::collections::HashSet::new()),
             pair_budget: Cell::new(rename::FRAME_BUDGET),
             unscored: RefCell::new(Vec::new()),
             pair_bytes: Cell::new(0),
@@ -700,14 +703,14 @@ impl Worktree {
                 }
             };
             let cost = unread(pair.from, pair.sizes.0) + unread(pair.to, pair.sizes.1);
+            if known.is_some() || self.pair_pending.borrow().contains(&pair.key) {
+                seen(pair.key);
+            }
             let score = match known {
-                Some(score) => {
-                    seen(pair.key);
-                    score
-                }
-                // Past what the scores hold with those listed, a new score
-                // would evict another.
-                None if self.pair_scores.borrow().len() + self.unscored.borrow().len()
+                Some(score) => score,
+                // Past what the scores hold with those the worker has yet to
+                // answer, a new score would evict another.
+                None if self.pair_scores.borrow().len() + self.pair_pending.borrow().len()
                     >= PAIRS_KEPT =>
                 {
                     continue;
@@ -726,9 +729,6 @@ impl Worktree {
                     score
                 }
                 None => {
-                    if listed.contains(&pair.key) {
-                        seen(pair.key);
-                    }
                     if self.unscored.borrow().len() >= rename::LISTED_MAX {
                         self.pairs_unlisted.set(true);
                     } else if listed.insert(pair.key) {
@@ -739,6 +739,7 @@ impl Worktree {
                             key: pair.key,
                             sides: self.pair_sources(&changes[pair.from], &changes[pair.to], homes),
                         });
+                        self.pair_pending.borrow_mut().insert(pair.key);
                         seen(pair.key);
                     }
                     continue;
@@ -850,6 +851,7 @@ impl Worktree {
             self.pair_epoch.update(|v| v + 1);
         }
         scores.insert(key, score);
+        self.pair_pending.borrow_mut().remove(&key);
     }
 
     /// How many times the scores were started again.
