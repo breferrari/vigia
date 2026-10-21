@@ -3425,14 +3425,21 @@ fn pictures_frame(protocol: ProtocolType) {
     );
 }
 
+/// [`support::icon_svg`] at 1024x1024.
+fn large_svg(seed: u8) -> String {
+    support::icon_svg(seed).replace(r#"width="24" height="24""#, r#"width="1024" height="1024""#)
+}
+
 /// The same with a changed SVG's pictures on screen.
 #[test]
 fn pictures_frame_svg() {
     pictures_frame_of(
         ProtocolType::Halfblocks,
         "a/icon.svg",
-        support::icon_svg(1).into_bytes(),
-        support::icon_svg(2).into_bytes(),
+        // Drawn at its own size, so large enough to fill the pane as a
+        // screenshot would.
+        large_svg(1).into_bytes(),
+        large_svg(2).into_bytes(),
     );
 }
 
@@ -3443,8 +3450,8 @@ fn pictures_frame_pdf() {
     pictures_frame_of(
         ProtocolType::Halfblocks,
         "a/doc.pdf",
-        support::icon_pdf(1),
-        support::icon_pdf(200),
+        support::pdf(&[(1024, 1024, &support::icon_ops(1))]),
+        support::pdf(&[(1024, 1024, &support::icon_ops(200))]),
     );
 }
 

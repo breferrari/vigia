@@ -6371,7 +6371,7 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_wherever_the_list_is_looking() 
             highlight: false,
             // The pin, which is what narrowed the walk to one file.
             single: true,
-            pictures: false,
+            pictures: None,
             rise: None,
         };
         let view = View::collect_noted(

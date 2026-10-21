@@ -73,7 +73,7 @@ fn viewport() -> Viewport {
         measured: true,
         landing: false,
         single: false,
-        pictures: false,
+        pictures: None,
         rise: None,
         highlight: false,
     }

@@ -130,6 +130,9 @@ pub struct App {
     /// Whether a changed image may draw its pictures, which the shell sets once
     /// from the terminal's colour depth.
     pictures: bool,
+    /// The device cell pictures are sized at, which the shell sets once the
+    /// terminal's is known.
+    picture_cell: crate::pictures::Cell,
     /// Top of the viewport.
     position: Position,
     /// What the footer should say instead of the key hints.
@@ -251,6 +254,7 @@ impl Default for App {
     fn default() -> Self {
         Self {
             pictures: false,
+            picture_cell: crate::pictures::BEFORE_CELL,
             position: Position::default(),
             notice: None,
             flash: None,
@@ -445,6 +449,11 @@ impl App {
     /// Let a changed image draw its pictures, or stop it.
     pub fn draw_pictures(&mut self, pictures: bool) {
         self.pictures = pictures;
+    }
+
+    /// Size pictures at `cell` device pixels a cell.
+    pub fn picture_cell(&mut self, cell: crate::pictures::Cell) {
+        self.picture_cell = cell;
     }
 
     /// Whether a changed image draws its pictures.
@@ -1441,7 +1450,7 @@ impl App {
                 // here is the plain one and every later frame colours. See
                 // [`Self::paint`].
                 highlight: self.paint != Paint::Never,
-                pictures: self.pictures,
+                pictures: self.pictures.then_some(self.picture_cell),
                 rise,
             },
             &self.notes,

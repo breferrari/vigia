@@ -553,7 +553,9 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let drawn = pictures::drawn(truecolour, picker.protocol_type());
     shell.app.draw_pictures(drawn);
     frame.draw_svg(drawn);
+    shell.pictures.cell_reported(answer.heard);
     shell.pictures.pick(picker);
+    shell.app.picture_cell(shell.pictures.device_cell());
     // The window the cell was measured in, which a later resize is scaled from.
     shell.follow_window();
     if ask {
@@ -1236,8 +1238,9 @@ impl Shell {
     fn follow_window(&mut self) {
         if self.pictures.follows_cell()
             && let Ok(window) = ratatui::crossterm::terminal::window_size()
+            && self.pictures.window_sized(window)
         {
-            self.pictures.window_sized(window);
+            self.app.picture_cell(self.pictures.device_cell());
         }
     }
 
@@ -2779,7 +2782,8 @@ mod tests {
             "    shell.pictures.pick(picker);\n",
             "    shell.follow_window();\n",
             "if matches!(action, Action::Redraw | Action::Refresh) {\n            self.follow_window();",
-            "self.pictures.window_sized(window);",
+            "&& self.pictures.window_sized(window)\n        {\n            self.app.picture_cell(self.pictures.device_cell());",
+            "    shell.app.picture_cell(shell.pictures.device_cell());\n",
         ] {
             assert!(
                 shipped.contains(route),

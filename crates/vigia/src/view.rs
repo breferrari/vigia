@@ -1352,9 +1352,9 @@ pub struct Viewport {
     pub highlight: bool,
     /// Whether the diff is pinned to the one file [`Self::position`] is inside.
     pub single: bool,
-    /// Whether a changed image may draw its pictures: the terminal draws 24-bit
-    /// colour.
-    pub pictures: bool,
+    /// The device cell a changed image's pictures are sized at, or `None` where
+    /// it draws none.
+    pub pictures: Option<crate::pictures::Cell>,
     /// A step up still owed: the top before it, and the steps above that top
     /// to open on. [`Self::position`] is already that many rows higher.
     pub rise: Option<(Position, usize)>,
@@ -1376,7 +1376,7 @@ impl Default for Viewport {
             landing: false,
             highlight: true,
             single: false,
-            pictures: false,
+            pictures: None,
             rise: None,
         }
     }
@@ -1583,11 +1583,14 @@ fn gap_rows(index: usize, files: usize) -> usize {
     usize::from(index + 1 < files)
 }
 
+/// Where a changed image's pictures go: columns, rows, and the device cell.
+type Room = (u16, u16, crate::pictures::Cell);
+
 /// Display rows a changed image's pictures take under its size line in `room`.
-fn picture_rows(kind: &ChangeKind, diff: &FileDiff, room: Option<(u16, u16)>) -> usize {
+fn picture_rows(kind: &ChangeKind, diff: &FileDiff, room: Option<Room>) -> usize {
     match (room, &diff.picture) {
-        (Some((width, rows)), Some(picture)) if noted(kind, diff) => {
-            crate::pictures::shape(picture, width, rows, true)
+        (Some((width, rows, cell)), Some(picture)) if noted(kind, diff) => {
+            crate::pictures::shape(picture, width, rows, cell, true)
                 .map_or(0, |shape| usize::from(shape.rows))
         }
         _ => 0,
@@ -1875,10 +1878,11 @@ impl View {
         let grouped = Runs::at(frame.files(), frame.staged_at()).grouped();
         // The line's two-column indent off the width, and the heading, the line and
         // the closing gap off the height.
-        let room = pictures.then(|| {
+        let room = pictures.map(|cell| {
             (
                 u16::try_from(width.saturating_sub(2)).unwrap_or(u16::MAX),
                 u16::try_from(height.saturating_sub(3)).unwrap_or(u16::MAX),
+                cell,
             )
         });
         let mut view = Self {
@@ -2967,7 +2971,7 @@ impl View {
         first: usize,
         stop: usize,
         height: usize,
-        room: Option<(u16, u16)>,
+        room: Option<Room>,
         read: &mut usize,
     ) -> Result<Position> {
         let mut index = stop - 1;
@@ -3067,8 +3071,8 @@ impl View {
                     && let Some(line) = note_for(kind, diff)
                 {
                     let shaped = diff.picture.as_ref().and_then(|picture| {
-                        let (width, rows) = (*room)?;
-                        crate::pictures::shape(picture, width, rows, true)
+                        let (width, rows, cell) = (*room)?;
+                        crate::pictures::shape(picture, width, rows, cell, true)
                             .map(|shape| (*picture, shape))
                     });
                     match shaped {
@@ -3287,7 +3291,7 @@ struct Walked {
     blocks: Vec<Block>,
     /// Columns and rows a changed image's pictures may take, or `None` where no
     /// picture is drawn.
-    room: Option<(u16, u16)>,
+    room: Option<Room>,
 }
 
 /// A changed image's pictures, hung under the logical row of its size line.

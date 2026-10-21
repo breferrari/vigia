@@ -35,10 +35,10 @@ mod pdf {
 
 /// Columns between two panels.
 pub const GAP: u16 = 2;
-/// The narrowest a panel may be and still be drawn.
+/// The narrowest a picture scaled down may be and still be drawn.
 pub const MIN_WIDTH: u16 = 8;
-/// The shortest a panel may be and still be drawn.
-pub const MIN_ROWS: u16 = 6;
+/// The cell pictures are laid out at until the terminal's is known.
+pub const BEFORE_CELL: Cell = (10, 20);
 
 /// Which pictures a changed image draws.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -121,22 +121,23 @@ pub struct Shape {
     pub slots: Vec<Slot>,
 }
 
-/// An image's size in cells when fitted into `width` columns by `rows` rows. A
-/// half-block is two pixels in one cell, which is about square on screen.
-fn fit(side: &ImageSide, width: u16, rows: u16) -> (u16, u16) {
-    if side.width == 0 || side.height == 0 {
-        return (0, 0);
+/// An image's size in cells of `cell` device pixels: its own size, or scaled
+/// down to fit `width` columns by `rows` rows, keeping its aspect. `None` when
+/// it had to be scaled under [`MIN_WIDTH`] columns.
+fn fit(side: &ImageSide, width: u16, rows: u16, cell: Cell) -> Option<(u16, u16)> {
+    if side.width == 0 || side.height == 0 || width == 0 || rows == 0 || cell.0 == 0 || cell.1 == 0
+    {
+        return None;
     }
-    let scale = (f64::from(width) / f64::from(side.width))
-        .min(f64::from(rows) * 2.0 / f64::from(side.height));
-    let cells = (f64::from(side.width) * scale).floor() as u16;
-    let pixels = (f64::from(side.height) * scale).floor() as u16;
-    (cells.max(1), pixels.div_ceil(2).max(1))
-}
-
-/// Whether a fitted panel is big enough to draw.
-fn fits((width, rows): (u16, u16)) -> bool {
-    width >= MIN_WIDTH && rows >= MIN_ROWS
+    let (cell_width, cell_height) = (f64::from(cell.0), f64::from(cell.1));
+    let (image_width, image_height) = (f64::from(side.width), f64::from(side.height));
+    let scale = (f64::from(width) * cell_width / image_width)
+        .min(f64::from(rows) * cell_height / image_height)
+        .min(1.0);
+    // Clamped, since the side that binds can round a hair past the room.
+    let columns = ((image_width * scale / cell_width).ceil() as u16).clamp(1, width);
+    let tall = ((image_height * scale / cell_height).ceil() as u16).clamp(1, rows);
+    (scale >= 1.0 || columns >= MIN_WIDTH).then_some((columns, tall))
 }
 
 /// Panels of these fitted sizes laid out from the left, [`GAP`] apart.
@@ -157,9 +158,16 @@ fn row_of(kind: Kind, start: u16, sizes: &[(u16, u16)]) -> Shape {
     }
 }
 
-/// Where a changed image's pictures go in `width` columns and `rows` rows, or
-/// `None` when nothing fits or the terminal cannot draw a half-block's colours.
-pub fn shape(picture: &Picture, width: u16, rows: u16, truecolour: bool) -> Option<Shape> {
+/// Where a changed image's pictures go in `width` columns and `rows` rows of
+/// `cell` device pixels, or `None` when nothing fits or the terminal cannot
+/// draw a half-block's colours.
+pub fn shape(
+    picture: &Picture,
+    width: u16,
+    rows: u16,
+    cell: Cell,
+    truecolour: bool,
+) -> Option<Shape> {
     if !truecolour {
         return None;
     }
@@ -177,27 +185,24 @@ pub fn shape(picture: &Picture, width: u16, rows: u16, truecolour: bool) -> Opti
     }
     let third = width.saturating_sub(2 * GAP) / 3;
     let one = |kind: Kind, side: &ImageSide| {
-        // The bar takes the slot's first column.
-        let size = fit(side, third.saturating_sub(1), rows);
-        fits(size).then(|| row_of(kind, 1, &[size]))
+        // The bar takes the first column.
+        fit(side, width.saturating_sub(1), rows, cell).map(|size| row_of(kind, 1, &[size]))
     };
     match (&picture.before, &picture.after) {
         (Some(old), Some(new)) if (old.width, old.height) == (new.width, new.height) => {
-            let size = fit(new, third, rows);
-            if fits(size) {
+            if let Some(size) = fit(new, third, rows, cell) {
                 return Some(row_of(Kind::Three, 0, &[size, size, size]));
             }
-            let size = fit(new, width, rows);
-            fits(size).then(|| row_of(Kind::Mask, 0, &[size]))
+            fit(new, width, rows, cell).map(|size| row_of(Kind::Mask, 0, &[size]))
         }
         (Some(old), Some(new)) => {
             let half = width.saturating_sub(GAP) / 2;
-            let (left, right) = (fit(old, half, rows), fit(new, half, rows));
-            if fits(left) && fits(right) {
+            if let (Some(left), Some(right)) =
+                (fit(old, half, rows, cell), fit(new, half, rows, cell))
+            {
                 return Some(row_of(Kind::Pair, 0, &[left, right]));
             }
-            let size = fit(new, width, rows);
-            fits(size).then(|| row_of(Kind::New, 0, &[size]))
+            fit(new, width, rows, cell).map(|size| row_of(Kind::New, 0, &[size]))
         }
         (None, Some(new)) => one(Kind::Added, new),
         (Some(old), None) => one(Kind::Deleted, old),
@@ -558,6 +563,12 @@ pub type Cell = (u16, u16);
 /// reports it.
 pub type Window = ratatui::crossterm::terminal::WindowSize;
 
+/// Device pixels to a reported cell pixel: 2 on macOS when the terminal gave
+/// only its window's size, which is in logical points there.
+pub fn density(heard: bool, macos: bool) -> u16 {
+    if !heard && macos { 2 } else { 1 }
+}
+
 /// The cell in `now`, from the cell `queried` in `then`, kept at `current`
 /// unless it moved further than the windows' leftover pixels can explain. `None` when either reports no
 /// pixels.
@@ -633,11 +644,13 @@ pub struct Pictures {
     /// Whether a delete has to pass through tmux.
     tmux: bool,
     /// Where the picker goes, until it has been given.
-    picker: Option<mpsc::Sender<Picker>>,
+    picker: Option<mpsc::Sender<(Picker, u16)>>,
     /// The cell size pictures are built at now.
     cell: Option<Cell>,
     /// The cell the query found; `None` for half-blocks, whose grid is no cell's.
     queried: Option<Cell>,
+    /// Device pixels to a cell pixel, from [`density`].
+    density: u16,
     /// The window the cell was queried in, once told.
     queried_in: Option<Window>,
     /// How many images this cache's worker has decoded.
@@ -745,7 +758,7 @@ impl Pictures {
             });
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel();
-        let (picked, picker) = mpsc::channel::<Picker>();
+        let (picked, picker) = mpsc::channel::<(Picker, u16)>();
         let shown = Arc::new(Mutex::new(HashSet::new()));
         let still = Arc::clone(&shown);
         let decoded = Arc::new(AtomicU64::new(0));
@@ -755,7 +768,7 @@ impl Pictures {
         let _ = std::thread::Builder::new()
             .name(WORKER.to_owned())
             .spawn(move || {
-                let Ok(base) = picker.recv() else {
+                let Ok((base, density)) = picker.recv() else {
                     return;
                 };
                 let queried = (base.font_size().width, base.font_size().height);
@@ -766,7 +779,11 @@ impl Pictures {
                         .contains(&ratatui_image::picker::Capability::KittyCompression);
                 let mut resized: Option<(Cell, Picker)> = None;
                 for job in inbox {
-                    let picker = match job.cell {
+                    let device = job
+                        .cell
+                        .map(|(width, height)| (width * density, height * density))
+                        .or((density > 1).then_some((queried.0 * density, queried.1 * density)));
+                    let picker = match device {
                         Some(cell) if cell != queried => {
                             if resized.as_ref().is_none_or(|(at, _)| *at != cell) {
                                 resized = Some((cell, picker_at(&base, cell)));
@@ -814,6 +831,7 @@ impl Pictures {
             picker: Some(picked),
             cell: None,
             queried: None,
+            density: 1,
             queried_in: None,
             decoded,
             found: Vec::new(),
@@ -902,6 +920,19 @@ impl Pictures {
         self.decoded.load(Ordering::Relaxed)
     }
 
+    /// Say whether the terminal reported its cell size, before [`Pictures::pick`]:
+    /// one that did not on macOS gives logical points, and pictures are sized and
+    /// encoded at twice them.
+    pub fn cell_reported(&mut self, heard: bool) {
+        self.density = density(heard, cfg!(target_os = "macos"));
+    }
+
+    /// The cell pictures are sized at, in device pixels.
+    pub fn device_cell(&self) -> Cell {
+        let (width, height) = self.cell.unwrap_or(BEFORE_CELL);
+        (width * self.density, height * self.density)
+    }
+
     /// Say how pictures are encoded, which starts the held jobs. Once only.
     pub fn pick(&mut self, picker: Picker) {
         if let Some(picked) = self.picker.take() {
@@ -910,7 +941,7 @@ impl Pictures {
             self.cell = Some(cell);
             let protocol = picker.protocol_type() != ProtocolType::Halfblocks;
             self.queried = protocol.then_some(cell);
-            let _ = picked.send(picker);
+            let _ = picked.send((picker, self.density));
         }
     }
 
@@ -2563,6 +2594,9 @@ mod tests {
         }
     }
 
+    /// A cell of 10x20 pixels.
+    const CELL: Cell = (10, 20);
+
     fn both(width: u32, height: u32) -> Picture {
         Picture {
             before: Some(side(width, height)),
@@ -2571,8 +2605,67 @@ mod tests {
     }
 
     #[test]
+    fn natural_size() {
+        // A 24x24 icon at a reported 16x32 cell takes 2x1 cells however much
+        // room there is: never enlarged.
+        let added = |width, height| Picture {
+            before: None,
+            after: Some(side(width, height)),
+        };
+        let icon = shape(&added(24, 24), 200, 60, (16, 32), true).expect("a shape");
+        assert_eq!((icon.slots[0].width, icon.slots[0].rows), (2, 1));
+        // The same icon where only the window's logical size is known, on
+        // macOS: the device cell is twice it, so the icon is the same size.
+        let unheard = (8 * density(false, true), 16 * density(false, true));
+        let same = shape(&added(24, 24), 200, 60, unheard, true).expect("a shape");
+        assert_eq!(same.slots, icon.slots);
+        // A full-screen snapshot beside it fills the height it is given.
+        let snapshot = shape(&added(1170, 2532), 200, 60, (16, 32), true).expect("a shape");
+        assert_eq!(snapshot.rows, 60);
+        assert!(snapshot.slots[0].width > 10 * icon.slots[0].width);
+    }
+
+    #[test]
+    fn wide_short_fits() {
+        // A deleted 1070x198 screenshot in half a laptop screen, 104 columns
+        // at a 16x32 cell: drawn across the width rather than hidden.
+        let deleted = Picture {
+            before: Some(side(1070, 198)),
+            after: None,
+        };
+        let half = shape(&deleted, 104, 40, (16, 32), true).expect("a picture");
+        assert_eq!(half.kind, Kind::Deleted);
+        let slot = half.slots[0];
+        assert_eq!((slot.x, slot.width), (1, 67), "{slot:?}");
+        // Narrower than its own size: scaled down to the width there is.
+        let narrow = shape(&deleted, 40, 40, (16, 32), true).expect("a picture");
+        assert_eq!(narrow.slots[0].width, 39);
+        assert_eq!(narrow.slots[0].rows, 4);
+    }
+
+    #[test]
+    fn small_unscaled_drawn() {
+        // Scaled down under 8 columns: too small to read. At its own size
+        // under 8 columns: drawn.
+        let added = |width, height| Picture {
+            before: None,
+            after: Some(side(width, height)),
+        };
+        assert_eq!(shape(&added(2000, 2000), 40, 3, CELL, true), None);
+        assert!(shape(&added(24, 24), 40, 3, CELL, true).is_some());
+    }
+
+    #[test]
+    fn retina_density() {
+        assert_eq!(density(true, true), 1, "a reported cell is device pixels");
+        assert_eq!(density(false, true), 2, "macOS's window size is in points");
+        assert_eq!(density(false, false), 1);
+        assert_eq!(density(true, false), 1);
+    }
+
+    #[test]
     fn three_panels() {
-        let shape = shape(&both(1242, 2688), 76, 19, true).expect("a shape");
+        let shape = shape(&both(1242, 2688), 76, 19, CELL, true).expect("a shape");
         assert_eq!(shape.kind, Kind::Three);
         assert_eq!(shape.slots.len(), 3);
         let first = shape.slots[0];
@@ -2581,24 +2674,25 @@ mod tests {
             first.width + GAP,
             "panels are not two columns apart"
         );
-        assert!(first.width >= MIN_WIDTH && first.rows >= MIN_ROWS);
+        assert!(first.width >= MIN_WIDTH);
     }
 
     #[test]
     fn mask_alone_narrow() {
-        let shape = shape(&both(2000, 800), 60, 19, true).expect("a shape");
+        // A third is under 8 columns, so the mask takes the width.
+        let shape = shape(&both(2000, 800), 26, 19, CELL, true).expect("a shape");
         assert_eq!(shape.kind, Kind::Mask);
         assert_eq!(shape.slots.len(), 1);
     }
 
     #[test]
     fn no_picture_short() {
-        assert_eq!(shape(&both(1242, 2688), 76, 5, true), None);
+        assert_eq!(shape(&both(1242, 2688), 76, 5, CELL, true), None);
     }
 
     #[test]
     fn no_picture_below_truecolour() {
-        assert_eq!(shape(&both(1242, 2688), 120, 40, false), None);
+        assert_eq!(shape(&both(1242, 2688), 120, 40, CELL, false), None);
     }
 
     #[test]
@@ -2607,7 +2701,7 @@ mod tests {
             before: None,
             after: Some(side(1242, 2688)),
         };
-        let shape_added = shape(&added, 76, 19, true).expect("a shape");
+        let shape_added = shape(&added, 76, 19, CELL, true).expect("a shape");
         assert_eq!(
             (shape_added.kind, shape_added.slots.len()),
             (Kind::Added, 1)
@@ -2616,17 +2710,17 @@ mod tests {
             shape_added.slots[0].x, 1,
             "the bar does not have the first column"
         );
-        let three = shape(&both(1242, 2688), 76, 19, true).expect("a shape");
+        let three = shape(&both(1242, 2688), 76, 19, CELL, true).expect("a shape");
         assert!(
-            shape_added.slots[0].width <= three.slots[0].width,
-            "an added picture is wider than a three-panel one"
+            shape_added.slots[0].width >= three.slots[0].width,
+            "an added picture has less room than one of three"
         );
         let deleted = Picture {
             before: Some(side(1242, 2688)),
             after: None,
         };
         assert_eq!(
-            shape(&deleted, 76, 19, true).map(|shape| shape.kind),
+            shape(&deleted, 76, 19, CELL, true).map(|shape| shape.kind),
             Some(Kind::Deleted)
         );
     }
@@ -2638,7 +2732,7 @@ mod tests {
             after: Some(side(1179, 2556)),
         };
         assert_eq!(
-            shape(&picture, 76, 19, true).map(|shape| shape.kind),
+            shape(&picture, 76, 19, CELL, true).map(|shape| shape.kind),
             Some(Kind::Pair)
         );
     }
