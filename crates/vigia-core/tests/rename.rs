@@ -703,3 +703,27 @@ fn text_rename_autocrlf() {
     );
     assert_eq!(ours, renamed("a.txt"));
 }
+
+#[cfg(unix)]
+#[test]
+fn symlink_never_renamed() {
+    // Git scores regular files only, so a symlink removed beside a file
+    // holding much the same text as its target is no rename.
+    let target: String = (0..20).map(|n| format!("segment{n:02}/")).collect();
+    let scratch = Scratch::new("rename-symlink");
+    std::os::unix::fs::symlink(&target, scratch.path_of("link")).expect("symlink");
+    scratch.commit_all("initial");
+    std::fs::remove_file(scratch.path_of("link")).expect("remove");
+    scratch.write("plain.txt", format!("{target}x"));
+    let git = git_unstaged(&scratch);
+    assert!(
+        git.contains(&("D".to_owned(), "link".to_owned())),
+        "the fixture is wrong: {git:?}"
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(kind_of(frame.files(), "plain.txt"), &ChangeKind::Added);
+}

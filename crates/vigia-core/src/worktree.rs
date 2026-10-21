@@ -489,9 +489,10 @@ impl Worktree {
             sizes: (u64, u64),
             bytes: u64,
         }
+        // Git scores regular files only, on both sides.
         let of_kind = |kind: ChangeKind| -> Vec<usize> {
             (0..changes.len())
-                .filter(|&at| changes[at].kind == kind)
+                .filter(|&at| changes[at].kind == kind && !changes[at].maybe_symlink)
                 .collect()
         };
         let (removed, added) = (of_kind(ChangeKind::Removed), of_kind(ChangeKind::Added));
@@ -2036,29 +2037,43 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
         return None;
     }
 
-    let (path, kind, before, after) = match change {
-        ChangeRef::Addition { location, id, .. } => (
+    let (path, kind, before, after, mode) = match change {
+        ChangeRef::Addition {
+            location,
+            id,
+            entry_mode,
+            ..
+        } => (
             path_of(location.as_ref()),
             ChangeKind::Added,
             None,
             Some(Side::Blob(id.as_ref().to_owned())),
+            *entry_mode,
         ),
-        ChangeRef::Deletion { location, id, .. } => (
+        ChangeRef::Deletion {
+            location,
+            id,
+            entry_mode,
+            ..
+        } => (
             path_of(location.as_ref()),
             ChangeKind::Removed,
             Some(id.as_ref().to_owned()),
             None,
+            *entry_mode,
         ),
         ChangeRef::Modification {
             location,
             previous_id,
             id,
+            entry_mode,
             ..
         } => (
             path_of(location.as_ref()),
             ChangeKind::Modified,
             Some(previous_id.as_ref().to_owned()),
             Some(Side::Blob(id.as_ref().to_owned())),
+            *entry_mode,
         ),
         // The *destination* names the change, exactly as it does for an
         // index-worktree rewrite: the row a reader sees is the path the content
@@ -2069,6 +2084,7 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
             location,
             id,
             copy,
+            entry_mode,
             ..
         } => {
             let from = path_of(source_location.as_ref());
@@ -2082,6 +2098,7 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
                 kind,
                 Some(source_id.as_ref().to_owned()),
                 Some(Side::Blob(id.as_ref().to_owned())),
+                *entry_mode,
             )
         }
     };
@@ -2092,8 +2109,10 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
         origin: Origin::Staged,
         before,
         after,
-        // Conservative, and it costs nothing here.
-        maybe_symlink: true,
+        maybe_symlink: !matches!(
+            mode,
+            gix::index::entry::Mode::FILE | gix::index::entry::Mode::FILE_EXECUTABLE
+        ),
         mode_changed: false,
     })
 }
