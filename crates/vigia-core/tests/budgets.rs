@@ -1478,33 +1478,28 @@ fn rename_frame_many_small() {
     );
 }
 
-/// A repository of a hundred similar `.rs` files, about 3 KB each: with
-/// `moved`, moved to another directory and lightly edited, ten thousand pairs
-/// to score; without, the same new files beside the old ones.
+/// [`support::refactor_files`] of a hundred, committed: with `moved` the old
+/// files go, ten thousand pairs to score; without, they stay.
 fn refactor_repo(name: &str, moved: bool) -> Scratch {
-    let body = |k: usize| -> String {
-        (0..60)
-            .map(|l| format!("fn item_{k}_{l}(x: u32) -> u32 {{ x + {l} }} // module {k}\n"))
-            .collect()
-    };
+    let (files, written) = support::refactor_files(100);
     let scratch = Scratch::new(name);
-    for k in 0..100 {
-        scratch.write(&format!("old/m{k:04}.rs"), body(k));
+    for (path, bytes) in &files {
+        scratch.write(path, bytes);
     }
     scratch.commit_all("initial");
-    for k in 0..100 {
+    for (path, _) in &files {
         if moved {
-            std::fs::remove_file(scratch.path_of(&format!("old/m{k:04}.rs"))).expect("remove");
+            std::fs::remove_file(scratch.path_of(path)).expect("remove");
         }
-        let edited = body(k).replacen("x + 3 ", "x + 33 ", 1) + "// moved\n";
-        scratch.write(&format!("new/n{k:04}.rs"), edited);
+    }
+    for (path, bytes) in &written {
+        scratch.write(path, bytes);
     }
     scratch
 }
 
-/// I9 over each frame a hundred-file move brings, from a cold worktree until
-/// every pair is scored, the worker's scores filed between frames, timed by
-/// its slowest frame and interleaved with the same files where nothing moved.
+/// I9 over each frame of a hundred-file move until every pair is scored, by
+/// its slowest frame, against the same files where nothing moved.
 #[test]
 fn rename_frame_refactor() {
     let moved = refactor_repo("budget-rename-refactor", true);

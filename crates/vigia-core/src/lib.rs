@@ -72,5 +72,5 @@ pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{
     ChangeOptions, Changes, Counted, INDEXED_EXTENSION, INDEXED_EXTENSIONS, INDEXED_PATH, Indexed,
-    Landmark, Page, SHORT_ID, Worktree, indexed_extensions, listing_walks,
+    Landmark, PAIRS_KEPT, Page, SHORT_ID, Worktree, indexed_extensions, listing_walks,
 };

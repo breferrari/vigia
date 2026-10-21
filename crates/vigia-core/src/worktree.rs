@@ -95,6 +95,8 @@ pub struct Worktree {
     lfs_unfetched: RefCell<HashMap<rename::PairKey, PathBuf>>,
     /// The most scores `pair_scores` holds.
     pairs_kept: Cell<usize>,
+    /// The scores a full record may drop this frame, found when first needed.
+    stale_keys: RefCell<Option<Vec<rename::PairKey>>>,
     /// Frames walked, which dates each score.
     pair_frame: Cell<u64>,
     /// Candidate bytes the current frame may still score.
@@ -157,6 +159,7 @@ impl Worktree {
             lfs_unfetched: RefCell::new(HashMap::new()),
             worktree_pointers: RefCell::new(HashMap::new()),
             pairs_kept: Cell::new(PAIRS_KEPT),
+            stale_keys: RefCell::new(None),
             pair_frame: Cell::new(0),
             pair_budget: Cell::new(rename::FRAME_BUDGET),
             unscored: RefCell::new(Vec::new()),
@@ -620,7 +623,7 @@ impl Worktree {
                             self.side_reads.update(|v| v + 1);
                             let size = self.repo().find_header(id).ok()?.size();
                             let mut sizes = self.blob_sizes.borrow_mut();
-                            if sizes.len() >= PAIRS_KEPT {
+                            if sizes.len() >= SIZES_KEPT {
                                 sizes.clear();
                             }
                             sizes.insert(id, size);
@@ -655,7 +658,7 @@ impl Worktree {
                                 };
                                 let pointer = picture::lfs_oid(&read).is_some();
                                 let mut seen = self.worktree_pointers.borrow_mut();
-                                if seen.len() >= PAIRS_KEPT {
+                                if seen.len() >= SIZES_KEPT {
                                     seen.clear();
                                 }
                                 seen.insert(stamp, pointer);
@@ -985,6 +988,7 @@ impl Worktree {
         // new pair.
         let last = self.pair_frame.get();
         self.pair_frame.set(last + 1);
+        self.stale_keys.borrow_mut().take();
         let mut scores = self.pair_scores.borrow_mut();
         if scores.len() >= self.pairs_kept.get() {
             let before = scores.len();
@@ -1053,11 +1057,19 @@ impl Worktree {
         let mut scores = self.pair_scores.borrow_mut();
         let frame = self.pair_frame.get();
         if scores.len() >= self.pairs_kept.get() && !scores.contains_key(&key) {
-            let Some(stale) = scores
-                .iter()
-                .find(|(_, dated)| dated.frame < frame)
-                .map(|(&stale, _)| stale)
-            else {
+            // Found once a frame, since a score only goes stale at a renew.
+            let mut stale_keys = self.stale_keys.borrow_mut();
+            let stale_keys = stale_keys.get_or_insert_with(|| {
+                scores
+                    .iter()
+                    .filter(|(_, dated)| dated.frame < frame)
+                    .map(|(&stale, _)| stale)
+                    .collect()
+            });
+            let still = |stale: &rename::PairKey| {
+                scores.get(stale).is_some_and(|dated| dated.frame < frame)
+            };
+            let Some(stale) = std::iter::from_fn(|| stale_keys.pop()).find(still) else {
                 return;
             };
             scores.remove(&stale);
@@ -2863,8 +2875,12 @@ const NO_OID: &str = "----------------------------------------------------------
 /// Bytes one status walk may compare between LFS files and their objects.
 const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 
-/// The most rename scores kept: git's whole matrix to about 360 by 360.
-const PAIRS_KEPT: usize = 131_072;
+/// The most rename scores kept: git's whole matrix to about 360 by 360. Past
+/// it a pair shows as removed and added.
+pub const PAIRS_KEPT: usize = 131_072;
+
+/// The most blob sizes kept, one per side rather than per pair.
+const SIZES_KEPT: usize = 4096;
 
 /// The most walks a frame of `files` changes takes to size every side, and
 /// to list every pair for the worker, before it goes quiet, when no score

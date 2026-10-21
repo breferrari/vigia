@@ -4,7 +4,7 @@ mod support;
 
 use std::time::{Duration, SystemTime};
 
-use support::{Scratch, changes_sorted, noise, tail_changed};
+use support::{Scratch, changes_sorted, noise, refactor_files, tail_changed};
 use vigia_core::{ChangeKind, ChangeOptions, FileChange, Frame, Origin, pair_score};
 
 /// `list` with each path borrowed.
@@ -1602,27 +1602,9 @@ fn lfs_unfetched_quiet() {
     }
 }
 
-/// `n` similar `.rs` files of about 3 KB, moved to another directory and each
-/// lightly edited, unstaged.
+/// [`refactor_files`]'s move, unstaged.
 fn refactor(name: &str, n: usize) -> Scratch {
-    let body = |k: usize| -> Vec<u8> {
-        (0..60)
-            .map(|l| format!("fn item_{k}_{l}(x: u32) -> u32 {{ x + {l} }} // module {k}\n"))
-            .collect::<String>()
-            .into_bytes()
-    };
-    let files: Vec<(String, Vec<u8>)> = (0..n)
-        .map(|k| (format!("old/m{k:04}.rs"), body(k)))
-        .collect();
-    let written: Vec<(String, Vec<u8>)> = (0..n)
-        .map(|k| {
-            let mut edited = String::from_utf8(body(k))
-                .expect("text")
-                .replacen("x + 3 ", "x + 33 ", 1);
-            edited.push_str("// moved\n");
-            (format!("new/n{k:04}.rs"), edited.into_bytes())
-        })
-        .collect();
+    let (files, written) = refactor_files(n);
     moved(name, &refs(&files), &refs(&written))
 }
 
