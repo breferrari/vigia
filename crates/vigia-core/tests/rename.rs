@@ -407,9 +407,9 @@ fn binary_rename_old_side_binary() {
 }
 
 #[test]
-fn binary_rename_limit() {
-    // 1,001 additions: past what a frame sizes, so nothing is weighed, though
-    // the 2,002 pairs are inside git's own limit.
+fn rename_limit_product() {
+    // Git's limit is removals times additions: two removals and 1,001
+    // additions are inside it, so the move is paired, as git pairs it.
     let old = noise(60, 20_000);
     let mut files = vec![("a.bin", old.clone()), ("gone.txt", b"gone\n".to_vec())];
     files.sort();
@@ -420,6 +420,28 @@ fn binary_rename_limit() {
         .collect();
     written.push(("b.bin", tail_changed(&old, 0.1)));
     let scratch = moved("rename-limit", &files, &written);
+    assert!(
+        git_unstaged(&scratch).contains(&("R a.bin".to_owned(), "b.bin".to_owned())),
+        "the fixture is wrong"
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
+}
+
+#[test]
+fn rename_limit_past() {
+    // Past 1,000 times 1,000 nothing is weighed, as git weighs nothing.
+    let files: Vec<(String, Vec<u8>)> = (0..1001)
+        .map(|n| (format!("old/{n:04}.txt"), format!("old {n}\n").into_bytes()))
+        .collect();
+    let written: Vec<(String, Vec<u8>)> = (0..1001)
+        .map(|n| (format!("new/{n:04}.txt"), format!("new {n}\n").into_bytes()))
+        .collect();
+    let scratch = moved("rename-limit-past", &refs(&files), &refs(&written));
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     assert_eq!(
@@ -427,7 +449,6 @@ fn binary_rename_limit() {
         0,
         "a walk past the limit weighed a pair"
     );
-    assert_eq!(kind_of(frame.files(), "b.bin"), &ChangeKind::Added);
 }
 
 #[test]

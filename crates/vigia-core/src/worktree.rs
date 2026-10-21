@@ -495,12 +495,10 @@ impl Worktree {
                 .collect()
         };
         let (removed, added) = (of_kind(ChangeKind::Removed), of_kind(ChangeKind::Added));
-        // Within git's limit of removals times additions, and neither side
-        // past it alone, so a frame never sizes more than 1,000 of either.
+        // Within git's limit of removals times additions.
         if removed.is_empty()
             || added.is_empty()
-            || removed.len() > rename::RENAME_LIMIT
-            || added.len() > rename::RENAME_LIMIT
+            || removed.len() * added.len() > rename::RENAME_LIMIT * rename::RENAME_LIMIT
         {
             return changes;
         }
