@@ -416,4 +416,10 @@ fn record_keeps_current_pairs() {
     }
     frame.advance().expect("advance");
     assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
+    assert_eq!(
+        frame.pair_epoch(),
+        1,
+        "the stale scores went without starting the record again, so the worker \
+         would never ask again for a dropped pair"
+    );
 }
