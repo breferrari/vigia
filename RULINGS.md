@@ -566,7 +566,7 @@ Ruled 2026-10-19, reader, relayed by the coordinator session. A pull request tha
 
 ## #638 — a decode limit in hayro-syntax
 
-Ruled 2026-10-19, reader, relayed by the coordinator session. `hayro` holds every stream it decodes whole, and a stream can decode to a thousand times its size: 1019 KiB of object stream decoded to 1 GiB inside `Pdf::new`, measured 2026-10-19, release, macOS aarch64. The ruling is a vendored `hayro-syntax` 0.8.0 with a thread-local decode limit, published with the rest of the `hayro` chain as the `vigia-hayro*` forks (ruled 2026-10-21, reader), and PDFs behind a `pdf` feature (SPEC §6), off by default until the reader turned it on on 2026-10-21 (`REVOCATIONS.md`).
+Ruled 2026-10-19, reader, relayed by the coordinator session. `hayro` holds every stream it decodes whole, and a stream can decode to a thousand times its size: 1019 KiB of object stream decoded to 1 GiB inside `Pdf::new`, measured 2026-10-19, release, macOS aarch64. The ruling is a vendored `hayro-syntax` 0.8.0 with a thread-local decode limit, published with the rest of the `hayro` chain as the `vigia-hayro*` forks (ruled 2026-10-21, reader), and PDFs behind a `pdf` feature (SPEC §6).
 
 **A parallel scanner was not kept.** The first build measured each stream before `hayro` parsed the file, with a tokenizer and `flate2`. Review found it failed open: it had to guess which streams `hayro` would decode, and an encrypted stream, the raw-deflate fallback, a comment inside a dictionary, an object stream decoded whatever its `/Type`, an inherited resource and an inline image each went past it. Every one is a decode it did not predict. The limit inside `hayro-syntax` sees every decode, because every decode goes through `Stream`.
 
