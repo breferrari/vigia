@@ -380,10 +380,12 @@ Found by readers on 2026-10-21, in a split pane, in Warp, and on an iOS asset ca
 
 | | Task | Issue |
 |---|---|---|
-| ⬜ | Scale a picture down to fit a narrow pane instead of hiding it | [#765](https://github.com/breferrari/vigia/issues/765) |
-| ⬜ | Draw small pictures at their natural size instead of filling the slot **True size, no enlargement: ruled 2026-10-21, reader** | [#766](https://github.com/breferrari/vigia/issues/766) |
-| ⬜ | Encode pictures at Retina density when the terminal reports only its window size | [#767](https://github.com/breferrari/vigia/issues/767) |
+| ✅ | Scale a picture down to fit a narrow pane instead of hiding it | [#765](https://github.com/breferrari/vigia/issues/765) |
+| ✅ | Draw small pictures at their natural size instead of filling the slot **True size, no enlargement: ruled 2026-10-21, reader** | [#766](https://github.com/breferrari/vigia/issues/766) |
+| ✅ | Encode pictures at Retina density when the terminal reports only its window size | [#767](https://github.com/breferrari/vigia/issues/767) |
 | ⬜ | Set the picture protocol and the update check in the config file, not only by environment variable | [#768](https://github.com/breferrari/vigia/issues/768) |
+| ⬜ | Keep the scrollbar thumb the same length while scrolling over pictures | [#771](https://github.com/breferrari/vigia/issues/771) |
+| ⬜ | Fall back from the file-list symbol in terminals whose fonts lack it | [#772](https://github.com/breferrari/vigia/issues/772) |
 
 ## Foundation, right after 1.2.0
 
