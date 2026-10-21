@@ -1538,3 +1538,53 @@ fn lfs_rename_unfetched() {
     frame.advance().expect("advance");
     assert_eq!(kind_of(frame.files(), "b.png"), &renamed("a.png"));
 }
+
+#[test]
+fn lfs_rename_pointer_worktree() {
+    // A file that is its own pointer, as a clone that skipped the smudge
+    // leaves it, is stored as it is, so moved it is a rename.
+    let old = noise(136, 300_000);
+    let Some(scratch) = lfs_moved("rename-lfs-pointer", &[("a.png", old)], &[]) else {
+        return;
+    };
+    let pointer = scratch.git(&["show", "HEAD:a.png"]);
+    assert!(pointer.starts_with("version https://git-lfs"), "{pointer}");
+    scratch.write("b.png", pointer);
+    assert_eq!(
+        lfs_kinds(&scratch, "b.png", ("R a.png", "b.png")),
+        (renamed("a.png"), renamed("a.png"))
+    );
+}
+
+#[test]
+fn lfs_unfetched_quiet() {
+    // Moves whose objects are not fetched are scored once and kept, so the
+    // frames go quiet rather than score them again on every walk.
+    let files: Vec<(String, Vec<u8>)> = (0..20)
+        .map(|n| (format!("old/{n:02}.png"), noise(140 + n, 1_000)))
+        .collect();
+    let written: Vec<(String, Vec<u8>)> = files
+        .iter()
+        .map(|(path, bytes)| (path.replace("old/", "new/"), bytes.clone()))
+        .collect();
+    let Some(scratch) = lfs_moved("rename-lfs-unfetched-many", &refs(&files), &refs(&written))
+    else {
+        return;
+    };
+    std::fs::rename(
+        scratch.path_of(".git/lfs/objects"),
+        scratch.path_of(".git/lfs/away"),
+    )
+    .expect("unfetch");
+    // Past the settle margin, so a wake is the rename pass's alone.
+    let scratch = scratch.settled();
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for walks in 1.. {
+        frame.advance().expect("advance");
+        if frame.settles_in(std::time::SystemTime::now()).is_none() {
+            break;
+        }
+        assert!(walks < 10, "still waking after {walks} walks");
+    }
+}

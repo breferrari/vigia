@@ -89,6 +89,10 @@ pub struct Worktree {
     lfs_wait: Cell<Option<std::time::SystemTime>>,
     /// Git's score for each pair of versions a walk weighed as a rename.
     pair_scores: RefCell<HashMap<rename::PairKey, DatedScore>>,
+    /// Whether each small worktree side under LFS is a pointer, by its stamp.
+    worktree_pointers: RefCell<HashMap<u64, bool>>,
+    /// The scores an LFS pair took without its object, by the object's path.
+    lfs_unfetched: RefCell<HashMap<rename::PairKey, PathBuf>>,
     /// Frames walked, which dates each score.
     pair_frame: Cell<u64>,
     /// Candidate bytes the current frame may still score.
@@ -148,6 +152,8 @@ impl Worktree {
             lfs_wait: Cell::new(None),
             lfs: Cell::new(lfs),
             pair_scores: RefCell::new(HashMap::new()),
+            lfs_unfetched: RefCell::new(HashMap::new()),
+            worktree_pointers: RefCell::new(HashMap::new()),
             pair_frame: Cell::new(0),
             pair_budget: Cell::new(rename::FRAME_BUDGET),
             unscored: RefCell::new(Vec::new()),
@@ -337,8 +343,9 @@ impl Worktree {
             return missed();
         };
         // Git would hash the bytes; vigia has no SHA-256.
-        let Ok(object) = self.lfs_path(oid) else {
-            return LfsScore::Unfetched(score(NO_OID));
+        let object = match self.lfs_path(oid) {
+            Ok(object) => object,
+            Err(missing) => return LfsScore::Unfetched(score(NO_OID), missing),
         };
         if size > self.lfs_budget.get() {
             return LfsScore::Worker(score(NO_OID));
@@ -624,13 +631,36 @@ impl Worktree {
                     if !meta.is_file() {
                         return None;
                     }
-                    let size = if self.lfs_cleaned(&change.path) {
+                    let lfs = self.lfs_cleaned(&change.path);
+                    let stamp = picture::path_stamp(&change.path, &meta);
+                    // A pointer in the worktree is stored as it is. Read once
+                    // per version.
+                    let pointer = lfs && meta.len() < picture::POINTER_MAX as u64 && {
+                        let known = self.worktree_pointers.borrow().get(&stamp).copied();
+                        match known {
+                            Some(pointer) => pointer,
+                            None => {
+                                if !spend(rename::READ_COST) {
+                                    return None;
+                                }
+                                let pointer = std::fs::read(self.workdir.join(&change.path))
+                                    .is_ok_and(|bytes| picture::lfs_oid(&bytes).is_some());
+                                let mut seen = self.worktree_pointers.borrow_mut();
+                                if seen.len() >= PAIRS_KEPT {
+                                    seen.clear();
+                                }
+                                seen.insert(stamp, pointer);
+                                pointer
+                            }
+                        }
+                    };
+                    let size = if lfs && !pointer {
                         lfs_sizes.borrow_mut().insert(at, meta.len());
                         picture::lfs_pointer_text(NO_OID, meta.len()).len() as u64
                     } else {
                         meta.len()
                     };
-                    Some((at, size, picture::path_stamp(&change.path, &meta)))
+                    Some((at, size, stamp))
                 }
             }
         };
@@ -782,15 +812,16 @@ impl Worktree {
                         self.pair_budget.update(|v| v - rename::PAIR_COST);
                         self.pairs_scored.update(|v| v + 1);
                         let score = match (&lfs, spans_of(pair.from), spans_of(pair.to)) {
-                            (Some(LfsScore::Scored(score) | LfsScore::Unfetched(score)), ..) => {
+                            (Some(LfsScore::Scored(score) | LfsScore::Unfetched(score, _)), ..) => {
                                 *score
                             }
                             (None, Some(old), Some(new)) => old.score(&new),
                             _ => 0,
                         };
-                        // Not kept, so the walk after a fetch compares again.
-                        if !matches!(lfs, Some(LfsScore::Unfetched(_))) {
-                            self.keep_score(pair.key, score);
+                        self.keep_score(pair.key, score);
+                        // Dropped once the object lands, so the walk after compares.
+                        if let Some(LfsScore::Unfetched(_, missing)) = lfs {
+                            self.lfs_unfetched.borrow_mut().insert(pair.key, missing);
                         }
                         score
                     }
@@ -953,6 +984,15 @@ impl Worktree {
                 self.pair_epoch.update(|v| v + 1);
             }
         }
+        // A score made without its object goes once the object lands.
+        self.lfs_unfetched.borrow_mut().retain(|key, missing| {
+            let landed = missing.is_file();
+            if landed || !scores.contains_key(key) {
+                scores.remove(key);
+                return false;
+            }
+            true
+        });
         drop(scores);
         self.pair_budget.set(rename::FRAME_BUDGET);
         self.unscored.borrow_mut().clear();
@@ -2790,8 +2830,9 @@ enum LfsScore {
     /// Past the walk's compare budget, for the worker to compare: the score
     /// when the bytes are not the object.
     Worker(u64),
-    /// The object is not fetched, so the bytes could not be compared.
-    Unfetched(u64),
+    /// The object, at the path given, is not fetched, so the bytes could not
+    /// be compared.
+    Unfetched(u64, PathBuf),
 }
 
 /// An oid no LFS object has, being no hex, for a pointer whose object is not
