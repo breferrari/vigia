@@ -947,6 +947,14 @@ impl<'w> Frame<'w> {
         self.worktree.image_sources(&self.files[index])
     }
 
+    /// The diff of the file at `index` as the last read of it left it, or
+    /// `None` for one not read yet: no read and no probe, so a caller outside
+    /// the window can count from it without breaking I4. It can lag a write.
+    pub fn cached_diff(&self, index: usize) -> Option<(&FileChange, &FileDiff)> {
+        let change = self.files.get(index)?;
+        self.cached.get(change).map(|cached| (change, &cached.diff))
+    }
+
     /// The change at `index` and its diff, computed now or reused from an
     /// earlier frame.
     /// # Panics

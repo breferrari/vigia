@@ -1602,14 +1602,13 @@ fn picture_rows(kind: &ChangeKind, diff: &FileDiff, room: Option<Room>) -> usize
     }
 }
 
-/// Picture rows the file at `index` draws under its line in `room`: none for a
-/// file whose span is not binary, which reads no diff.
-fn pictured(frame: &mut Frame, index: usize, room: Option<Room>) -> Result<usize> {
-    if room.is_none() || frame.rows_of(index, |_, span| usize::from(span.binary))? == 0 {
-        return Ok(0);
-    }
-    let (change, diff) = frame.diff(index)?;
-    Ok(picture_rows(&change.kind, diff, room))
+/// Picture rows the file at `index` draws under its line in `room`, from the
+/// diff the frame already holds: none for a file not read yet, so this reads
+/// nothing outside the window.
+fn pictured(frame: &Frame, index: usize, room: Option<Room>) -> usize {
+    frame
+        .cached_diff(index)
+        .map_or(0, |(change, diff)| picture_rows(&change.kind, diff, room))
 }
 
 /// Rows the block of the file at `index` occupies: the file's own rows and the
@@ -2388,12 +2387,17 @@ impl View {
         if !wanted || self.files == 0 {
             return Ok(());
         }
-        let current = pictured(frame, self.top.file.min(self.files - 1), room)?;
-        // The rows of the top file's pictures already scrolled past.
-        let passed = if current > 0 {
-            self.top.under.min(current)
+        let current = if self.top.file < self.files {
+            pictured(frame, self.top.file, room)
         } else {
             0
+        };
+        // The top file's picture rows already scrolled past: all of them from
+        // the blank that closes its block, else those hung under the top row.
+        let passed = if self.top.row >= self.current_span {
+            current
+        } else {
+            self.top.under.min(current)
         };
         if single {
             self.total_rows = self.current_span;
@@ -2408,19 +2412,21 @@ impl View {
         // `frame.height` has already filled the span cache, so this second walk
         // reads nothing.
         let mut above = 0usize;
-        let mut pictured_above = 0usize;
         for index in 0..self.top.file.min(self.files) {
             above += block_rows(frame, index)?;
-            pictured_above += pictured(frame, index, room)?;
         }
         // Clamped, because a position past the end would invert the bar's travel.
         self.rows_above =
             (above + self.top.row.min(self.current_span) + trimmed).min(self.total_rows);
-        let mut pictured_below = 0usize;
-        for index in self.top.file.min(self.files) + 1..self.files {
-            pictured_below += pictured(frame, index, room)?;
+        let (mut pictured_above, mut pictured_total) = (0usize, 0usize);
+        for index in 0..self.files {
+            let rows = pictured(frame, index, room);
+            pictured_total += rows;
+            if index < self.top.file {
+                pictured_above += rows;
+            }
         }
-        self.pictured_total = pictured_above + current + pictured_below;
+        self.pictured_total = pictured_total;
         self.pictured_above = pictured_above + passed;
         Ok(())
     }
