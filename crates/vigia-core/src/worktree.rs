@@ -496,6 +496,17 @@ impl Worktree {
                 .collect()
         };
         let (removed, added) = (of_kind(ChangeKind::Removed), of_kind(ChangeKind::Added));
+        // Each side's file names, counted before the budget sizes any, so a
+        // name is unique or not whatever this walk could afford.
+        let file_name = |at: usize| changes[at].path.rsplit('/').next().unwrap_or_default();
+        let counted = |side: &[usize]| {
+            let mut counts: HashMap<&str, usize> = HashMap::new();
+            for &at in side {
+                *counts.entry(file_name(at)).or_default() += 1;
+            }
+            counts
+        };
+        let (removed_names, added_names) = (counted(&removed), counted(&added));
         // Within git's limit of removals times additions.
         if removed.is_empty()
             || added.is_empty()
@@ -690,14 +701,6 @@ impl Worktree {
         });
         // Git pairs a file name held by one removal and one addition first,
         // when it clears the higher bar, and only then the best of the rest.
-        let counted = |side: &[(usize, u64, u64)]| {
-            let mut counts: HashMap<&str, usize> = HashMap::new();
-            for &(at, _, _) in side {
-                *counts.entry(name(at)).or_default() += 1;
-            }
-            counts
-        };
-        let (removed_names, added_names) = (counted(&removed), counted(&added));
         let once = |counts: &HashMap<&str, usize>, at: usize| counts.get(name(at)) == Some(&1);
         let (by_name, rest): (Vec<_>, Vec<_>) =
             scored.into_iter().partition(|&(score, from, to)| {
