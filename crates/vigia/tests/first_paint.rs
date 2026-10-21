@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 use vigia::{App, Body, Glyphs, Pointing, Row, Theme, body_layout, render};
 use vigia_core::{Highlighter, History, Standing, Worktree};
 
-use support::{Scratch, budget, exclusively_timed, highlight_delta, scheduled_budgets};
+use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_delta};
 
 /// I7: startup to first paint.
 const I7_STARTUP: Duration = Duration::from_millis(50);
@@ -180,7 +180,7 @@ fn the_shells_first_paint_holds_the_startup_budget() {
          that never highlights rather than one that defers"
     );
 
-    if !scheduled_budgets("cargo test --release -p vigia --test first_paint") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
         return;
     }
     let _timed = exclusively_timed();
@@ -267,7 +267,7 @@ fn standing_at_the_branch_point_holds_the_startup_budget() {
         );
     }
 
-    if !scheduled_budgets("cargo test --release -p vigia --test first_paint") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
         return;
     }
     let _timed = exclusively_timed();
@@ -496,7 +496,7 @@ fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
         .map(|_| picture_cold_start(&scratch, path, pane))
         .min()
         .expect("three runs");
-    if !scheduled_budgets("cargo test --release -p vigia --test first_paint") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
         return;
     }
     assert!(

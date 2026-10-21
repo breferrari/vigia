@@ -23,7 +23,7 @@ use vigia_core::{
 use support::{
     PROSE_EXT, PROSE_SPANS, Scratch, WIDE_EXT, WIDE_UNPARSED_EXT, absolute_gates_apply, budget,
     delta, exclusively_timed, generated, highlight_delta, holds_p99, holds_p99_rounds,
-    prose_generated, scheduled_budgets, settle, settle_spans, time, time_cpu, timed_cpu,
+    prose_generated, settle, settle_spans, time, time_cpu, timed_cpu,
 };
 
 /// I9: steady-state frame time.
@@ -306,7 +306,7 @@ fn the_timed_frame_draws_the_readouts_it_is_timing() {
 /// Sizing a whole burst does not measurably change the frame it sits in.
 #[test]
 fn sizing_a_whole_burst_does_not_change_the_frame_it_sits_in() {
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -388,7 +388,7 @@ fn the_memory_read_costs_a_fraction_of_the_frame_it_sits_in() {
     // on it: `SPEC.md` §5.1 ships this cell precisely because the read is a syscall on
     // all three tier-1 targets rather than the process spawn `soak.rs` uses, which is
     // 42.8ms median on Windows against this 16ms budget.
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -556,7 +556,7 @@ fn frame_budget_on(
         assert_eq!(view.top.file, 0, "the scroll crossed into another file");
     }
 
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
 
@@ -723,7 +723,7 @@ fn ticking_over_an_undrawn_worktree_holds_the_frame_budget() {
     let height = body(&app, FILES);
     let screen = layout(&app, FILES);
 
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
 
@@ -818,7 +818,7 @@ fn what_a_bulk_rewrite_of_undrawn_files_costs() {
     let height = body(&app, FILES);
     let screen = layout(&app, FILES);
 
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
 
@@ -1000,7 +1000,7 @@ fn the_frame_budget_holds_through_a_bulk_rewrite() {
     let height = body(&app, FILES);
     let screen = layout(&app, FILES);
 
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
 
@@ -1423,7 +1423,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
         );
     }
 
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return None;
     }
 
@@ -1698,7 +1698,7 @@ fn prose_frame(ext: &str) -> Option<ProseRun> {
         "fixture is not {PROSE_FILES} files"
     );
 
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return None;
     }
 
@@ -2002,7 +2002,7 @@ fn a_parked_frame_holds_the_frame_budget() {
         sample(&mut history, scratch.root(), &change.path);
     }
 
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
 
@@ -2137,7 +2137,7 @@ const OVERVIEW_PANE: Rect = Rect {
 /// listed file, and no diff row was built at all.
 #[test]
 fn an_overview_frame_holds_the_frame_budget() {
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -2246,7 +2246,7 @@ const NOTED_PANE: Rect = Rect {
 /// with and without the notes, interleaved so a loaded machine moves both arms.
 #[test]
 fn a_frame_full_of_notes_holds_the_frame_budget() {
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -2396,7 +2396,7 @@ fn a_frame_full_of_notes_holds_the_frame_budget() {
 /// fifty standing still, so a loaded machine moves both arms.
 #[test]
 fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -2751,7 +2751,7 @@ fn what_the_staged_run_costs_the_frame_it_is_drawn_in() {
 /// ends, so no timed frame draws the box still.
 #[test]
 fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -2926,7 +2926,7 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
 /// is what this times.
 #[test]
 fn a_frame_whose_answers_quote_code_holds_the_frame_budget() {
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -3224,7 +3224,7 @@ fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
 /// is recorded rather than budgeted.
 #[test]
 fn arrival_holds_the_budget() {
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -3478,7 +3478,7 @@ fn pdf_stream_bound() {
     let view = app
         .view(&mut frame, &mut highlighter, &history, layout)
         .expect("view");
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -3627,7 +3627,7 @@ fn pdf_frame_read() {
         read < 1024 * 1024,
         "the first frame read {read} bytes of five 16 MiB PDFs, more than their headers"
     );
-    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
     // Each is sized on the worker, so the frame that first sees them reads
@@ -3922,7 +3922,7 @@ fn pictures_frame_at(
         "a picture was decoded on the thread that paints"
     );
 
-    if !settled || !scheduled_budgets("cargo test --release -p vigia --test budgets") {
+    if !settled || !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return (sent.get(), first);
     }
     let _timed = exclusively_timed();

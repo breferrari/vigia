@@ -4,10 +4,7 @@ mod support;
 
 use std::time::Duration;
 
-use support::{
-    Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_window, scheduled_budgets,
-    time,
-};
+use support::{Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_window, time};
 use vigia_core::{
     Class, Frame, Highlighter, INDEXED_EXTENSION, INDEXED_EXTENSIONS, WARM_BYTES, WARM_FILES,
     WARM_LEADING, WARM_PER_GRAMMAR, WARM_TOTAL, indexed_extensions,
@@ -161,7 +158,7 @@ fn warming_moves_a_grammars_compile_off_the_parse_that_follows_it() {
     // The only claim `warm` makes, and the one that has to be measured rather
     // than asserted structurally: there is no observable state to check, because
     // the compiled patterns live in `syntect`'s own `OnceCell`s.
-    if !scheduled_budgets("cargo test --release -p vigia-core --test warm") {
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
         return;
     }
     // Taken for the reason `crates/vigia/tests/budgets.rs` takes it: this binary also
@@ -564,7 +561,7 @@ const SCREENFUL: usize = 24;
 /// The frame a reader actually meets, and the one nothing gated.
 #[test]
 fn a_frame_that_meets_a_new_grammar_holds_the_frame_budget() {
-    if !scheduled_budgets("cargo test --release -p vigia-core --test warm") {
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test warm") {
         return;
     }
     let _timed = exclusively_timed();
