@@ -507,3 +507,33 @@ fn staged_count_own_budget() {
         "the count changed the frame's list"
     );
 }
+
+#[test]
+fn text_rename_basename_bar() {
+    // The same file name below git's basename bar earns no preference, so the
+    // better match elsewhere wins.
+    let lines: Vec<String> = (0..20)
+        .map(|n| format!("entry {n} with some text\n"))
+        .collect();
+    let reversed = |kept: usize| lines[..kept].iter().rev().cloned().collect::<String>();
+    let same_name = reversed(12) + &(0..8).map(|n| format!("new {n}\n")).collect::<String>();
+    let elsewhere = reversed(18) + "a\nb\n";
+    let scratch = moved(
+        "rename-basename-bar",
+        &[("d0/notes.txt", lines.concat().into_bytes())],
+        &[
+            ("d1/notes.txt", same_name.into_bytes()),
+            ("d1/other.txt", elsewhere.into_bytes()),
+        ],
+    );
+    scratch.git(&["add", "-A"]);
+    assert!(
+        git_staged(&scratch).contains(&("R d0/notes.txt".to_owned(), "d1/other.txt".to_owned())),
+        "the fixture is wrong: {:?}",
+        git_staged(&scratch)
+    );
+    assert_eq!(
+        kind_of(&staged(&scratch), "d1/other.txt"),
+        &renamed("d0/notes.txt")
+    );
+}
