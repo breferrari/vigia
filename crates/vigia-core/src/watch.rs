@@ -643,7 +643,8 @@ impl<'repo> Watcher<'repo> {
         }
         // A directory on the way to a store in the git dir: inotify watches it
         // only once it exists, so what landed in it first raised no event.
-        if within(&self.git_dir, path).is_some_and(|inside| !inside.as_os_str().is_empty())
+        let in_git = within(&self.git_dir, path).or_else(|| within(&self.common_dir, path));
+        if in_git.is_some_and(|inside| !inside.as_os_str().is_empty())
             && self.store.iter().any(|spelling| spelling.starts_with(path))
         {
             return Some((Path::new(".git"), false));
@@ -1163,18 +1164,15 @@ mod tests {
             .map_or(guard, |secs| guard.min(Duration::from_secs(secs)))
     }
 
-    /// A store inside the git dir, appearing whole in one burst: inotify
-    /// watches each new directory only after it exists, so the burst can leave
-    /// only the first directory's own event. That event ticks.
-    #[test]
-    fn store_ancestor_ticks() {
+    /// An empty repository, removed when the test ends: the directory holding
+    /// it, and its worktree.
+    fn fresh_repo(name: &str) -> (Removed, PathBuf) {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |since| since.as_nanos());
-        let base = Removed(std::env::temp_dir().join(format!(
-            "vigia-store-ancestor-{}-{stamp}",
-            std::process::id()
-        )));
+        let base = Removed(
+            std::env::temp_dir().join(format!("vigia-{name}-{}-{stamp}", std::process::id())),
+        );
         let tree = base.0.join("tree");
         std::fs::create_dir_all(&tree).expect("tree");
         let out = std::process::Command::new("git")
@@ -1184,6 +1182,15 @@ mod tests {
             .output()
             .expect("run git");
         assert!(out.status.success(), "git init");
+        (base, tree)
+    }
+
+    /// A store inside the git dir, appearing whole in one burst: inotify
+    /// watches each new directory only after it exists, so the burst can leave
+    /// only the first directory's own event. That event ticks.
+    #[test]
+    fn store_ancestor_ticks() {
+        let (_base, tree) = fresh_repo("store-ancestor");
         let repo = gix::open(&tree).expect("open");
         let mut watcher = watch_with(&tree, &repo, |backend, path, mode| {
             backend.watch(path, mode)
@@ -1206,30 +1213,19 @@ mod tests {
             !elsewhere.relevant,
             "a directory off the store's path ticked"
         );
+        let tmp = watcher
+            .accept(created(git.join("lfs").join("tmp")))
+            .expect("not a stop");
+        assert!(!tmp.relevant, "the store's download directory ticked");
         let itself = watcher.accept(created(git)).expect("not a stop");
         assert!(!itself.relevant, "the git dir's own event ticked");
     }
 
-    /// The same burst in the worktree: `a/b/c/f` written before any of its
-    /// directories is watched leaves only `a`'s event, which ticks, and the
-    /// walk the tick brings finds the file.
+    /// The same burst in the worktree, which already holds: `a`'s event alone
+    /// ticks, and a status walk finds `a/b/c/f` with no event of its own.
     #[test]
     fn worktree_burst_found() {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos());
-        let base = Removed(
-            std::env::temp_dir().join(format!("vigia-tree-burst-{}-{stamp}", std::process::id())),
-        );
-        let tree = base.0.join("tree");
-        std::fs::create_dir_all(&tree).expect("tree");
-        let out = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&tree)
-            .args(["init", "-q"])
-            .output()
-            .expect("run git");
-        assert!(out.status.success(), "git init");
+        let (_base, tree) = fresh_repo("tree-burst");
         let repo = gix::open(&tree).expect("open");
         let mut watcher = watch_with(&tree, &repo, |backend, path, mode| {
             backend.watch(path, mode)
