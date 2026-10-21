@@ -52,6 +52,8 @@ Every pull request carries one of two labels before it merges: `release` or `int
 
 What you control is the line a user reads. Put `Release-note: <one sentence>` in the Release note section of the pull request description, or in a commit message body on your branch, and that sentence becomes the changelog line instead of your title. Put `Release-note: none` when the change is internal. Write the sentence for someone who has never opened this repository: name what changed for them, not the rule behind it. If you write nothing, the title of a `release` pull request becomes the line, so make the title readable on its own.
 
+When a change makes an earlier pull request's line wrong, add `Release-note-replaces: #<n>` beside your own note, one per pull request, and that line leaves the release's notes. A maintainer can open a release's notes with a short summary by adding `.github/release-summary.md` before the release; the release commit removes it.
+
 The release reads the commit message first and the pull request description second, so a line in a commit wins. The CI check on wording, described below, reads commits only.
 
 Start the title of an `internal` pull request with a prefix that says what kind of work it is: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:`, or `chore:` for anything else. A `release` pull request starts with `fix:` for a defect or `feat:` for a new feature. Its title can become the changelog line, prefix included. The prefix is for people reading the log and the changelog. The label is what the release reads.

@@ -2206,6 +2206,17 @@ fn the_bump_writes_the_changelog_it_publishes() {
          release: {step}"
     );
     assert!(
+        step.contains("grep '^Release-note-replaces:'"),
+        "bump.yml's changelog step does not pass Release-note-replaces lines, so a \
+         retired note still ships: {step}"
+    );
+    assert!(
+        step_block(&bump, "commit the bump")
+            .contains("git rm -q --ignore-unmatch .github/release-summary.md"),
+        "the release commit leaves the summary behind, so the next release opens \
+         with this one's"
+    );
+    assert!(
         bump.contains("fetch-depth: 0"),
         "bump.yml checks out without `fetch-depth: 0`, so it holds no tags and \
          the range the notes are written from cannot reach the previous release"
@@ -2394,7 +2405,9 @@ fn note_wins() {
 #[test]
 fn note_replaces() {
     let records = "#40\trelease\tRelease-note: PDFs draw in every build\n\
-                   #40\trelease\tRelease-note-replaces: #41, #42\n\
+                   #40\trelease\tRelease-note-replaces: #41\n\
+                   #40\trelease\tRelease-note-replaces: #42, #44\n\
+                   #44\trelease\tRelease-note: Another old line\n\
                    #41\trelease\tRelease-note: PDFs draw with a feature\n\
                    #42\trelease\tA build without PDFs shows them as binary (#42)\n\
                    #43\trelease\tRelease-note: A key moves\n";
@@ -2406,7 +2419,9 @@ fn note_replaces() {
         "the replaced entries were not dropped, or a kept one was:\n{left}"
     );
     assert!(
-        said.contains("replaced by #40: #41") && said.contains("replaced by #40: #42"),
+        said.contains("replaced by #40: #41")
+            && said.contains("replaced by #40: #42")
+            && said.contains("replaced by #40: #44"),
         "the log does not name what was replaced:\n{said}"
     );
 
