@@ -29,21 +29,29 @@
 #                           guess: the old subject list let factory work
 #                           through whenever its wording was ordinary.
 #   both labels             fail.
+#   Release-note-replaces: #<n>
+#                           drops pull request #<n>'s entries from the section,
+#                           for a later change that makes its note wrong. A
+#                           number with no record in the range fails.
 #
 # A range that keeps nothing exits 1, so the bump stops before a version is
 # cut. Every failure in the range is named before the exit, so one run shows
 # every PR that needs a label.
 #
-# Usage: changelog-entry.sh <version> <date> [changelog]
+# Usage: changelog-entry.sh <version> <date> [changelog] [summary]
 #   version   the version being released, three numeric components
 #   date      ISO date for the heading
 #   changelog the file to write into (default: ./CHANGELOG.md)
+#   summary   prose to open the section with, when the file exists
+#             (default: ./.github/release-summary.md). The release commit
+#             removes it. Present and empty fails.
 set -eu
 
-[ "$#" -ge 2 ] || { echo "::error::usage: changelog-entry.sh <version> <date> [changelog]"; exit 1; }
+[ "$#" -ge 2 ] || { echo "::error::usage: changelog-entry.sh <version> <date> [changelog] [summary]"; exit 1; }
 version="$1"
 date="$2"
 changelog="${3:-CHANGELOG.md}"
+summary="${4:-.github/release-summary.md}"
 
 case "$version" in
     [0-9]*.[0-9]*.[0-9]*) ;;
@@ -51,6 +59,11 @@ case "$version" in
 esac
 
 [ -f "$changelog" ] || { echo "::error::${changelog} does not exist"; exit 1; }
+
+if [ -f "$summary" ] && ! grep -q '[^[:space:]]' "$summary"; then
+    echo "::error::${summary} is empty; write the summary or remove the file"
+    exit 1
+fi
 
 # A section for this version already existing means the release is being
 # re-run, or that somebody wrote it by hand. Either way, overwriting it would
@@ -73,11 +86,46 @@ noted=$(printf '%s\n' "$records" | awk -F '\t' '
     }
 ')
 
+# The pull requests a later one's `Release-note-replaces:` drops, each as
+# `#<n>=<who replaced it>`.
+replaced=$(printf '%s\n' "$records" | awk -F '\t' '
+    NF == 3 && $3 ~ /^Release-note-replaces:/ {
+        list = $3
+        sub(/^Release-note-replaces:[ \t]*/, "", list)
+        n = split(list, numbers, /[ \t,]+/)
+        for (i = 1; i <= n; i++) if (numbers[i] != "") printf ",%s=%s", numbers[i], $1
+    }
+')
+# Every pull request the range names.
+named=$(printf '%s\n' "$records" | awk -F '\t' 'NF == 3 { printf ",%s", $1 }')
+
+unknown=0
+# Split on spaces, and never expand a token against the working tree.
+set -f
+for pair in $(printf '%s' "$replaced" | tr ',' ' '); do
+    gone=${pair%%=*}
+    by=${pair#*=}
+    case "$gone" in
+        \#[0-9]*) ;;
+        *) echo "::error::${by} replaces ${gone}, which is not a pull request number"; unknown=1; continue ;;
+    esac
+    if [ "$gone" = "$by" ]; then
+        echo "::error::${by} replaces itself"
+        unknown=1
+        continue
+    fi
+    case "${named}," in
+        *",${gone},"*) ;;
+        *) echo "::error::${by} replaces ${gone}, which has no record in this range"; unknown=1 ;;
+    esac
+done
+set +f
+
 # One pass decides every record. Kept lines go to stdout prefixed `keep:`, and
 # everything else is a workflow annotation. The trailing `(#n)` references are
 # peeled here, one at a time, because a merge subject carries the issue's
 # number and the pull request's, and sometimes two issues'.
-decided=$(printf '%s\n' "$records" | awk -v noted="$noted," '
+decided=$(printf '%s\n' "$records" | awk -v noted="$noted," -v replaced="$replaced," '
     BEGIN { FS = "\t"; bad = 0 }
     function strip(s) {
         while (match(s, /[ \t]*\(#[0-9]+(,[ \t]*#[0-9]+)*\)[ \t]*$/)) s = substr(s, 1, RSTART - 1)
@@ -90,8 +138,16 @@ decided=$(printf '%s\n' "$records" | awk -v noted="$noted," '
         bad = 1
         next
     }
+    $3 ~ /^Release-note-replaces:/ { next }
     {
         who = $1; labels = "," $2 ","; text = $3
+        at = index(replaced, "," who "=")
+        if (at) {
+            by = substr(replaced, at + length(who) + 2)
+            sub(/,.*/, "", by)
+            print "::notice::replaced by " by ": " who
+            next
+        }
         release = index(labels, ",release,") > 0
         internal = index(labels, ",internal,") > 0
         if (release && internal) {
@@ -150,6 +206,10 @@ decided=$(printf '%s\n' "$records" | awk -v noted="$noted," '
 
 printf '%s\n' "$decided" | grep -v '^keep:' | grep -v '^$' || true
 
+if [ "$unknown" -ne 0 ]; then
+    echo "::error::fix each Release-note-replaces line named above"
+    exit 1
+fi
 if [ "$failed" -ne 0 ]; then
     echo "::error::label every pull request in the range release or internal, and put Release-note: none only on internal ones"
     exit 1
@@ -183,10 +243,22 @@ lines="${changelog}.entries"
 printf '%s\n' "$entries" > "$lines"
 
 inserted="${changelog}.inserted"
-awk -v heading="## [${version}] - ${date}" -v lines="$lines" '
+[ -f "$summary" ] || summary=""
+awk -v heading="## [${version}] - ${date}" -v lines="$lines" -v summary="$summary" '
     function emit() {
         print heading
         print ""
+        if (summary != "") {
+            # Its own trailing blank lines dropped, so one blank line follows.
+            blanks = 0
+            while ((getline line < summary) > 0) {
+                if (line ~ /^[ \t]*$/) { blanks++; continue }
+                for (; blanks > 0; blanks--) print ""
+                print line
+            }
+            close(summary)
+            print ""
+        }
         while ((getline entry < lines) > 0) print entry
         close(lines)
     }

@@ -407,6 +407,20 @@ pub fn absolute_gates_apply(how: &str) -> bool {
     }
 }
 
+/// Whether an absolute budget (a frame against a fixed number of
+/// milliseconds) is judged here: in a release build of the scheduled budget
+/// run, which sets `VIGIA_SCHEDULED_BUDGETS=1`. On a pull request the work it
+/// times still runs and its counts are still checked.
+pub fn scheduled_budgets(how: &str) -> bool {
+    let scheduled = std::env::var_os("VIGIA_SCHEDULED_BUDGETS").is_some_and(|v| v == "1");
+    if !scheduled {
+        eprintln!(
+            "note: absolute budgets are judged by the scheduled run; run `VIGIA_SCHEDULED_BUDGETS=1 {how}`"
+        );
+    }
+    scheduled && absolute_gates_apply(how)
+}
+
 /// Held for the timed region of an absolute gate, so two never overlap.
 static TIMED: Mutex<()> = Mutex::new(());
 

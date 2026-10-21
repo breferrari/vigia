@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use support::{
     COARSE_TICK, FLOOR_TICKS, Scratch, absolute_gates_apply, budget, delta, highlight_delta,
-    highlight_window, holds_p99, holds_p99_rounds, holds_p99_ticked, materialise, settle, time,
-    time_cpu, timed_cpu,
+    highlight_window, holds_p99, holds_p99_rounds, holds_p99_ticked, materialise,
+    scheduled_budgets, settle, time, time_cpu, timed_cpu,
 };
 use vigia_core::{
     ChangeKind, ChangeOptions, FileChange, Frame, FrameStats, HighlightStats, Highlighter,
@@ -341,7 +341,7 @@ fn absolute_budgets_hold_on_a_100k_line_diff() {
         "fixture is only {lines} changed lines, so it does not exercise the I4 budget"
     );
 
-    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia-core --test budgets") {
         return;
     }
 
@@ -419,7 +419,7 @@ fn a_real_frame_holds_the_frame_budget() {
     settle(&mut frame);
     assert_eq!(frame.files().len(), FILES, "fixture is not {FILES} files");
 
-    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia-core --test budgets") {
         return;
     }
 
@@ -1300,7 +1300,7 @@ fn lfs_compare_frame() {
     // Every sample is checked, so the gate measures the compare it names.
     cold(&compared, 1);
     cold(&plain, 0);
-    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia-core --test budgets") {
         return;
     }
     let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
@@ -1361,7 +1361,7 @@ fn rename_frame_score() {
     };
     cold(&moved, true);
     cold(&plain, false);
-    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia-core --test budgets") {
         return;
     }
     let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
@@ -1453,7 +1453,7 @@ fn rename_frame_many_small() {
     };
     cold(&moved, true);
     cold(&plain, false);
-    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia-core --test budgets") {
         return;
     }
     let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
@@ -1500,6 +1500,7 @@ fn refactor_repo(name: &str, moved: bool) -> Scratch {
 /// I9 over each frame of a hundred-file move until every pair is scored, by
 /// its slowest frame, against the same files where nothing moved.
 #[test]
+#[ignore = "scheduled budget"]
 fn rename_frame_refactor() {
     let moved = refactor_repo("budget-rename-refactor", true);
     let plain = refactor_repo("budget-rename-refactor-plain", false);
@@ -1525,7 +1526,7 @@ fn rename_frame_refactor() {
     };
     cold(&moved);
     cold(&plain);
-    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia-core --test budgets") {
         return;
     }
     let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
@@ -1601,7 +1602,7 @@ fn fenced_markdown_budget() {
     redraw(&mut frame, &mut highlighter, "notes.md");
     redraw(&mut frame, &mut highlighter, "notes.txt");
 
-    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia-core --test budgets") {
         return;
     }
     let (mut fence, mut control) = (Samples::new(FENCE_FRAMES), Samples::new(FENCE_FRAMES));
