@@ -1841,6 +1841,14 @@ impl Worktree {
     fn diff_attribute(&self, change: &FileChange) -> Result<Option<bool>> {
         use crate::filter::Diff;
         let (diff, cleaned) = self.with_filter(|filter| filter.diff_attribute(&change.path))?;
+        // Git reads each side at its own path, so a source that unsets `diff`
+        // makes a rename binary whatever its destination says.
+        if let Some(source) = change.kind.source() {
+            let (from, _) = self.with_filter(|filter| filter.diff_attribute(source))?;
+            if from == Some(Diff::Unset) {
+                return Ok(Some(false));
+            }
+        }
         // A stored pointer against the content it stands for does not diff. Git
         // runs no clean filter on a symlink.
         let pointer = change.before.is_some() && change.after == Some(Side::Worktree);
