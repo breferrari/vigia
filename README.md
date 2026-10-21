@@ -30,7 +30,7 @@ It shows the working-tree diff live, as the agent writes it. Click a line, type 
 |---|---|
 | 🤖 **For the pane beside the agent** | Zero input. It follows the newest change and scrolls to it on its own |
 | ✍️ **Talk back to a line** | Click a line number, type, `Enter`. Your agent gets the file, the line and your words |
-| 🖼️ **Pictures, not bytes** | A changed image, SVG or PDF shows its old and new pictures side by side (from 1.2.0, unreleased) |
+| 🖼️ **Pictures, not bytes** | A changed image, SVG or PDF shows its old and new pictures side by side |
 | 🕰️ **Look back without leaving** | `B` stands the pane anywhere in the branch's history, and back |
 | 🪶 **Cheap enough to leave open for a week** | Zero wakeups while idle. Under 5% memory drift over 24 hours |
 | 📐 **Fits half a laptop screen** | Legible at 40 columns, because that is the actual pane you have |
@@ -147,7 +147,7 @@ From source, with a Rust toolchain: `cargo install vigia`.
 
 Each row answers one question: the caret says where you are, the pulse `●` which file was written last, the note mark whose turn it is, the heat strip **where** in the file the change is, the sparkline **when** it changed, and the counters **how much**. The diff is syntax highlighted, and the words that changed inside a line are lit brighter than the line around them.
 
-**A changed picture shows as pictures** (from 1.2.0, unreleased). A changed image, SVG or PDF draws its old and new versions side by side, with the changed pixels marked. Terminals that draw Kitty graphics, Sixel or iTerm2 images (kitty, Ghostty, iTerm2, WezTerm, foot, Windows Terminal) draw them sharp. Everywhere else they draw in half-blocks, which need 24-bit colour.
+**A changed picture shows as pictures**. A changed image, SVG or PDF draws its old and new versions side by side, with the changed pixels marked. Terminals that draw Kitty graphics, Sixel or iTerm2 images (kitty, Ghostty, iTerm2, WezTerm, foot, Windows Terminal) draw them sharp. Everywhere else they draw in half-blocks, which need 24-bit colour.
 
 [**Reading the pane**](https://github.com/breferrari/vigia/blob/main/docs/READING.md) explains every signal, how a file finds its language, and what the pane never selects.
 
@@ -204,7 +204,7 @@ It is read every time the pane starts. [**Theme**](https://github.com/breferrari
 
 **Settings** (staged changes, wrapping, the note rows, what the pane opens as) live in `~/.config/vigia/config`. Press `m` in the pane to switch them, and with `persist` on your choices are written back to that file.
 
-For a single run, `VIGIA_THEME` and `NO_COLOR` still work, and so do `VIGIA_PICTURES` for how pictures are drawn (from 1.2.0, unreleased) and `VIGIA_UPDATE=off` for the update check. [**Configuration**](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) covers them.
+For a single run, `VIGIA_THEME` and `NO_COLOR` still work, and so do `VIGIA_PICTURES` for how pictures are drawn and `VIGIA_UPDATE=off` for the update check. [**Configuration**](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) covers them.
 
 ---
 
@@ -233,11 +233,11 @@ These pages track `main`. For a released version, browse its tag.
 
 **Does it go online?** Once per start, to ask crates.io whether a newer release exists. `VIGIA_UPDATE=off` turns that off. Nothing else leaves the machine.
 
-**Does it need git-lfs?** No. The pane never starts `git-lfs`, and it reads an LFS image from the local LFS store (from 1.2.0, unreleased).
+**Does it need git-lfs?** No. The pane never starts `git-lfs`, and it reads an LFS image from the local LFS store.
 
-**Does it work on Windows?** Yes. Use the PowerShell installer above. Windows Terminal 1.22 and later draws pictures sharp (from 1.2.0, unreleased).
+**Does it work on Windows?** Yes. Use the PowerShell installer above. Windows Terminal 1.22 and later draws pictures sharp.
 
-**Which terminals draw sharp pictures?** (from 1.2.0, unreleased)
+**Which terminals draw sharp pictures?**
 
 | Pictures | Terminals |
 |---|---|

@@ -10,15 +10,15 @@
 | [tachyonfx](https://github.com/ratatui/tachyonfx) | Effects over the drawn buffer, so a note or a message can be seen arriving |
 | [ratatui-textarea](https://github.com/ratatui/ratatui-textarea) | The note box: its text, its caret, its undo |
 | [fancy-regex](https://github.com/fancy-regex/fancy-regex) | The `hide` pattern |
-| [image](https://github.com/image-rs/image) | Reads a changed image's format and size: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, QOI and TGA (from 1.2.0, unreleased) |
-| [ratatui-image](https://github.com/ratatui/ratatui-image) | Draws a changed image's pictures, as half-blocks or a terminal image protocol (from 1.2.0, unreleased) |
-| [resvg](https://github.com/linebender/resvg) | Draws a changed SVG's pictures (from 1.2.0, unreleased) |
-| [svgtypes](https://github.com/linebender/svgtypes) | Reads an SVG's size for its size line (from 1.2.0, unreleased) |
-| [hayro](https://github.com/LaurenzV/hayro) | Draws a changed PDF's pictures (from 1.2.0, unreleased) |
-| [hayro-syntax](https://github.com/LaurenzV/hayro) | Reads a PDF's page size for its size line (from 1.2.0, unreleased) |
-| [skrifa](https://github.com/googlefonts/fontations) | Finds an installed font that can draw an SVG's text (from 1.2.0, unreleased) |
+| [image](https://github.com/image-rs/image) | Reads a changed image's format and size: PNG, JPEG, GIF, WebP, BMP, ICO, TIFF, QOI and TGA |
+| [ratatui-image](https://github.com/ratatui/ratatui-image) | Draws a changed image's pictures, as half-blocks or a terminal image protocol |
+| [resvg](https://github.com/linebender/resvg) | Draws a changed SVG's pictures |
+| [svgtypes](https://github.com/linebender/svgtypes) | Reads an SVG's size for its size line |
+| [hayro](https://github.com/LaurenzV/hayro) | Draws a changed PDF's pictures |
+| [hayro-syntax](https://github.com/LaurenzV/hayro) | Reads a PDF's page size for its size line |
+| [skrifa](https://github.com/googlefonts/fontations) | Finds an installed font that can draw an SVG's text |
 
-The last rows draw changed images (from 1.2.0, unreleased).
+The last rows draw changed images.
 
 Three of those earn their place by what they *do not* add. `fancy-regex` is already in the graph under `syntect`, so the `hide` pattern costs the binary nothing. `tachyonfx` schedules nothing, which is what keeps *no polling timer* this program's own rule to keep rather than a dependency's. `two-face` builds the grammar dump at compile time and is absent from every shipped graph.
 
