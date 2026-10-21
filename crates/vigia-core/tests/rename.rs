@@ -1221,8 +1221,15 @@ fn candidate_slot_ties() {
     let y = [&p[..], &u].concat();
     let equal = [&u[..], &p[..600], &v[..1_800]].concat();
     let lower = [&u[..], &p[..480], &v].concat();
-    for (case, first, paired) in [("equal", equal.clone(), "s1"), ("lower", lower, "s5")] {
-        let removals: Vec<(String, Vec<u8>)> = [("s1.bin".to_owned(), first)]
+    // A removal of the same name too small to score holds the first slot at
+    // 0, and s5 takes it.
+    let tiny = noise(114, 100);
+    for (case, first, paired) in [
+        ("equal", ("s1.bin", equal.clone()), "s1.bin"),
+        ("lower", ("s1.bin", lower), "s5.bin"),
+        ("named", ("a/y.bin", tiny), "s5.bin"),
+    ] {
+        let removals: Vec<(String, Vec<u8>)> = [(first.0.to_owned(), first.1)]
             .into_iter()
             .chain((2..=5).map(|n| (format!("s{n}.bin"), equal.clone())))
             .collect();
@@ -1231,7 +1238,7 @@ fn candidate_slot_ties() {
             &refs(&removals),
             &[("y.bin", y.clone())],
         );
-        let want = (format!("R {paired}.bin"), "y.bin".to_owned());
+        let want = (format!("R {paired}"), "y.bin".to_owned());
         let git = git_unstaged(&scratch);
         assert!(git.contains(&want), "{case}: the fixture is wrong: {git:?}");
         let worktree = scratch.worktree();
@@ -1239,10 +1246,6 @@ fn candidate_slot_ties() {
         for _ in 0..4 {
             frame.advance().expect("advance");
         }
-        assert_eq!(
-            kind_of(frame.files(), "y.bin"),
-            &renamed(&format!("{paired}.bin")),
-            "{case}"
-        );
+        assert_eq!(kind_of(frame.files(), "y.bin"), &renamed(paired), "{case}");
     }
 }
