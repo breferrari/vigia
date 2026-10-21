@@ -318,6 +318,10 @@ fn full_record_makes_room() {
         Some(Duration::ZERO),
         "the pair waits for room and no frame comes to make it"
     );
+    assert!(
+        frame.pairs_unlisted(),
+        "the worker's next answer would not walk again"
+    );
     // A frame later the fillers are stale, and the pair is asked for again.
     frame.advance().expect("advance");
     assert_eq!(frame.pair_epoch(), 1);
@@ -332,6 +336,11 @@ fn full_record_makes_room() {
     }
     frame.advance().expect("advance");
     assert_eq!(frame.pair_epoch(), 1);
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "no pair waits for room, and a frame was asked for"
+    );
     frame.learn_pair((u64::MAX, u64::MAX), 0);
     assert_eq!(
         frame.pair_epoch(),
