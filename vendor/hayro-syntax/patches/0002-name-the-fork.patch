@@ -1,5 +1,5 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index 1d6bc95..e7066ae 100644
+index 1d6bc95..57db85b 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -12,7 +12,7 @@
@@ -19,14 +19,13 @@ index 1d6bc95..e7066ae 100644
 +description = "hayro-syntax 0.8.0 with the patches vigia ships, until upstream releases them. Use hayro-syntax instead."
 +documentation = "https://docs.rs/vigia-hayro-syntax"
  readme = "README.md"
--license = "Apache-2.0 OR MIT"
--repository = "https://github.com/LaurenzV/hayro"
 +exclude = [
 +    "/Cargo.toml.orig",
 +    "/PATCHES.md",
 +    "/patches/*",
 +]
-+license = "MIT"
+ license = "Apache-2.0 OR MIT"
+-repository = "https://github.com/LaurenzV/hayro"
 +repository = "https://github.com/breferrari/vigia"
  resolver = "2"
  

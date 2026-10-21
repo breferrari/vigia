@@ -1,3 +1,4 @@
+// Changed for vigia-hayro-syntax, which grows its output within the decode limit in `crate::limit`. See PATCHES.md.
 // Keep in sync with `hayro-postscript/src/string/ascii_85.rs`.
 
 use crate::reader::Reader;

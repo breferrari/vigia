@@ -1,3 +1,4 @@
+// Changed for vigia-hayro-syntax, which grows its output within the decode limit in `crate::limit`, and never allocates a predictor row longer than its data. See PATCHES.md.
 use crate::bit_reader::{BitChunk, BitChunks, BitReader, BitWriter, bit_mask};
 use crate::filter::png::{self, BytesPerPixel, RowFilter};
 use crate::object::Dict;

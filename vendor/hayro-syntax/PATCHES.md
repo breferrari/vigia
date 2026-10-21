@@ -32,15 +32,19 @@ The budget is checked where each decode produces its output:
 
 ## `0002-name-the-fork.patch`
 
-The manifest only: the package is named `vigia-hayro-syntax`, its `license` is `MIT` (see Licence), with a description that points at upstream, docs.rs and repository links for the fork, and `Cargo.toml.orig`, `PATCHES.md` and `patches/` left out of the package. The library is still named `hayro_syntax`.
+The manifest only: the package is named `vigia-hayro-syntax`, with a description that points at upstream, docs.rs and repository links for the fork, and `Cargo.toml.orig`, `PATCHES.md` and `patches/` left out of the package. The library is still named `hayro_syntax`.
 
 ## `0003-fork-notice.patch`
 
 `README.md`, which crates.io shows as the fork's page: a notice at the top that this is a fork kept for vigia, not affiliated with or endorsed by hayro or its author, with a link to upstream and a line saying to use hayro-syntax instead. Upstream's badges are removed. Upstream's text follows unchanged.
 
+## `0004-change-notices.patch`
+
+A one-line comment at the top of every file `0001` changes, and of `src/limit.rs`, which it adds, saying the file was changed or added for this fork. It is kept apart from `0001`, so `0001` stays the change that would go upstream.
+
 ## Licence
 
-Upstream is MIT OR Apache-2.0. This fork changes its code and is published under the MIT terms alone, with upstream's copyright and both licence files kept, so `license` in its manifest is `MIT`.
+Upstream is MIT OR Apache-2.0, and so is this fork. Upstream's copyright and both licence files are kept, and every file the fork changes carries a notice saying so (`0004`), as Apache-2.0 §4(b) asks.
 
 ## Left out
 

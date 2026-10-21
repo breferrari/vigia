@@ -1,3 +1,4 @@
+// Changed for vigia-hayro-syntax, which checks an image against the decode limit in `crate::limit` before decoding it. See PATCHES.md.
 use crate::bit_reader::BitWriter;
 use crate::filter::FilterResult;
 use crate::math::round_f32;

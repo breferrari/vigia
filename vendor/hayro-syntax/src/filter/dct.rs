@@ -1,3 +1,4 @@
+// Changed for vigia-hayro-syntax, which checks an image against the decode limit in `crate::limit` before decoding it. See PATCHES.md.
 use crate::object::Dict;
 use crate::object::dict::keys::COLOR_TRANSFORM;
 use crate::object::stream::{FilterResult, ImageColorSpace, ImageData, ImageDecodeParams};

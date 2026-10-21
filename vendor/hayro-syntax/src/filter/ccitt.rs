@@ -1,3 +1,4 @@
+// Changed for vigia-hayro-syntax, which checks an image against the decode limit in `crate::limit` before decoding it. See PATCHES.md.
 use crate::object::Dict;
 use crate::object::dict::keys::{
     BLACK_IS_1, COLUMNS, ENCODED_BYTE_ALIGN, END_OF_BLOCK, END_OF_LINE, K, ROWS,

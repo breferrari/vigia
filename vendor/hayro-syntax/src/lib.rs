@@ -1,3 +1,4 @@
+// Changed for vigia-hayro-syntax, which exports the decode limit in `limit`. See PATCHES.md.
 /*!
 A low-level library for reading PDF files.
 

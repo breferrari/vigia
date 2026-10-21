@@ -1,3 +1,4 @@
+// Changed for vigia-hayro-syntax, which makes `lzw_flate` visible in the crate, for the decode limit's tests. See PATCHES.md.
 //! Results from decoding filtered data streams.
 
 mod ascii_85;

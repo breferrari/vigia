@@ -1,3 +1,4 @@
+// Changed for vigia-hayro-syntax, which counts every decoded filter output against the decode limit in `crate::limit`. See PATCHES.md.
 //! Streams.
 
 use crate::crypto::DecryptionTarget;

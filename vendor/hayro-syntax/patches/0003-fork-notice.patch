@@ -1,5 +1,5 @@
 diff --git a/README.md b/README.md
-index 91f0f67..2f9a217 100644
+index 91f0f67..64e6f96 100644
 --- a/README.md
 +++ b/README.md
 @@ -1,7 +1,14 @@
@@ -12,7 +12,7 @@ index 91f0f67..2f9a217 100644
  
 -[![Crates.io](https://img.shields.io/crates/v/hayro-syntax.svg)](https://crates.io/crates/hayro-syntax)
 -[![Documentation](https://docs.rs/hayro-syntax/badge.svg)](https://docs.rs/hayro-syntax)
-+hayro-syntax is licensed under Apache-2.0 or MIT; this fork changes its code and is published under MIT. Both licence files are kept, as upstream's notice requires. Upstream's README follows, without its badges, which describe upstream's crate.
++hayro-syntax is licensed under Apache-2.0 or MIT, and so is this fork. Each file it changes says so at the top. Upstream's README follows, without its badges, which describe upstream's crate.
 +
 +---
 +

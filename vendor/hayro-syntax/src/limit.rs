@@ -1,3 +1,4 @@
+// Added for vigia-hayro-syntax. See PATCHES.md.
 //! A limit on how many bytes stream decoding may produce on one thread.
 //!
 //! Decoding holds each stream's output whole, and a small file can name a

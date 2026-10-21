@@ -1,3 +1,4 @@
+// Changed for vigia-hayro-syntax, which grows its output within the decode limit in `crate::limit`. See PATCHES.md.
 use crate::reader::Reader;
 use alloc::vec;
 use alloc::vec::Vec;
