@@ -292,22 +292,43 @@ fn binary_rename_limit() {
 
 #[test]
 fn full_record_makes_room() {
-    let scratch = moved("rename-epoch", &[("a.txt", b"a\n".to_vec())], &[]);
+    let old = noise(82, 200_000);
+    let scratch = moved(
+        "rename-room",
+        &[("a.bin", old.clone())],
+        &[("b.bin", tail_changed(&old, 0.1))],
+    );
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    for n in 0..4097u64 {
-        frame.learn_pair((n, n), 0);
-    }
-    assert_eq!(
-        frame.pair_epoch(),
-        0,
-        "a score past a record of current ones evicted one"
-    );
     frame.advance().expect("advance");
-    frame.learn_pair((u64::MAX, 0), 0);
+    // Past the frame's budget, the pair waits for the worker.
+    let key = frame.unscored_pairs().first().expect("listed").key;
+    for n in 0..4096u64 {
+        frame.learn_pair((u64::MAX - n, n), 0);
+    }
+    // The record is full of scores filed this frame, so a.bin's has no room.
+    frame.learn_pair(key, 60_000);
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "b.bin"), &ChangeKind::Added);
+    assert_eq!(frame.pair_epoch(), 0, "a current score was evicted");
+    // A frame later the fillers are stale, and the pair is asked for again.
+    frame.advance().expect("advance");
+    assert_eq!(frame.pair_epoch(), 1);
+    let listed: Vec<_> = frame.unscored_pairs().iter().map(|c| c.key).collect();
+    assert_eq!(listed, [key]);
+    frame.learn_pair(key, 60_000);
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
+    // Full again, of scores a frame older than the walk, one makes room.
+    for n in 0..4095u64 {
+        frame.learn_pair((n, u64::MAX - n), 0);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(frame.pair_epoch(), 1);
+    frame.learn_pair((u64::MAX, u64::MAX), 0);
     assert_eq!(
         frame.pair_epoch(),
-        1,
+        2,
         "a score past a record of stale ones did not take one's place"
     );
 }
