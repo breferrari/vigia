@@ -420,6 +420,7 @@ Milestone: [Phase 11](https://github.com/breferrari/vigia/milestone/12). Ships i
 | ⬜ | Stop syntect recompiling a fence's closing regex on every search **Ruled 2026-10-20, reader: vendored patch plus upstream; the build is Phase 11's** | [#264](https://github.com/breferrari/vigia/issues/264) |
 | ⬜ | Measure an @ guard on Markdown's email auto-link pattern | [#265](https://github.com/breferrari/vigia/issues/265) |
 | ⬜ | Keep an edit above a long fence off the paint | [#729](https://github.com/breferrari/vigia/issues/729) |
+| ⬜ | Rename candidate matrix per walk | [#736](https://github.com/breferrari/vigia/issues/736) |
 
 ## Phase 12 — correct at the edges
 
@@ -439,6 +440,7 @@ Milestone: [Phase 12](https://github.com/breferrari/vigia/milestone/13). Ships i
 | ⬜ | Cap wrapped breaks the same way in the short check and the layout | [#661](https://github.com/breferrari/vigia/issues/661) |
 | ⬜ | Wake the staged count until every staged side is weighed **Found by review on #675** | [#686](https://github.com/breferrari/vigia/issues/686) |
 | ⬜ | Weigh pending rename sides without a fresh status walk **Found by review on #675** | [#687](https://github.com/breferrari/vigia/issues/687) |
+| ✅ | Text renames by git's rule | [#734](https://github.com/breferrari/vigia/issues/734) |
 
 ## Phase 13 — testable by construction
 
@@ -695,6 +697,7 @@ Items that moved into an *earlier* phase than planned. Recorded for the same rea
 
 | Item | Moved | Why |
 |---|---|---|
+| Text renames by git's rule ([#734](https://github.com/breferrari/vigia/issues/734)) | Ahead of Phase 12, 2026-10-21 | The git oracle ([#681](https://github.com/breferrari/vigia/issues/681)) found text renames git pairs and vigia did not, and it could not land strict until they matched |
 | A wall-clock bound on the rename listing test ([#727](https://github.com/breferrari/vigia/issues/727)) | Ahead of Phase 13, 2026-10-21 | It failed unrelated pull requests at random, three in one hour on 2026-10-20, so every pass paid for it. A diagnostic showed the scorer converging slowly on a loaded runner, not a walk re-arming, so the fix was a bound derived from the scorer's constants rather than a longer clock |
 | `notify` named as a dependency in `SPEC.md` §6 | Into Phase 1 | I1 requires filesystem events rather than a timer, so the choice had to be made before the shell. The same pass verified that it is C-toolchain-free on all three tier-1 targets |
 | Terminal restoration implemented with the shell, ahead of I8 | Into [#9](https://github.com/breferrari/vigia/issues/9) | Not scope creep and not I8 done early. A shell that takes the alternate screen without giving it back is not shippable at any stage, and `panic = "abort"` means a `Drop` alone cannot give it back, so the panic hook had to land with the code that takes the screen. What [#8](https://github.com/breferrari/vigia/issues/8) still owns is the whole of its proof, which is also the whole of the invariant |
