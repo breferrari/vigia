@@ -1206,6 +1206,49 @@ mod tests {
             !elsewhere.relevant,
             "a directory off the store's path ticked"
         );
+        let itself = watcher.accept(created(git)).expect("not a stop");
+        assert!(!itself.relevant, "the git dir's own event ticked");
+    }
+
+    /// The same burst in the worktree: `a/b/c/f` written before any of its
+    /// directories is watched leaves only `a`'s event, which ticks, and the
+    /// walk the tick brings finds the file.
+    #[test]
+    fn worktree_burst_found() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let base = Removed(
+            std::env::temp_dir().join(format!("vigia-tree-burst-{}-{stamp}", std::process::id())),
+        );
+        let tree = base.0.join("tree");
+        std::fs::create_dir_all(&tree).expect("tree");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&tree)
+            .args(["init", "-q"])
+            .output()
+            .expect("run git");
+        assert!(out.status.success(), "git init");
+        let repo = gix::open(&tree).expect("open");
+        let mut watcher = watch_with(&tree, &repo, |backend, path, mode| {
+            backend.watch(path, mode)
+        });
+        std::fs::create_dir_all(tree.join("a/b/c")).expect("dirs");
+        std::fs::write(tree.join("a/b/c/f"), "x\n").expect("file");
+        let event = Message::Event(Box::new(
+            notify::Event::new(EventKind::Create(notify::event::CreateKind::Folder))
+                .add_path(tree.join("a")),
+        ));
+        let accepted = watcher.accept(event).expect("not a stop");
+        assert!(accepted.relevant, "a new directory did not tick");
+        let worktree = crate::Worktree::discover(&tree).expect("discover");
+        let found: Vec<String> = worktree
+            .changes_of(crate::Origin::Unstaged, crate::ChangeOptions::default())
+            .expect("walk")
+            .map(|change| change.expect("change").path)
+            .collect();
+        assert_eq!(found, ["a/b/c/f"], "the walk missed the file");
     }
 
     /// A store arm that fails as a full inotify table does.
