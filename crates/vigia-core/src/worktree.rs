@@ -686,7 +686,7 @@ impl Worktree {
             }
         }
         // Git keeps an addition's best few removals and weighs no others.
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|&(score, _, _)| std::cmp::Reverse(score));
         let mut kept: HashMap<usize, usize> = HashMap::new();
         scored.retain(|&(_, _, to)| {
             let count = kept.entry(to).or_default();
