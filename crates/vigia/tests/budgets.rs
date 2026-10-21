@@ -3298,6 +3298,74 @@ fn pictures_frame_kitty() {
     pictures_frame(ProtocolType::Kitty);
 }
 
+/// The frame that first draws Kitty pictures, at the largest size
+/// measured, a 300x100 pane at a high-DPI 20x40 cell, costs what the same
+/// frame costs in half-blocks: the image bytes go on the writer's lane, not
+/// into the frame. Interleaved, best of three each, so a loaded machine moves
+/// both.
+#[test]
+fn pictures_first_draw_large() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let draw = |protocol| {
+        pictures_frame_at(
+            protocol,
+            "a/screen.png",
+            support::screen_png(10),
+            support::screen_png(200),
+            Rect::new(0, 0, 300, 100),
+            Some((20, 40)),
+        )
+    };
+    let (mut kitty, mut halfblocks) = (Duration::MAX, Duration::MAX);
+    let mut sent = 0;
+    for _ in 0..3 {
+        let (bytes, first) = draw(ProtocolType::Kitty);
+        sent = bytes;
+        kitty = kitty.min(first);
+        halfblocks = halfblocks.min(draw(ProtocolType::Halfblocks).1);
+    }
+    eprintln!(
+        "note: first draw, Kitty {kitty:?} with {sent} bytes of uploads, half-blocks {halfblocks:?}"
+    );
+    assert!(
+        sent > 1_000_000,
+        "the Kitty pictures sent {sent} bytes, so this prices nothing"
+    );
+    assert!(
+        kitty.as_secs_f64() <= halfblocks.as_secs_f64() * 1.5 + 0.002,
+        "the frame that first draws Kitty pictures took {kitty:?} against half-blocks' {halfblocks:?}, \
+         so the image bytes are back on the frame"
+    );
+}
+
+/// The first-draw table: run by hand with `--ignored --nocapture`.
+#[test]
+#[ignore = "a measurement for the record, not a gate"]
+fn first_draw_table() {
+    for (width, height) in [(120, 40), (240, 80), (300, 100)] {
+        for (protocol, cell) in [
+            (ProtocolType::Kitty, (10, 20)),
+            (ProtocolType::Kitty, (20, 40)),
+            (ProtocolType::Halfblocks, (20, 40)),
+        ] {
+            let (sent, first) = pictures_frame_at(
+                protocol,
+                "a/screen.png",
+                support::screen_png(10),
+                support::screen_png(200),
+                Rect::new(0, 0, width, height),
+                Some(cell),
+            );
+            eprintln!(
+                "table: {protocol:?} {width}x{height} pane, {}x{} cell, {sent} bytes sent, first draw {first:?}",
+                cell.0, cell.1
+            );
+        }
+    }
+}
+
 /// The same with Sixel, which writes each panel's sequence into its first cell
 /// on every frame.
 #[test]
@@ -3662,6 +3730,20 @@ fn pdf_cold_paint(scratch: &Scratch, pane: Rect) -> (usize, u64, Duration, Durat
 }
 
 fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<u8>) {
+    pictures_frame_at(protocol, path, old, new, Rect::new(0, 0, 120, 40), None);
+}
+
+/// [`pictures_frame_of`] on a pane of `pane`, at `cell` pixels a cell, or the
+/// picker's own. The bytes the first frame's uploads carry and that frame's
+/// time, for a table.
+fn pictures_frame_at(
+    protocol: ProtocolType,
+    path: &str,
+    old: Vec<u8>,
+    new: Vec<u8>,
+    pane: Rect,
+    cell: Option<vigia::pictures::Cell>,
+) -> (usize, Duration) {
     use vigia::pictures::{self, Inks, Pictures};
 
     let scratch = Scratch::new(&format!("i9-pictures-{protocol:?}"));
@@ -3678,7 +3760,6 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
     let mut frame = worktree.frame();
     settle(&mut frame);
 
-    let pane = Rect::new(0, 0, 120, 40);
     let mut app = App::new();
     app.draw_pictures(true);
     let mut highlighter = Highlighter::eager();
@@ -3693,11 +3774,12 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
         {
             let mut picker = ratatui_image::picker::Picker::halfblocks();
             picker.set_protocol_type(protocol);
-            picker
+            cell.map_or(picker.clone(), |cell| pictures::picker_at(&picker, cell))
         },
         Box::new(|| {}),
     );
     let screen_layout = layout_of(&app, pane, frame.files().len());
+    let sent = std::cell::Cell::new(0);
     let mut paint = |frame: &mut Frame,
                      app: &mut App,
                      highlighter: &mut Highlighter,
@@ -3719,7 +3801,15 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
         pictures.attach(&mut view.rows, frame);
         // What the shell's writer does with an upload, here at once: a Kitty
         // picture draws once the terminal holds it.
-        if !pictures.written_at_once().is_empty() {
+        let uploads = pictures.written_at_once();
+        if !uploads.is_empty() {
+            sent.set(
+                sent.get()
+                    + uploads
+                        .iter()
+                        .map(|upload| upload.data.len())
+                        .sum::<usize>(),
+            );
             pictures.attach(&mut view.rows, frame);
         }
         render(&mut buf, pane, &view, &theme, Glyphs::default(), &chrome);
@@ -3735,7 +3825,15 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
         "note: three pictures of a 1170x2532 pair built in {:?}, off the paint",
         building.elapsed()
     );
-    let view = paint(&mut frame, &mut app, &mut highlighter, &mut pictures);
+    // The frame that first draws them, once their uploads are written.
+    let (view, first, _) =
+        timed_cpu(|| paint(&mut frame, &mut app, &mut highlighter, &mut pictures));
+    eprintln!(
+        "note: the first frame to draw them on a {}x{} pane took {first:?}, its uploads {} bytes",
+        pane.width,
+        pane.height,
+        sent.get()
+    );
     let built = view
         .rows
         .iter()
@@ -3771,7 +3869,7 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
     );
 
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
-        return;
+        return (sent.get(), first);
     }
     let _timed = exclusively_timed();
     let mut frames = Samples::new(SAMPLED_FRAMES);
@@ -3786,11 +3884,13 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
     holds_p99(
         &format!(
             "I9: a settled frame repainting a changed image's three pictures in {protocol:?} \
-             on a 120x40 pane"
+             on a {}x{} pane",
+            pane.width, pane.height
         ),
         budget(I9_FRAME),
         &frames,
         || format!("({built} picture rows on screen)"),
         || timed(&mut frame, &mut app, &mut highlighter, &mut pictures),
     );
+    (sent.get(), first)
 }

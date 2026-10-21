@@ -963,6 +963,87 @@ fn upload_stopped_away() {
     );
 }
 
+/// Two changed pictures, `a.png` above `b.png`, and a Kitty pane for them.
+fn two_pictures(name: &str) -> (Scratch, Pane) {
+    let scratch = Scratch::new(name);
+    scratch.write("a.png", png(60, 40, 1));
+    scratch.write("b.png", png(60, 40, 3));
+    scratch.commit_all("baseline");
+    scratch.write("a.png", png(60, 40, 2));
+    scratch.write("b.png", png(60, 40, 4));
+    (scratch, Pane::drawn_by(100, 60, ProtocolType::Kitty))
+}
+
+/// Build what is on screen and hand out none of its uploads.
+fn built_unsent(pane: &mut Pane, frame: &mut Frame) -> View {
+    pane.unsent(frame);
+    assert!(
+        pane.pictures
+            .settle(support::ceiling(Duration::from_secs(60))),
+        "the pictures were not built"
+    );
+    pane.unsent(frame)
+}
+
+/// The Kitty ids of the picture of `path` on screen.
+fn ids_of(pane: &Pane, view: &View, path: &str) -> Vec<u32> {
+    view.rows
+        .iter()
+        .find_map(|row| match row {
+            Row::Sized { key, .. } if key.path == path => pane.pictures.get(key),
+            _ => None,
+        })
+        .map(|ready| ready.0.kitty.clone())
+        .unwrap_or_default()
+}
+
+#[test]
+fn credit_holds() {
+    // With credit for one image and one already with the writer, nothing more
+    // goes; with none held, the first goes alone though it is over the credit.
+    let (scratch, mut pane) = two_pictures("pictures-credit");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    built_unsent(&mut pane, &mut frame);
+    let (first, _) = pane.pictures.uploads(1, 0);
+    assert_eq!(
+        first.len(),
+        1,
+        "with nothing held, one upload did not go alone"
+    );
+    let held = first[0].data.len();
+    let (more, _) = pane.pictures.uploads(held * 2, held);
+    assert!(
+        more.len() <= 1,
+        "{} uploads went beside one held, within credit for two",
+        more.len()
+    );
+    let (none, _) = pane.pictures.uploads(held, held);
+    assert!(none.is_empty(), "an upload went past the credit");
+}
+
+#[test]
+fn screen_order() {
+    // Of two pictures waiting, the one higher on the screen goes first.
+    let (scratch, mut pane) = two_pictures("pictures-order");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let view = built_unsent(&mut pane, &mut frame);
+    let (top, below) = (ids_of(&pane, &view, "a.png"), ids_of(&pane, &view, "b.png"));
+    assert!(
+        !top.is_empty() && !below.is_empty(),
+        "both pictures were not on screen"
+    );
+    let (first, _) = pane.pictures.uploads(1, 0);
+    assert!(
+        top.contains(&first[0].id),
+        "the lower picture went first: {} not among {top:?}",
+        first[0].id
+    );
+}
+
 #[test]
 fn scrolled_kitty_placement() {
     let scratch = Scratch::new("pictures-kitty-scrolled");

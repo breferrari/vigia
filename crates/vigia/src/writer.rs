@@ -1148,6 +1148,107 @@ mod tests {
         );
     }
 
+    /// A terminal that takes `rate` bytes a second, for the lanes under load.
+    #[derive(Clone)]
+    struct Slow {
+        bytes: Arc<Mutex<Vec<u8>>>,
+        rate: f64,
+    }
+
+    impl Out for Slow {
+        fn write_some(&mut self, bytes: &[u8], _: Duration) -> io::Result<usize> {
+            std::thread::sleep(Duration::from_secs_f64(bytes.len() as f64 / self.rate));
+            self.bytes.lock().expect("bytes").extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+    }
+
+    /// Frames of `size` bytes, one every `every`, for `lasting`, through `sink`.
+    fn frames(sink: &mut Sink, size: usize, every: Duration, lasting: Duration) {
+        let until = Instant::now() + lasting;
+        while Instant::now() < until {
+            sink.write_all(&vec![b'f'; size]).expect("write");
+            sink.flush().expect("flush");
+            std::thread::sleep(every);
+        }
+    }
+
+    /// An upload of `count` chunks of `size` bytes each.
+    fn big_upload(id: u32, count: usize, size: usize) -> (Upload, impl Fn() -> bool) {
+        let chunk = format!("\x1b_Gi={id},m=1;{}\x1b\\", "u".repeat(size));
+        let (ticket, held) = crate::kitty::ticket();
+        (
+            Upload {
+                id,
+                data: chunk.repeat(count).into(),
+                ends: (1..=count).map(|i| i * chunk.len()).collect(),
+                close: "".into(),
+                tmux: false,
+                ticket,
+            },
+            held,
+        )
+    }
+
+    #[test]
+    fn starvation_cap() {
+        // Frames that keep a slow terminal busy: past the cap the upload still
+        // completes, a turn at a time, while the frames go on.
+        let out = Slow {
+            bytes: Arc::new(Mutex::new(Vec::new())),
+            rate: 400_000.0,
+        };
+        let writer = Writer::start(out, Wakes::none());
+        let mut sink = writer.sink();
+        let (upload, held) = big_upload(21, 20, 4000);
+        sink.write_all(&[b'f'; 8000]).expect("write");
+        sink.flush().expect("flush");
+        sink.upload(upload).expect("upload");
+        frames(
+            &mut sink,
+            8000,
+            Duration::from_millis(15),
+            Duration::from_millis(2500),
+        );
+        assert!(
+            held(),
+            "frames kept a slow terminal busy and the upload never finished"
+        );
+    }
+
+    #[test]
+    fn starved_on_screen() {
+        // Two waiting behind the frames, the older stopped as off screen: the
+        // other goes, and the stopped one never finishes.
+        let out = Slow {
+            bytes: Arc::new(Mutex::new(Vec::new())),
+            rate: 400_000.0,
+        };
+        let writer = Writer::start(out, Wakes::none());
+        let mut sink = writer.sink();
+        let (older, older_held) = big_upload(31, 20, 4000);
+        let (newer, newer_held) = big_upload(32, 20, 4000);
+        sink.write_all(&[b'f'; 8000]).expect("write");
+        sink.flush().expect("flush");
+        sink.upload(older).expect("upload");
+        sink.upload(newer).expect("upload");
+        sink.delete(31, b"<delete>".to_vec()).expect("delete");
+        frames(
+            &mut sink,
+            8000,
+            Duration::from_millis(15),
+            Duration::from_millis(2500),
+        );
+        assert!(
+            !older_held(),
+            "an upload stopped as off screen was finished"
+        );
+        assert!(
+            newer_held(),
+            "the on-screen upload never finished behind the frames"
+        );
+    }
+
     #[test]
     fn cancel_queued() {
         // Cancelled before it starts: none of it is written.
