@@ -905,6 +905,11 @@ fn placed_after_upload() {
         picture_rows(&view).iter().all(|(_, built)| *built),
         "the picture did not draw once its uploads were written"
     );
+    let drawn = pane.draw(&view);
+    assert!(
+        cells_with(&drawn, &PLACEHOLDER.to_string()) > 0 && cells_with(&drawn, "\x1b_G") == 0,
+        "the placed picture's cells carried a transmit, or none was placed"
+    );
 }
 
 #[test]

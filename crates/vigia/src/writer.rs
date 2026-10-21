@@ -159,8 +159,6 @@ enum Job {
     Frame(Vec<u8>),
     /// An image to send, chunk by chunk, between frames.
     Upload(Upload),
-    /// Graphics bytes to write in turn with the uploads.
-    Graphic(Vec<u8>),
     /// Delete image `id`: its upload is cancelled first, so the delete never
     /// lands inside its chunks.
     Delete { id: u32, bytes: Vec<u8> },
@@ -173,6 +171,8 @@ enum Job {
 enum Graphic {
     /// An upload and how many of its chunks are written.
     Upload(Upload, usize),
+    /// The close of an upload cut off, which stays the open image until written.
+    Close(Vec<u8>),
     /// Bytes written whole.
     Raw(Vec<u8>),
 }
@@ -198,7 +198,6 @@ impl Lanes {
                 self.graphics.push_back(Graphic::Upload(upload, 0));
             }
             Job::Upload(_) => {}
-            Job::Graphic(bytes) => self.graphics.push_back(Graphic::Raw(bytes)),
             Job::Delete { id, bytes } => {
                 self.cancel(|of| of == id);
                 self.graphics.push_back(Graphic::Raw(bytes));
@@ -222,9 +221,8 @@ impl Lanes {
             if *sent == 0 {
                 return false;
             }
-            OPEN.store(0, Ordering::SeqCst);
             let close = upload.close.as_bytes().to_vec();
-            *graphic = Graphic::Raw(close);
+            *graphic = Graphic::Close(close);
             true
         });
     }
@@ -249,6 +247,13 @@ impl Lanes {
         match graphic {
             Graphic::Raw(bytes) => {
                 write_out(out, bytes, shared, &mut |_| {})?;
+                self.graphics.pop_front();
+            }
+            Graphic::Close(bytes) => {
+                write_out(out, bytes, shared, &mut |_| {})?;
+                if !shared.stopping() {
+                    OPEN.store(0, Ordering::SeqCst);
+                }
                 self.graphics.pop_front();
             }
             Graphic::Upload(upload, sent) => {
@@ -435,15 +440,6 @@ impl Sink {
     /// The writer has stopped.
     pub fn upload(&mut self, upload: Upload) -> io::Result<()> {
         self.job(Job::Upload(upload))
-    }
-
-    /// Queue `bytes` on the graphics lane, after the uploads before them.
-    ///
-    /// # Errors
-    ///
-    /// The writer has stopped.
-    pub fn graphic(&mut self, bytes: Vec<u8>) -> io::Result<()> {
-        self.job(Job::Graphic(bytes))
     }
 
     /// Delete image `id` with `bytes`, after cancelling its upload: what is
@@ -922,7 +918,7 @@ mod tests {
         let upload = three_chunks(7);
         let first = upload.ends[0];
         sink.upload(upload).expect("upload");
-        sink.graphic(b"<delete>".to_vec()).expect("delete");
+        sink.delete(8, b"<delete>".to_vec()).expect("delete");
         sink.write_all(b"<frame1>").expect("write");
         sink.flush().expect("flush");
         // Room for the frame and the first chunk, then none: the second chunk waits.
@@ -982,6 +978,75 @@ mod tests {
         assert!(
             rx.try_recv().is_err(),
             "a cancelled upload was reported whole"
+        );
+    }
+
+    #[test]
+    fn chunk_whole() {
+        // A chunk longer than one write's piece is still written whole before
+        // a frame that arrives while it is going out.
+        let out = Taken::default();
+        let writer = Writer::start(out.clone(), Wakes::none());
+        let mut sink = writer.sink();
+        let chunk = format!("\x1b_Gi=5,m=0;{}\x1b\\", "A".repeat(6000));
+        let len = chunk.len();
+        sink.upload(Upload {
+            id: 5,
+            data: chunk.clone().into(),
+            ends: vec![len].into(),
+            close: "".into(),
+            tmux: false,
+        })
+        .expect("upload");
+        out.room.store(100, Ordering::Release);
+        taken_len(&out, 100);
+        sink.write_all(b"<frame>").expect("write");
+        sink.flush().expect("flush");
+        std::thread::sleep(Duration::from_millis(20));
+        out.room.store(usize::MAX, Ordering::Release);
+        wait_for(&out, |taken| taken.ends_with("<frame>"));
+        assert_eq!(
+            written(&out),
+            format!("{chunk}<frame>"),
+            "a frame cut into a chunk"
+        );
+    }
+
+    #[test]
+    fn cancel_last_chunk() {
+        // A delete that comes while the last chunk is going out follows it: the
+        // image completes, then goes.
+        let out = Taken::default();
+        let (tx, rx) = mpsc::channel();
+        let writer = Writer::start(
+            out.clone(),
+            Wakes {
+                uploaded: Box::new(move |id| {
+                    let _ = tx.send(id);
+                }),
+                ..Wakes::none()
+            },
+        );
+        let mut sink = writer.sink();
+        let upload = three_chunks(13);
+        let data = upload.data.to_string();
+        let into_last = upload.ends[1] + 2;
+        sink.upload(upload).expect("upload");
+        out.room.store(into_last, Ordering::Release);
+        taken_len(&out, into_last);
+        sink.delete(13, b"<delete>".to_vec()).expect("delete");
+        std::thread::sleep(Duration::from_millis(20));
+        out.room.store(usize::MAX, Ordering::Release);
+        wait_for(&out, |taken| taken.ends_with("<delete>"));
+        assert_eq!(
+            written(&out),
+            format!("{data}<delete>"),
+            "a delete cut into the last chunk"
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)),
+            Ok(13),
+            "the whole upload was not reported"
         );
     }
 

@@ -65,8 +65,7 @@ fn transmit(
     (out, ends)
 }
 
-/// The empty last chunk that closes an image left part sent. Its load then
-/// fails, quietly, in kitty and in Ghostty, where a delete alone leaves it open.
+/// The empty last chunk that closes an image left part sent.
 pub fn cancel(tmux: bool) -> String {
     let (start, escape, end) = Parser::tmux_start_escape_end(tmux);
     format!("{start}{escape}_Gm=0,q=2;{escape}\\{end}")
@@ -215,9 +214,12 @@ impl Image {
         self.state.load(Ordering::Acquire) == WRITTEN
     }
 
-    /// The writer wrote its last chunk.
+    /// The writer wrote its last chunk. Not if it was stopped since, and so
+    /// deleted.
     pub fn mark_uploaded(&self) {
-        self.state.store(WRITTEN, Ordering::Release);
+        let _ = self
+            .state
+            .compare_exchange(QUEUED, WRITTEN, Ordering::AcqRel, Ordering::Acquire);
     }
 
     /// Its upload was cancelled, or never finished: send it again when next
@@ -508,6 +510,29 @@ mod tests {
                 .iter()
                 .all(|cell| !cell.symbol().contains("_G")),
             "a cell carried a graphics escape"
+        );
+    }
+
+    #[test]
+    fn late_report() {
+        // Written whole just as it was stopped: the late report does not mark
+        // the image held, so it is sent again rather than drawn blank.
+        let pixels = image(40, 40);
+        let image = Image::new(
+            pixels.as_raw(),
+            pixels.dimensions(),
+            Size::new(4, 2),
+            3,
+            false,
+            false,
+        );
+        let _ = image.upload().expect("an upload");
+        image.unsent();
+        image.mark_uploaded();
+        assert!(!image.uploaded(), "a stopped image was taken as held");
+        assert!(
+            image.upload().is_some(),
+            "a stopped image was not sent again"
         );
     }
 
