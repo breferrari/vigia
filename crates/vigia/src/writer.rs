@@ -102,9 +102,18 @@ impl Shared {
     }
 }
 
+/// What the writer's queue carries.
+enum Job {
+    /// Bytes to write, in order.
+    Frame(Vec<u8>),
+    /// The end `stop` queues, which a sink still open would otherwise keep
+    /// from coming.
+    Stop,
+}
+
 /// The thread that writes the terminal, and the handle the loop draws through.
 pub struct Writer {
-    queue: Option<mpsc::Sender<Vec<u8>>>,
+    queue: Option<mpsc::Sender<Job>>,
     shared: Arc<Shared>,
     finished: mpsc::Receiver<()>,
 }
@@ -113,17 +122,18 @@ impl Writer {
     /// Start writing to `out` on a thread of its own.
     pub fn start(out: impl Out + Send + 'static, wakes: Wakes) -> Self {
         let shared = Arc::new(Shared::default());
-        let (queue, frames) = mpsc::channel::<Vec<u8>>();
+        let (queue, jobs) = mpsc::channel::<Job>();
         let (done, finished) = mpsc::channel();
         let theirs = Arc::clone(&shared);
         let _ = std::thread::Builder::new()
             .name(THREAD.to_owned())
             .spawn(move || {
                 let mut out = out;
-                for bytes in frames {
-                    // Empty is the end `stop` queues, which a sink still open
-                    // would otherwise keep from coming.
-                    if bytes.is_empty() || theirs.stopping() {
+                for job in jobs {
+                    let Job::Frame(bytes) = job else {
+                        break;
+                    };
+                    if theirs.stopping() {
                         break;
                     }
                     if write_out(&mut out, &bytes, &theirs, &wakes).is_err() {
@@ -192,7 +202,7 @@ impl Writer {
     /// wait if a write it cannot leave is in flight: whether it stopped.
     pub fn stop(&mut self, limit: Duration) -> bool {
         if let Some(queue) = self.queue.take() {
-            let _ = queue.send(Vec::new());
+            let _ = queue.send(Job::Stop);
         }
         // A thread already gone has dropped its end, which is as good as done.
         let ended = |waited| !matches!(waited, Err(mpsc::RecvTimeoutError::Timeout));
@@ -213,7 +223,7 @@ impl Drop for Writer {
 /// The writer's end of ratatui's backend: bytes gather until a flush, which
 /// hands them to the writer whole.
 pub struct Sink {
-    queue: Option<mpsc::Sender<Vec<u8>>>,
+    queue: Option<mpsc::Sender<Job>>,
     shared: Arc<Shared>,
     pending: Vec<u8>,
 }
@@ -261,7 +271,7 @@ impl Sink {
             self.shared.last.store(bytes.len(), Ordering::Release);
         }
         let len = bytes.len();
-        queue.send(bytes).map_err(|_| {
+        queue.send(Job::Frame(bytes)).map_err(|_| {
             self.shared.unwritten.fetch_sub(len, Ordering::AcqRel);
             io::Error::from(io::ErrorKind::BrokenPipe)
         })
@@ -624,6 +634,28 @@ mod tests {
             began.elapsed()
         );
         drop(sink);
+    }
+
+    #[test]
+    fn empty_frame_kept() {
+        // A frame with no bytes is a frame, not a stop: the writer goes on.
+        let out = Taken::default();
+        out.room.store(usize::MAX, Ordering::Release);
+        let writer = Writer::start(out.clone(), Wakes::none());
+        writer
+            .queue
+            .as_ref()
+            .expect("running")
+            .send(Job::Frame(Vec::new()))
+            .expect("queue");
+        let mut sink = writer.sink();
+        sink.write_all(b"after").expect("write");
+        sink.flush().expect("flush");
+        assert!(
+            writer.drain(Duration::from_secs(2)),
+            "the writer stopped at an empty frame"
+        );
+        assert_eq!(out.bytes.lock().expect("bytes").as_slice(), b"after");
     }
 
     #[test]
