@@ -422,6 +422,8 @@ Milestone: [Phase 11](https://github.com/breferrari/vigia/milestone/12). Ships i
 | ⬜ | Keep an edit above a long fence off the paint | [#729](https://github.com/breferrari/vigia/issues/729) |
 | ⬜ | Rename candidate matrix per walk | [#736](https://github.com/breferrari/vigia/issues/736) |
 | ⬜ | Tell the worker which pairs a full record dropped **Approved by the PO, 2026-10-21** | [#740](https://github.com/breferrari/vigia/issues/740) |
+| ⬜ | Find why the rename refactor budget takes minutes on Windows | [#755](https://github.com/breferrari/vigia/issues/755) |
+| ⬜ | Keep scrolling over pictures smooth inside herdr without blinking them | [#759](https://github.com/breferrari/vigia/issues/759) |
 
 ## Phase 12 — correct at the edges
 
@@ -442,6 +444,8 @@ Milestone: [Phase 12](https://github.com/breferrari/vigia/milestone/13). Ships i
 | ⬜ | Wake the staged count until every staged side is weighed **Found by review on #675** | [#686](https://github.com/breferrari/vigia/issues/686) |
 | ⬜ | Weigh pending rename sides without a fresh status walk **Found by review on #675** | [#687](https://github.com/breferrari/vigia/issues/687) |
 | ✅ | Text renames by git's rule | [#734](https://github.com/breferrari/vigia/issues/734) |
+| ⬜ | Compress Kitty pictures to Ghostty again once a release carries the new decoder | [#756](https://github.com/breferrari/vigia/issues/756) |
+| ⬜ | Pair moved files by git's rule wherever gix would have guessed | [#750](https://github.com/breferrari/vigia/pull/750) |
 
 ## Phase 13 — testable by construction
 
@@ -457,6 +461,7 @@ Milestone: [Phase 13](https://github.com/breferrari/vigia/milestone/14). Interna
 | ⬜ | Classify every tracked markdown file under one written-layer rule | [#504](https://github.com/breferrari/vigia/issues/504) |
 | ✅ | Rename listing test bounds | [#727](https://github.com/breferrari/vigia/issues/727) |
 | ⬜ | Time the rename walk gate on thread CPU | [#730](https://github.com/breferrari/vigia/issues/730) |
+| ⬜ | Replace absolute-millisecond PR gates with work counts and same-run ratios, and run the budgets on a schedule | [#754](https://github.com/breferrari/vigia/issues/754) |
 
 ## Phase 14 — the instruments
 
@@ -472,6 +477,8 @@ Milestone: [Phase 14](https://github.com/breferrari/vigia/milestone/15). Interna
 | ⬜ | Fail the build when the README calls a released version unreleased. **Found by review on #670** **Taken with the README rework (vigia), 2026-10-20** | [#671](https://github.com/breferrari/vigia/issues/671) |
 | ✅ | Fail the flake-rate workflow when its filter matches no test. **Found on #673** | [#674](https://github.com/breferrari/vigia/issues/674) |
 | ✅ | Decide whether vigia-core's public API is stable **Ruled C by the reader, 2026-10-20** | [#684](https://github.com/breferrari/vigia/issues/684) |
+| ⬜ | Stop a release before it builds when a vendored fork is not on crates.io | [#757](https://github.com/breferrari/vigia/issues/757) |
+| ⬜ | Return to the upstream crates when they release the forks' patches | [#758](https://github.com/breferrari/vigia/issues/758) |
 
 ## Shelf (retired 2026-10-19)
 
