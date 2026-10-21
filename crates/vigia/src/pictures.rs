@@ -563,10 +563,11 @@ pub type Cell = (u16, u16);
 /// reports it.
 pub type Window = ratatui::crossterm::terminal::WindowSize;
 
-/// Device pixels to a reported cell pixel: 2 on macOS when the terminal gave
-/// only its window's size, which is in logical points there.
-pub fn density(heard: bool, macos: bool) -> u16 {
-    if !heard && macos { 2 } else { 1 }
+/// Device pixels to a reported cell pixel: 2 on macOS when the cell was
+/// measured from the window's size, which is in logical points there, and not
+/// heard from the terminal.
+pub fn density(heard: bool, measured: bool, macos: bool) -> u16 {
+    if !heard && measured && macos { 2 } else { 1 }
 }
 
 /// The cell in `now`, from the cell `queried` in `then`, kept at `current`
@@ -644,7 +645,7 @@ pub struct Pictures {
     /// Whether a delete has to pass through tmux.
     tmux: bool,
     /// Where the picker goes, until it has been given.
-    picker: Option<mpsc::Sender<(Picker, u16)>>,
+    picker: Option<mpsc::Sender<Picker>>,
     /// The cell size pictures are built at now.
     cell: Option<Cell>,
     /// The cell the query found; `None` for half-blocks, whose grid is no cell's.
@@ -758,7 +759,7 @@ impl Pictures {
             });
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel();
-        let (picked, picker) = mpsc::channel::<(Picker, u16)>();
+        let (picked, picker) = mpsc::channel::<Picker>();
         let shown = Arc::new(Mutex::new(HashSet::new()));
         let still = Arc::clone(&shown);
         let decoded = Arc::new(AtomicU64::new(0));
@@ -768,7 +769,7 @@ impl Pictures {
         let _ = std::thread::Builder::new()
             .name(WORKER.to_owned())
             .spawn(move || {
-                let Ok((base, density)) = picker.recv() else {
+                let Ok(base) = picker.recv() else {
                     return;
                 };
                 let queried = (base.font_size().width, base.font_size().height);
@@ -779,11 +780,7 @@ impl Pictures {
                         .contains(&ratatui_image::picker::Capability::KittyCompression);
                 let mut resized: Option<(Cell, Picker)> = None;
                 for job in inbox {
-                    let device = job
-                        .cell
-                        .map(|(width, height)| (width * density, height * density))
-                        .or((density > 1).then_some((queried.0 * density, queried.1 * density)));
-                    let picker = match device {
+                    let picker = match job.cell {
                         Some(cell) if cell != queried => {
                             if resized.as_ref().is_none_or(|(at, _)| *at != cell) {
                                 resized = Some((cell, picker_at(&base, cell)));
@@ -920,16 +917,24 @@ impl Pictures {
         self.decoded.load(Ordering::Relaxed)
     }
 
-    /// Say whether the terminal reported its cell size, before [`Pictures::pick`]:
-    /// one that did not on macOS gives logical points, and pictures are sized and
-    /// encoded at twice them.
-    pub fn cell_reported(&mut self, heard: bool) {
-        self.density = density(heard, cfg!(target_os = "macos"));
+    /// Say how the terminal's cell size was found, before [`Pictures::pick`]:
+    /// one measured from the window on macOS is in logical points, and pictures
+    /// are sized and encoded at twice them.
+    pub fn cell_reported(&mut self, heard: bool, measured: bool) {
+        self.density = density(heard, measured, cfg!(target_os = "macos"));
     }
 
     /// The cell pictures are sized at, in device pixels.
     pub fn device_cell(&self) -> Cell {
-        let (width, height) = self.cell.unwrap_or(BEFORE_CELL);
+        self.scaled(self.cell.unwrap_or(BEFORE_CELL))
+    }
+
+    /// The device cell pictures are built at, once the picker is given.
+    fn built_cell(&self) -> Option<Cell> {
+        self.cell.map(|cell| self.scaled(cell))
+    }
+
+    fn scaled(&self, (width, height): Cell) -> Cell {
         (width * self.density, height * self.density)
     }
 
@@ -941,7 +946,14 @@ impl Pictures {
             self.cell = Some(cell);
             let protocol = picker.protocol_type() != ProtocolType::Halfblocks;
             self.queried = protocol.then_some(cell);
-            let _ = picked.send((picker, self.density));
+            // Jobs queued before the cell was known are for a layout that is
+            // not drawn: dropped as off screen, and the next frame asks again.
+            if self.device_cell() != BEFORE_CELL
+                && let Ok(mut shown) = self.shown.lock()
+            {
+                shown.clear();
+            }
+            let _ = picked.send(picker);
         }
     }
 
@@ -1140,8 +1152,8 @@ impl Pictures {
         while let Ok((key, cell, built)) = self.done.try_recv() {
             self.pending.remove(&key);
             // Built at a cell the window has since left: asked for again.
-            let at = cell.or(self.queried);
-            if at.is_some() && at != self.cell {
+            let at = cell.or(self.queried.map(|queried| self.scaled(queried)));
+            if at.is_some() && at != self.built_cell() {
                 self.retired
                     .extend(built.iter().flat_map(|built| built.kitty.iter()));
                 continue;
@@ -1219,7 +1231,7 @@ impl Pictures {
                     picture.before.map(|side| side.format),
                     picture.after.map(|side| side.format),
                 ),
-                cell: self.cell,
+                cell: self.built_cell(),
             };
             if self.jobs.send(job).is_ok() {
                 self.pending.insert(Arc::clone(key));
@@ -1987,17 +1999,28 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
         let Some(image) = image else {
             return undecoded();
         };
-        let to = pixels_of(slot, image.dimensions(), picker);
         let tree = vectors.as_ref().and_then(|drawn| match side {
             Side::Old => drawn.old.as_ref().map(|tree| (tree, drawn.long)),
             Side::New => drawn.new.as_ref().map(|tree| (tree, drawn.long)),
         });
+        let to = pixels_of(slot, image.dimensions(), picker);
+        // A slot is whole cells, so its pixels can exceed the picture's: a
+        // raster is drawn at its own pixels rather than enlarged to them.
+        let to = if tree.is_none()
+            && picker.protocol_type() != ProtocolType::Halfblocks
+            && to.0 > image.width()
+        {
+            image.dimensions()
+        } else {
+            to
+        };
         let small = shrunk
             .entry((side, to.0, to.1))
             .or_insert_with(|| {
                 // An SVG is drawn again at the panel's pixels, so it is sharp
                 // at the size it is shown.
                 if let Some((tree, long)) = tree
+                    && to != image.dimensions()
                     && let Some(mut drawn) = render_svg(tree, long.min(to.0.max(to.1) as f32))
                 {
                     if drawn.dimensions() != to {
@@ -2653,7 +2676,10 @@ mod tests {
         assert_eq!((icon.slots[0].width, icon.slots[0].rows), (2, 1));
         // The same icon where only the window's logical size is known, on
         // macOS: the device cell is twice it, so the icon is the same size.
-        let unheard = (8 * density(false, true), 16 * density(false, true));
+        let unheard = (
+            8 * density(false, true, true),
+            16 * density(false, true, true),
+        );
         let same = shape(&added(24, 24), 200, 60, unheard, true).expect("a shape");
         assert_eq!(same.slots, icon.slots);
         // A full-screen snapshot beside it fills the height it is given.
@@ -2694,10 +2720,23 @@ mod tests {
 
     #[test]
     fn retina_density() {
-        assert_eq!(density(true, true), 1, "a reported cell is device pixels");
-        assert_eq!(density(false, true), 2, "macOS's window size is in points");
-        assert_eq!(density(false, false), 1);
-        assert_eq!(density(true, false), 1);
+        assert_eq!(
+            density(true, true, true),
+            1,
+            "a reported cell is device pixels"
+        );
+        assert_eq!(
+            density(false, true, true),
+            2,
+            "macOS's window size is in points"
+        );
+        assert_eq!(
+            density(false, false, true),
+            1,
+            "a guessed cell is not doubled"
+        );
+        assert_eq!(density(false, true, false), 1);
+        assert_eq!(density(true, true, false), 1);
     }
 
     #[test]

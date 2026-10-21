@@ -824,8 +824,9 @@ fn protocol_pane(name: &str, protocol: ProtocolType) -> (Scratch, Pane) {
     let scratch = changed(
         name,
         "screen.png",
-        &encode(&screen_like(120, 260, [40, 90, 200]), ImageFormat::Png),
-        &encode(&screen_like(120, 260, [200, 90, 40]), ImageFormat::Png),
+        // Larger than the pane at either cell, so it is scaled to the room.
+        &encode(&screen_like(600, 1300, [40, 90, 200]), ImageFormat::Png),
+        &encode(&screen_like(600, 1300, [200, 90, 40]), ImageFormat::Png),
     );
     (scratch, Pane::drawn_by(100, 30, protocol))
 }

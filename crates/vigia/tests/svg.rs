@@ -327,7 +327,6 @@ fn fanned(leaf: &str, fan: usize, levels: usize) -> String {
     body
 }
 
-/// The verdict on `body` drawn over a plain square.
 /// A 1024x1024 document over the same 24 units, so a side compares at the
 /// filter budget's size rather than below it.
 fn large(body: &str) -> String {
@@ -338,6 +337,7 @@ fn large(body: &str) -> String {
     )
 }
 
+/// The verdict on `body` drawn over a plain square.
 fn verdict_of(name: &str, body: &str) -> Option<Verdict> {
     drawn(
         name,

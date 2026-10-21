@@ -553,7 +553,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let drawn = pictures::drawn(truecolour, picker.protocol_type());
     shell.app.draw_pictures(drawn);
     frame.draw_svg(drawn);
-    shell.pictures.cell_reported(answer.heard);
+    shell.pictures.cell_reported(answer.heard, answer.cell);
     shell.pictures.pick(picker);
     shell.app.picture_cell(shell.pictures.device_cell());
     // The window the cell was measured in, which a later resize is scaled from.
