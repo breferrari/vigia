@@ -3358,6 +3358,24 @@ fn pictures_first_draw_large() {
     );
 }
 
+/// The settled frames after the first draw, at the largest size measured, in
+/// Kitty and in half-blocks, against I9.
+#[test]
+#[ignore = "scheduled budget"]
+fn pictures_settled_large() {
+    for protocol in [ProtocolType::Kitty, ProtocolType::Halfblocks] {
+        pictures_frame_at(
+            protocol,
+            "a/screen.png",
+            support::screen_png(10),
+            support::screen_png(200),
+            Rect::new(0, 0, 300, 100),
+            Some((20, 40)),
+            true,
+        );
+    }
+}
+
 /// The first-draw table: run by hand with `--ignored --nocapture`.
 #[test]
 #[ignore = "a measurement for the record, not a gate"]
