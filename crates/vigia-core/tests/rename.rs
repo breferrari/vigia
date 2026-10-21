@@ -1516,7 +1516,7 @@ fn lfs_rename_grown() {
 #[test]
 fn lfs_rename_unfetched() {
     // An object not fetched cannot be compared, so the move shows as removed
-    // and added; nothing is kept, so once it is fetched the move pairs.
+    // and added until it is fetched, and then the move pairs.
     let old = noise(135, 300_000);
     let Some(scratch) = lfs_moved(
         "rename-lfs-unfetched",

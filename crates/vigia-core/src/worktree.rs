@@ -643,8 +643,14 @@ impl Worktree {
                                 if !spend(rename::READ_COST) {
                                     return None;
                                 }
-                                let pointer = std::fs::read(self.workdir.join(&change.path))
-                                    .is_ok_and(|bytes| picture::lfs_oid(&bytes).is_some());
+                                self.side_reads.update(|v| v + 1);
+                                // A read that failed is asked again next frame.
+                                let Ok(read) = std::fs::read(self.workdir.join(&change.path))
+                                else {
+                                    self.sides_left.set(true);
+                                    return None;
+                                };
+                                let pointer = picture::lfs_oid(&read).is_some();
                                 let mut seen = self.worktree_pointers.borrow_mut();
                                 if seen.len() >= PAIRS_KEPT {
                                     seen.clear();
@@ -984,10 +990,15 @@ impl Worktree {
                 self.pair_epoch.update(|v| v + 1);
             }
         }
-        // A score made without its object goes once the object lands.
+        // A score made without its object goes once the object lands, or once
+        // no walk asks for it. Each object is looked for once.
+        let mut landed: HashMap<PathBuf, bool> = HashMap::new();
         self.lfs_unfetched.borrow_mut().retain(|key, missing| {
-            let landed = missing.is_file();
-            if landed || !scores.contains_key(key) {
+            let asked = scores.get(key).is_some_and(|kept| kept.frame == last);
+            let landed = *landed
+                .entry(missing.clone())
+                .or_insert_with(|| missing.is_file());
+            if landed || !asked {
                 scores.remove(key);
                 return false;
             }
