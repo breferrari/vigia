@@ -221,6 +221,11 @@ impl Lanes {
         self.text.is_empty() && self.graphics.is_empty()
     }
 
+    fn clear_starvation(&mut self) {
+        self.starved_since = None;
+        self.chunk_owed = false;
+    }
+
     /// Whether an upload waits.
     fn waiting(&self) -> bool {
         self.graphics
@@ -282,8 +287,7 @@ impl Lanes {
     ) -> io::Result<bool> {
         if self.starved_since.is_some() && !self.waiting() {
             // Cancelled or stopped since: the next to wait starts afresh.
-            self.starved_since = None;
-            self.chunk_owed = false;
+            self.clear_starvation();
         }
         // Past the cap, the upload waiting longest takes every other turn
         // until it is done, so it moves while a frame waits one chunk at most.
@@ -326,11 +330,14 @@ impl Lanes {
                 let from = upload.written_to(*sent);
                 let to = upload.ends[*sent];
                 timed_out(out, &upload.data.as_bytes()[from..to], shared, &mut |_| {})?;
+                if !chunk_turn {
+                    // It moved in a gap between frames, so it was not starved.
+                    (self.starved_since, self.chunk_owed) = (None, false);
+                }
                 shared.graphics.fetch_sub(to - from, Ordering::AcqRel);
                 *sent += 1;
                 if *sent == upload.ends.len() && !shared.stopping() {
-                    self.starved_since = None;
-                    self.chunk_owed = false;
+                    (self.starved_since, self.chunk_owed) = (None, false);
                     OPEN.store(0, Ordering::SeqCst);
                     upload.ticket.written();
                     // A redraw, so its cells are drawn.
@@ -610,7 +617,7 @@ fn timed_out(
 }
 
 /// Write all of `bytes` in pieces, counting each as it goes, unless told to
-/// stop. Whether the terminal ever had less room than a piece.
+/// stop. `true` if the terminal ever had less room than a piece.
 fn write_out(
     out: &mut impl Out,
     bytes: &[u8],
@@ -1292,6 +1299,36 @@ mod tests {
         assert!(
             held(),
             "frames kept a slow terminal busy and the upload never finished"
+        );
+    }
+
+    #[test]
+    fn promoted_cancelled() {
+        // Past the cap, the upload taking turns is deleted: the frames go on,
+        // and the upload never finishes.
+        let (writer, mut sink) = slow_writer();
+        let (upload, held) = big_upload(41, 40, 4000);
+        sink.write_all(&[b'f'; 8000]).expect("write");
+        sink.flush().expect("flush");
+        sink.upload(upload).expect("upload");
+        frames(
+            &mut sink,
+            8000,
+            Duration::from_millis(15),
+            Duration::from_millis(1300),
+        );
+        sink.delete(41, b"<delete>".to_vec()).expect("delete");
+        frames(
+            &mut sink,
+            8000,
+            Duration::from_millis(15),
+            Duration::from_millis(300),
+        );
+        assert!(!held(), "a deleted upload was finished");
+        assert_eq!(
+            writer.graphics_queued(),
+            0,
+            "a deleted upload's bytes are still counted"
         );
     }
 
