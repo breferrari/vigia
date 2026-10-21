@@ -563,7 +563,8 @@ impl Worktree {
                     };
                     match side {
                         Side::Blob(id) => self.blob(id, &change.path).ok(),
-                        Side::Worktree => std::fs::read(self.workdir.join(&change.path)).ok(),
+                        // As git stores it, so the score is git's.
+                        Side::Worktree => self.read_worktree(change, &mut 0).ok(),
                     }
                     .map(std::rc::Rc::new)
                 })

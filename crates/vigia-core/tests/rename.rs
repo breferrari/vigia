@@ -675,3 +675,31 @@ fn four_candidates_per_addition() {
         frame.files()
     );
 }
+
+#[test]
+fn text_rename_autocrlf() {
+    // With autocrlf, a worktree file's CRs are not what git scores: it reads
+    // the file as it would store it. Near git's threshold they decide the pair.
+    let lines: Vec<String> = (0..20).map(|n| format!("row {n:02} x\n")).collect();
+    let kept: String = lines[..11].iter().rev().cloned().collect();
+    let new: String = kept + &(0..9).map(|n| format!("added {n} y\n")).collect::<String>();
+    let scratch = Scratch::new("rename-autocrlf");
+    scratch.git(&["config", "core.autocrlf", "true"]);
+    scratch.write("a.txt", lines.concat());
+    scratch.commit_all("initial");
+    std::fs::remove_file(scratch.path_of("a.txt")).expect("remove");
+    scratch.write("b.txt", new.replace('\n', "\r\n"));
+    let git = git_unstaged(&scratch);
+    let paired = git.contains(&("R a.txt".to_owned(), "b.txt".to_owned()));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    let ours = kind_of(frame.files(), "b.txt").clone();
+    assert!(
+        paired,
+        "the fixture is wrong: git does not pair it: {git:?}"
+    );
+    assert_eq!(ours, renamed("a.txt"));
+}
