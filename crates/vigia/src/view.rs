@@ -2392,9 +2392,9 @@ impl View {
         } else {
             0
         };
-        // The top file's picture rows already scrolled past: all of them from
-        // the blank that closes its block, else those hung under the top row.
-        let passed = if self.top.row >= self.current_span {
+        // The top file's picture rows already scrolled past: all of them once
+        // the top row is past the file's own rows, else those hung under it.
+        let passed = if current > 0 && self.top.row >= span_in(frame, self.top.file)? {
             current
         } else {
             self.top.under.min(current)
