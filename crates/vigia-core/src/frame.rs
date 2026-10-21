@@ -508,9 +508,9 @@ impl<'w> Frame<'w> {
             }
             hidden += walk.hidden();
         }
-        // A side the budget could not weigh is weighed by the next frame, with no
-        // event to bring it.
-        if self.worktree.sides_left() {
+        // A side the budget could not weigh, or a pair the record had no room
+        // for, is weighed by the next frame, with no event to bring it.
+        if self.worktree.sides_left() || self.worktree.room_coming() {
             let now = SystemTime::now();
             self.settles_at = Some(self.settles_at.map_or(now, |at| at.max(now)));
         }
@@ -671,8 +671,8 @@ impl<'w> Frame<'w> {
         self.worktree.pairs_unlisted()
     }
 
-    /// How many times the rename scores were started again, after which a
-    /// pair sent to the worker before is sent again.
+    /// How many times the rename record dropped scores, after which a pair
+    /// sent to the worker before is sent again.
     pub fn pair_epoch(&self) -> u64 {
         self.worktree.pair_epoch()
     }

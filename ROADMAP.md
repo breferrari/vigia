@@ -410,8 +410,8 @@ Milestone: [Phase 11](https://github.com/breferrari/vigia/milestone/12). Ships i
 | ✅ | Observe what a prompting session does with a posted note **Moved from Phase 12, 2026-10-20, reader: measure first** | [#444](https://github.com/breferrari/vigia/issues/444) |
 | ⬜ | Keep size-proportional work off the frame path | [#666](https://github.com/breferrari/vigia/issues/666) |
 | ⬜ | Re-diff a large changed file off the paint | [#665](https://github.com/breferrari/vigia/issues/665) |
-| ⬜ | Write to the terminal off the event loop **Pulled into 1.2.0 by the reader, 2026-10-20; with #664, #722 and #723 the picture rendering set** | [#721](https://github.com/breferrari/vigia/issues/721) |
-| ⬜ | Bound Kitty's first transmit on the paint **Pulled into 1.2.0 by the reader, 2026-10-20** | [#664](https://github.com/breferrari/vigia/issues/664) |
+| ✅ | Write to the terminal off the event loop **Pulled into 1.2.0 by the reader, 2026-10-20; with #664, #722 and #723 the picture rendering set** | [#721](https://github.com/breferrari/vigia/issues/721) |
+| 🔨 | Bound Kitty's first transmit on the paint **Pulled into 1.2.0 by the reader, 2026-10-20** | [#664](https://github.com/breferrari/vigia/issues/664) |
 | ⬜ | Build pictures on a latest-wins pool **Pulled into 1.2.0 by the reader, 2026-10-20** | [#722](https://github.com/breferrari/vigia/issues/722) |
 | ⬜ | Gate a held key over pictures through a slow terminal **Pulled into 1.2.0 by the reader, 2026-10-20** | [#723](https://github.com/breferrari/vigia/issues/723) |
 | ⬜ | Prefetch pictures just past the view | [#663](https://github.com/breferrari/vigia/issues/663) |
@@ -421,6 +421,7 @@ Milestone: [Phase 11](https://github.com/breferrari/vigia/milestone/12). Ships i
 | ⬜ | Measure an @ guard on Markdown's email auto-link pattern | [#265](https://github.com/breferrari/vigia/issues/265) |
 | ⬜ | Keep an edit above a long fence off the paint | [#729](https://github.com/breferrari/vigia/issues/729) |
 | ⬜ | Rename candidate matrix per walk | [#736](https://github.com/breferrari/vigia/issues/736) |
+| ⬜ | Tell the worker which pairs a full record dropped **Approved by the PO, 2026-10-21** | [#740](https://github.com/breferrari/vigia/issues/740) |
 
 ## Phase 12 — correct at the edges
 
@@ -455,6 +456,7 @@ Milestone: [Phase 13](https://github.com/breferrari/vigia/milestone/14). Interna
 | ⬜ | Make the rail's arrival width depend on the glyph rung | [#284](https://github.com/breferrari/vigia/issues/284) |
 | ⬜ | Classify every tracked markdown file under one written-layer rule | [#504](https://github.com/breferrari/vigia/issues/504) |
 | ✅ | Rename listing test bounds | [#727](https://github.com/breferrari/vigia/issues/727) |
+| ⬜ | Time the rename walk gate on thread CPU | [#730](https://github.com/breferrari/vigia/issues/730) |
 
 ## Phase 14 — the instruments
 

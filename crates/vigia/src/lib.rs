@@ -13,6 +13,8 @@ mod glyphs;
 /// integration test and must measure through the same reader the shell uses.
 pub mod icons;
 mod input;
+/// The Kitty images [`pictures`] builds, public because its panels hold them.
+pub mod kitty;
 /// The agent's side of `SPEC.md` §11.2 B21: `vigia mcp`, the stdio server
 /// over the notes store. Public because the suite drives it as the loop does.
 pub mod mcp;

@@ -2,6 +2,8 @@
 
 mod support;
 
+use std::time::{Duration, SystemTime};
+
 use support::{Scratch, changes_sorted, noise, tail_changed};
 use vigia_core::{ChangeKind, ChangeOptions, FileChange, Frame, Origin, pair_score};
 
@@ -469,18 +471,59 @@ fn rename_limit_past() {
 }
 
 #[test]
-fn pair_scores_start_again() {
-    let scratch = moved("rename-epoch", &[("a.txt", b"a\n".to_vec())], &[]);
+fn full_record_makes_room() {
+    let old = noise(82, 200_000);
+    let scratch = moved(
+        "rename-room",
+        &[("a.bin", old.clone())],
+        &[("b.bin", tail_changed(&old, 0.1))],
+    );
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    assert_eq!(frame.pair_epoch(), 0);
-    for n in 0..4097u64 {
-        frame.learn_pair((n, n), 0);
+    frame.advance().expect("advance");
+    // Past the frame's budget, the pair waits for the worker.
+    let key = frame.unscored_pairs().first().expect("listed").key;
+    for n in 0..4096u64 {
+        frame.learn_pair((u64::MAX - n, n), 0);
     }
+    // The record is full of scores filed this frame, so a.bin's has no room.
+    frame.learn_pair(key, 60_000);
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "b.bin"), &ChangeKind::Added);
+    assert_eq!(frame.pair_epoch(), 0, "a current score was evicted");
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        Some(Duration::ZERO),
+        "the pair waits for room and no frame comes to make it"
+    );
+    assert!(
+        frame.pairs_unlisted(),
+        "the worker's next answer would not walk again"
+    );
+    // A frame later the fillers are stale, and the pair is asked for again.
+    frame.advance().expect("advance");
+    assert_eq!(frame.pair_epoch(), 1);
+    let listed: Vec<_> = frame.unscored_pairs().iter().map(|c| c.key).collect();
+    assert_eq!(listed, [key]);
+    frame.learn_pair(key, 60_000);
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
+    // Full again, of scores a frame older than the walk, one makes room.
+    for n in 0..4095u64 {
+        frame.learn_pair((n, u64::MAX - n), 0);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(frame.pair_epoch(), 1);
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "no pair waits for room, and a frame was asked for"
+    );
+    frame.learn_pair((u64::MAX, u64::MAX), 0);
     assert_eq!(
         frame.pair_epoch(),
-        1,
-        "4,097 scores did not start the record again"
+        2,
+        "a score past a record of stale ones did not take one's place"
     );
 }
 
@@ -946,4 +989,150 @@ fn tie_to_same_name() {
         frame.advance().expect("advance");
     }
     assert_eq!(kind_of(frame.files(), "c/x.bin"), &renamed("b/x.bin"));
+}
+
+#[test]
+fn record_keeps_current_pairs() {
+    // A full record of scores for files long gone must not stop a fresh
+    // rename from being scored. 4,096 fills it without the restart a 4,097th
+    // learned score would trigger.
+    let old = noise(81, 20_000);
+    let scratch = moved(
+        "rename-stale-record",
+        &[("a.bin", old.clone())],
+        &[("b.bin", tail_changed(&old, 0.1))],
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for n in 0..4096u64 {
+        frame.learn_pair((u64::MAX - n, n), 0);
+    }
+    // Filed at frame 0, they last the first frame, which asks for the next.
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        Some(Duration::ZERO),
+        "the pair waits for room and no frame comes to make it"
+    );
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
+    assert_eq!(
+        frame.pair_epoch(),
+        1,
+        "the stale scores went without starting the record again, so the worker \
+         would never ask again for a dropped pair"
+    );
+    // Full again beside that score, the record keeps it.
+    let scored = frame.stats().pairs_scored;
+    for n in 0..4095u64 {
+        frame.learn_pair((n, u64::MAX - n), 0);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
+    assert_eq!(
+        frame.stats().pairs_scored,
+        scored,
+        "a full record dropped a score the last frame asked about"
+    );
+}
+
+#[test]
+fn record_over_cap() {
+    // 65 by 65 binaries is 4,225 live pairs, more than the record holds. Once
+    // it is full of them it must drop none, or the worker scores them again,
+    // whether it answers before the next frame or after it.
+    for late in [false, true] {
+        let olds: Vec<(String, Vec<u8>)> = (0..65)
+            .map(|n| (format!("old/{n:02}.bin"), noise(300 + n, 1_000)))
+            .collect();
+        let news: Vec<(String, Vec<u8>)> = (0..65)
+            .map(|n| (format!("new/{n:02}.bin"), noise(400 + n, 1_000)))
+            .collect();
+        let scratch = moved(
+            &format!("rename-over-cap-{late}"),
+            &refs(&olds),
+            &refs(&news),
+        );
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        let (mut quiet, mut asked, mut learned) = (0, Vec::new(), 0);
+        for _ in 0..200 {
+            frame.advance().expect("advance");
+            let listed = frame.unscored_pairs();
+            let answered = if late {
+                std::mem::replace(&mut asked, listed)
+            } else {
+                listed
+            };
+            learned += answered.len() as u64;
+            for candidate in answered {
+                frame.learn_pair(candidate.key, 0);
+            }
+            if frame.unscored_pairs().is_empty() && asked.is_empty() {
+                quiet += 1;
+                if quiet == 5 {
+                    break;
+                }
+                continue;
+            }
+            quiet = 0;
+        }
+        assert_eq!(
+            quiet, 5,
+            "late {late}: the frames never stopped listing pairs"
+        );
+        let scored = frame.stats().pairs_scored;
+        assert!(
+            learned + scored >= 4096,
+            "late {late}: the record stopped at {} scores",
+            learned + scored
+        );
+        for _ in 0..5 {
+            frame.advance().expect("advance");
+        }
+        assert_eq!(
+            frame.settles_in(SystemTime::now()),
+            None,
+            "late {late}: a record of live pairs asked for a frame"
+        );
+        assert_eq!(
+            frame.pair_epoch(),
+            0,
+            "late {late}: a record of live pairs dropped some, so the worker scores them again"
+        );
+        assert_eq!(
+            frame.stats().pairs_scored,
+            scored,
+            "late {late}: a full record scored again"
+        );
+    }
+}
+
+#[test]
+fn listed_room_no_wake() {
+    // Short of full, a record whose room is held by pairs listed for the
+    // worker waits for its answers, not for a frame that could drop nothing.
+    let olds: Vec<(String, Vec<u8>)> = (0..15)
+        .map(|n| (format!("old/{n:02}.bin"), noise(500 + n, 300_000)))
+        .collect();
+    let news: Vec<(String, Vec<u8>)> = (0..15)
+        .map(|n| (format!("new/{n:02}.bin"), noise(600 + n, 300_000)))
+        .collect();
+    let scratch = moved("rename-listed-room", &refs(&olds), &refs(&news));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for n in 0..3900u64 {
+        frame.learn_pair((u64::MAX - n, n), 0);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(frame.unscored_pairs().len(), 196, "the fixture is wrong");
+    assert!(
+        frame.pairs_unlisted(),
+        "the worker's answers would not walk again"
+    );
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "a frame that can make no room was asked for"
+    );
 }

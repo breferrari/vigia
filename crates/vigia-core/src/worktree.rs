@@ -39,6 +39,12 @@ impl Default for ChangeOptions<'_> {
     }
 }
 
+/// A pair's score, and the frame that last asked for it or filed it.
+struct DatedScore {
+    score: u64,
+    frame: u64,
+}
+
 /// A working tree under observation.
 pub struct Worktree {
     /// The repository under its current configuration. The watcher takes a clone.
@@ -82,7 +88,9 @@ pub struct Worktree {
     /// settles, or at once for a file the walk could not afford.
     lfs_wait: Cell<Option<std::time::SystemTime>>,
     /// Git's score for each pair of versions a walk weighed as a rename.
-    pair_scores: RefCell<HashMap<rename::PairKey, u64>>,
+    pair_scores: RefCell<HashMap<rename::PairKey, DatedScore>>,
+    /// Frames walked, which dates each score.
+    pair_frame: Cell<u64>,
     /// Candidate bytes the current frame may still score.
     pair_budget: Cell<u64>,
     /// The pairs the last walks could not afford, for the picture worker.
@@ -93,7 +101,7 @@ pub struct Worktree {
     pairs_scored: Cell<u64>,
     /// Sides read to weigh or score them, for the same.
     side_reads: Cell<u64>,
-    /// How many times `pair_scores` started again.
+    /// How many times `pair_scores` dropped scores.
     pair_epoch: Cell<u64>,
     /// Each blob's size, as the rename pass found it.
     blob_sizes: RefCell<HashMap<gix::ObjectId, u64>>,
@@ -101,6 +109,8 @@ pub struct Worktree {
     sides_left: Cell<bool>,
     /// Whether this frame had more pairs for the worker than it listed.
     pairs_unlisted: Cell<bool>,
+    /// Whether a walk left a pair unweighed for want of room in the record.
+    room_wanted: Cell<bool>,
 }
 
 impl Worktree {
@@ -138,6 +148,7 @@ impl Worktree {
             lfs_wait: Cell::new(None),
             lfs: Cell::new(lfs),
             pair_scores: RefCell::new(HashMap::new()),
+            pair_frame: Cell::new(0),
             pair_budget: Cell::new(rename::FRAME_BUDGET),
             unscored: RefCell::new(Vec::new()),
             pair_bytes: Cell::new(0),
@@ -146,6 +157,7 @@ impl Worktree {
             pair_epoch: Cell::new(0),
             blob_sizes: RefCell::new(HashMap::new()),
             sides_left: Cell::new(false),
+            room_wanted: Cell::new(false),
             pairs_unlisted: Cell::new(false),
         })
     }
@@ -396,12 +408,17 @@ impl Worktree {
         // Its own rename budget, and the frame's pairs left as they were.
         let budget = self.pair_budget.replace(rename::FRAME_BUDGET);
         let unscored = self.unscored.take();
-        let left = (self.sides_left.get(), self.pairs_unlisted.get());
+        let left = (
+            self.sides_left.get(),
+            self.pairs_unlisted.get(),
+            self.room_wanted.get(),
+        );
         let counted = self.count_walk(origin, hide);
         self.pair_budget.set(budget);
         self.unscored.replace(unscored);
         self.sides_left.set(left.0);
         self.pairs_unlisted.set(left.1);
+        self.room_wanted.set(left.2);
         counted
     }
 
@@ -660,7 +677,14 @@ impl Worktree {
         let mut score_all = |weighed: Vec<Weighed>| -> Vec<(u64, usize, usize)> {
             let mut scored = Vec::new();
             for pair in weighed {
-                let known = self.pair_scores.borrow().get(&pair.key).copied();
+                let known = self
+                    .pair_scores
+                    .borrow_mut()
+                    .get_mut(&pair.key)
+                    .map(|kept| {
+                        kept.frame = self.pair_frame.get();
+                        kept.score
+                    });
                 // What is left to read of the two sides.
                 let unread = |at: usize, size: u64| {
                     if charged.borrow().contains(&at) {
@@ -677,6 +701,8 @@ impl Worktree {
                     None if self.pair_scores.borrow().len() + self.unscored.borrow().len()
                         >= PAIRS_KEPT =>
                     {
+                        self.room_wanted.set(true);
+                        self.pairs_unlisted.set(true);
                         continue;
                     }
                     None if cost + rename::PAIR_COST <= self.pair_budget.get() => {
@@ -795,17 +821,43 @@ impl Worktree {
         }
     }
 
-    /// A fresh scoring budget, for the frame about to walk.
+    /// A fresh scoring budget, and room in a full record, for the frame about
+    /// to walk.
     pub(crate) fn renew_pair_budget(&self) {
+        // Scores for files long gone would fill the record and refuse every
+        // new pair.
+        let last = self.pair_frame.get();
+        self.pair_frame.set(last + 1);
+        let mut scores = self.pair_scores.borrow_mut();
+        if scores.len() >= PAIRS_KEPT {
+            let before = scores.len();
+            scores.retain(|_, kept| kept.frame == last);
+            if scores.len() < before {
+                self.pair_epoch.update(|v| v + 1);
+            }
+        }
+        drop(scores);
         self.pair_budget.set(rename::FRAME_BUDGET);
         self.unscored.borrow_mut().clear();
         self.sides_left.set(false);
+        self.room_wanted.set(false);
         self.pairs_unlisted.set(false);
     }
 
     /// Whether this frame's walks left a side unweighed for want of budget.
     pub(crate) fn sides_left(&self) -> bool {
         self.sides_left.get()
+    }
+
+    /// Whether a pair waits for room that the next frame makes, by dropping
+    /// a score this frame did not ask for. Short of full, the room comes with
+    /// the worker's answers instead.
+    pub(crate) fn room_coming(&self) -> bool {
+        let frame = self.pair_frame.get();
+        let scores = self.pair_scores.borrow();
+        self.room_wanted.get()
+            && scores.len() >= PAIRS_KEPT
+            && scores.values().any(|dated| dated.frame < frame)
     }
 
     /// Whether this frame's walks had more pairs for the worker than they listed.
@@ -823,18 +875,28 @@ impl Worktree {
         self.keep_score(key, score);
     }
 
-    /// Keep a pair's score, bounded: past [`PAIRS_KEPT`] the record starts
-    /// again, and so does the count of them, so a pair sent before is sent again.
+    /// Keep a pair's score, bounded by [`PAIRS_KEPT`]: a full record makes
+    /// room by dropping a score this frame has not asked for, and drops the new
+    /// one when there is none.
     fn keep_score(&self, key: rename::PairKey, score: u64) {
         let mut scores = self.pair_scores.borrow_mut();
-        if scores.len() >= PAIRS_KEPT {
-            scores.clear();
+        let frame = self.pair_frame.get();
+        if scores.len() >= PAIRS_KEPT && !scores.contains_key(&key) {
+            let Some(stale) = scores
+                .iter()
+                .find(|(_, dated)| dated.frame < frame)
+                .map(|(&stale, _)| stale)
+            else {
+                return;
+            };
+            scores.remove(&stale);
+            // The worker asks again for the pair it dropped, should it return.
             self.pair_epoch.update(|v| v + 1);
         }
-        scores.insert(key, score);
+        scores.insert(key, DatedScore { score, frame });
     }
 
-    /// How many times the scores were started again.
+    /// How many times the record dropped scores.
     pub(crate) fn pair_epoch(&self) -> u64 {
         self.pair_epoch.get()
     }
@@ -2552,7 +2614,7 @@ type LfsKey = (Fingerprint, gix::ObjectId);
 /// Bytes one status walk may compare between LFS files and their objects.
 const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 
-/// The most rename scores kept before the cache starts again.
+/// The most rename scores kept.
 const PAIRS_KEPT: usize = 4096;
 
 /// The most walks a frame of `files` changes takes to size every side, and

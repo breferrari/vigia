@@ -112,7 +112,7 @@ fn quiet_pairs_never_wake() {
 }
 
 #[test]
-fn pairs_sent_again_after_scores_restart() {
+fn pairs_sent_again() {
     let old = noise(3, 2 * 1024 * 1024);
     let scratch = Scratch::new("rename-resend");
     scratch.write("a.bin", &old);
@@ -143,10 +143,12 @@ fn pairs_sent_again_after_scores_restart() {
     };
     pictures.score_pairs(&frame);
     assert_eq!(answers(&mut pictures), 1);
-    // The scores start again: the pair, unscored once more, is sent again.
-    for n in 0..4097u64 {
+    // A full record drops scores no walk asked for, and the pair, unscored
+    // once more, is sent again.
+    for n in 0..4096u64 {
         frame.learn_pair((n, n), 0);
     }
+    frame.advance().expect("advance");
     frame.advance().expect("advance");
     pictures.score_pairs(&frame);
     assert_eq!(answers(&mut pictures), 1, "the pair was not sent again");

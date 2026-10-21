@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 use image::{DynamicImage, ImageFormat, RgbImage, RgbaImage};
-use ratatui::layout::Size;
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Rect, Size};
+use ratatui::widgets::Widget;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::halfblocks::Halfblocks;
 use ratatui_image::sliced::SlicedProtocol;
@@ -247,10 +249,49 @@ pub enum Verdict {
     Undecoded,
 }
 
+/// One panel, encoded for the terminal.
+pub enum Panel {
+    /// A Kitty image, which this pane encodes itself.
+    Kitty(crate::kitty::Image),
+    /// Anything else, which `ratatui-image` encodes.
+    Sliced(SlicedProtocol),
+}
+
+impl Panel {
+    /// Whether the terminal paints it over the cells, so an overlay drawn on
+    /// top would not hide it.
+    pub fn drawn_by_terminal(&self) -> bool {
+        !matches!(self, Self::Sliced(SlicedProtocol::Halfblocks(_)))
+    }
+
+    /// What a Kitty image of `pixels` holds: its unpacked pixels in the
+    /// terminal, or, sent uncompressed, the larger base64 kept for it, four
+    /// bytes to three.
+    pub fn held(&self, pixels: u64) -> u64 {
+        match self {
+            Self::Kitty(image) if image.deflated() => pixels * 4,
+            Self::Kitty(_) => pixels * 16 / 3,
+            Self::Sliced(_) => 0,
+        }
+    }
+
+    /// Draw it into `area`, its first `above` rows scrolled off the top.
+    pub fn render(&self, area: Rect, buf: &mut Buffer, above: u16) {
+        match self {
+            Self::Kitty(image) => image.render(area, buf, above),
+            Self::Sliced(protocol) => {
+                let above = i16::try_from(above).unwrap_or(i16::MAX);
+                ratatui_image::sliced::SlicedImage::new(protocol, (0, -above).into())
+                    .render(area, buf);
+            }
+        }
+    }
+}
+
 /// A picture built and encoded, ready to draw.
 pub struct Built {
     /// Each panel's place and its encoded cells.
-    pub panels: Vec<(Slot, SlicedProtocol)>,
+    pub panels: Vec<(Slot, Panel)>,
     /// What the comparison found.
     pub verdict: Verdict,
     /// Whether the two sides carry different colour profiles.
@@ -1625,14 +1666,16 @@ fn panel(
     inks: Inks,
     picker: &Picker,
     compress: bool,
-) -> Option<(SlicedProtocol, Option<u32>)> {
+) -> Option<(Panel, Option<u32>)> {
     let image = DynamicImage::ImageRgb8(painted(image, hit, paint, inks));
     let size = Size::new(slot.width, slot.rows);
     vigia_core::armed(Stage::Encode);
     // Direct, because the picker's fit would read the grid as font pixels.
     if picker.protocol_type() == ProtocolType::Halfblocks {
         return Some((
-            SlicedProtocol::Halfblocks(Halfblocks::new(image, size).ok()?),
+            Panel::Sliced(SlicedProtocol::Halfblocks(
+                Halfblocks::new(image, size).ok()?,
+            )),
             None,
         ));
     }
@@ -1640,21 +1683,21 @@ fn panel(
         // Built here rather than by the picker, so the id is known for its delete.
         let id = kitty_id();
         let cells = ratatui_image::Resize::natural_size(&image, picker.font_size());
-        let kitty = ratatui_image::protocol::kitty::Kitty::new(
-            image,
+        let rgba = image.to_rgba8();
+        let kitty = crate::kitty::Image::new(
+            rgba.as_raw(),
+            rgba.dimensions(),
             cells,
             id,
             picker.tmux_detected(),
             compress,
-            false,
-        )
-        .ok()?;
-        return Some((SlicedProtocol::Kitty(kitty), Some(id)));
+        );
+        return Some((Panel::Kitty(kitty), Some(id)));
     }
     let sliced =
         SlicedProtocol::new_with_resize(picker, image, size, ratatui_image::Resize::Fit(None))
             .ok()?;
-    Some((sliced, None))
+    Some((Panel::Sliced(sliced), None))
 }
 
 /// A slot's half-block grid: two pixels to a cell's height.
@@ -1848,12 +1891,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
         };
         if let Some(id) = id {
             kitty.push(id);
-            // An uncompressed transmit is base64 of the pixels, four bytes to three.
-            stored += if compress {
-                pixels * 4
-            } else {
-                pixels * 16 / 3
-            };
+            stored += protocol.held(pixels);
         }
         panels.push((slot, protocol));
     }
@@ -1875,7 +1913,6 @@ mod tests {
 
     #[test]
     fn kitty_sent_compressed() {
-        use ratatui::widgets::Widget;
         #[allow(deprecated)]
         let mut picker = Picker::from_fontsize((10, 20).into());
         picker.set_protocol_type(ProtocolType::Kitty);
@@ -1901,8 +1938,10 @@ mod tests {
             .expect("a panel");
             let area = ratatui::layout::Rect::new(0, 0, 4, 2);
             let mut buf = ratatui::buffer::Buffer::empty(area);
-            ratatui_image::sliced::SlicedImage::new(&protocol, (0, 0).into())
-                .render(area, &mut buf);
+            let Panel::Kitty(image) = &protocol else {
+                panic!("a Kitty picker built another panel");
+            };
+            image.render(area, &mut buf, 0);
             buf.content()
                 .iter()
                 .map(|cell| cell.symbol())
@@ -1910,6 +1949,37 @@ mod tests {
         };
         assert!(sent(true).contains("o=z"), "asked to compress, it sent raw");
         assert!(!sent(false).contains("o=z"), "it compressed unasked");
+    }
+
+    #[test]
+    fn photo_sent_raw() {
+        // A picture no deflate shrinks goes uncompressed even to a terminal that
+        // takes compression, and is counted as the base64 kept for it.
+        #[allow(deprecated)]
+        let mut picker = Picker::from_fontsize((10, 20).into());
+        picker.set_protocol_type(ProtocolType::Kitty);
+        let inks = Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        };
+        let slot = Slot {
+            x: 0,
+            width: 100,
+            rows: 50,
+        };
+        let noise = RgbImage::from_raw(1000, 1000, crate::kitty::noise(1000 * 1000 * 3))
+            .expect("a whole image");
+        let (panel, _) =
+            panel(noise, None, slot, Paint::Plain, inks, &picker, true).expect("a panel");
+        assert!(
+            matches!(panel, Panel::Kitty(_)),
+            "a Kitty picker built another panel"
+        );
+        assert_eq!(
+            panel.held(1000 * 1000),
+            1000 * 1000 * 16 / 3,
+            "noise was deflated though deflating it saves nothing, or not counted as its base64"
+        );
     }
 
     #[test]
@@ -2136,6 +2206,59 @@ mod tests {
             None
         );
         assert_eq!(at(&window(100, 30, 1, 1)), Some((1, 1)));
+    }
+
+    #[test]
+    fn sixel_font_change() {
+        // A Sixel picture built after the cell doubles is drawn at the new
+        // cell's pixels, through the picker rebuilt at that size.
+        let mut base = Picker::halfblocks();
+        base.set_protocol_type(ProtocolType::Sixel);
+        let inks = Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        };
+        let slot = Slot {
+            x: 0,
+            width: 4,
+            rows: 2,
+        };
+        let width = |cell: Cell| {
+            let picker = picker_at(&base, cell);
+            assert_eq!(
+                picker.tmux_detected(),
+                base.tmux_detected(),
+                "the rebuild lost tmux"
+            );
+            let pixels = pixels_of(slot, (100, 100), &picker);
+            let (panel, _) = panel(
+                RgbImage::new(pixels.0, pixels.1),
+                None,
+                slot,
+                Paint::Plain,
+                inks,
+                &picker,
+                false,
+            )
+            .expect("a panel");
+            let area = Rect::new(0, 0, 4, 2);
+            let mut buf = Buffer::empty(area);
+            panel.render(area, &mut buf, 0);
+            let sent: String = buf.content().iter().map(|cell| cell.symbol()).collect();
+            // The raster attributes: aspect, aspect, width, height.
+            let raster = sent.split("\"1;1;").nth(1).expect("a Sixel image");
+            raster
+                .split(';')
+                .next()
+                .expect("a width")
+                .parse::<u32>()
+                .expect("a number")
+        };
+        assert_eq!(
+            (width((10, 20)), width((20, 40))),
+            (40, 80),
+            "a Sixel picture was not drawn at the new cell's pixels"
+        );
     }
 
     #[test]
