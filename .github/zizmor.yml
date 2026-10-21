@@ -1,23 +1,22 @@
-# What zizmor may leave unfixed. The release.yml lines are dist's generated
-# output, which no dist setting changes. Recheck them after `dist generate`:
-# a moved finding is reported again, but a new one on an ignored line is not.
+# What zizmor may leave unfixed. release.yml is dist's generated output, which
+# no dist setting changes, so its findings are ignored by file rather than by
+# line: a line number moves whenever dist adds a step.
 rules:
   # The workflow-level `contents: write` dist grants for the release.
   excessive-permissions:
-    ignore: ["release.yml:18"]
-  # dist's own expressions in its generated steps; 143 is its cargo-auditable
-  # install.
+    ignore: ["release.yml"]
+  # dist's own expressions in its generated steps.
   template-injection:
-    ignore: ["release.yml:83", "release.yml:134", "release.yml:143", "release.yml:146", "release.yml:150", "release.yml:203", "release.yml:257", "release.yml:293"]
+    ignore: ["release.yml"]
   # dist's build container, named by tag in its generated job.
   unpinned-images:
-    ignore: ["release.yml:114"]
+    ignore: ["release.yml"]
   # dist calls the custom publish job with `secrets: inherit`, and spells the
   # call as a path.
   secrets-inherit:
-    ignore: ["release.yml:346"]
+    ignore: ["release.yml"]
   self-repository:
-    ignore: ["release.yml:346"]
+    ignore: ["release.yml"]
   # Trusted publishing is its own change on the roadmap.
   use-trusted-publishing:
     ignore: ["publish-crates-io.yml:122"]
