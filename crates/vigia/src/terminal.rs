@@ -100,8 +100,9 @@ impl<W: Rearm> Console for Crossterm<W> {
         // Closed and deleted before the alternate screen goes, in whose own
         // store kitty holds it.
         if let Some((id, tmux)) = crate::writer::open_image() {
-            // Under tmux the terminator above ends tmux's passthrough; this one
-            // goes through it, to the escape tmux had passed on (unverified).
+            // tmux holds a passthrough until it ends, then forwards it whole:
+            // the terminator above ends ours, and this one reaches the escape it
+            // left open in the outer terminal (tmux 3.8 `input.c`, read).
             let ended = if tmux {
                 crate::kitty::string_end(true)
             } else {
