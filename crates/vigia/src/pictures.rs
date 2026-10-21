@@ -818,6 +818,12 @@ impl Pictures {
         }
         for candidate in frame.unscored_pairs() {
             if self.asked.insert(candidate.key) {
+                // The record lists no pair past its size, and every score it
+                // drops moves the epoch, so the clear above is only a bound.
+                debug_assert!(
+                    self.asked.len() <= frame.pairs_kept(),
+                    "the worker holds more pairs sent than the record can score"
+                );
                 if self.pairs.send(candidate).is_err() {
                     return;
                 }
