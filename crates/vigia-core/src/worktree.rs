@@ -111,6 +111,8 @@ pub struct Worktree {
     sides_left: Cell<bool>,
     /// Whether this frame had more pairs for the worker than it listed.
     pairs_unlisted: Cell<bool>,
+    /// Whether a walk left a pair unweighed for want of room in the record.
+    room_wanted: Cell<bool>,
 }
 
 impl Worktree {
@@ -158,6 +160,7 @@ impl Worktree {
             pair_epoch: Cell::new(0),
             blob_sizes: RefCell::new(HashMap::new()),
             sides_left: Cell::new(false),
+            room_wanted: Cell::new(false),
             pairs_unlisted: Cell::new(false),
         })
     }
@@ -408,12 +411,17 @@ impl Worktree {
         // Its own rename budget, and the frame's pairs left as they were.
         let budget = self.pair_budget.replace(rename::FRAME_BUDGET);
         let unscored = self.unscored.take();
-        let left = (self.sides_left.get(), self.pairs_unlisted.get());
+        let left = (
+            self.sides_left.get(),
+            self.pairs_unlisted.get(),
+            self.room_wanted.get(),
+        );
         let counted = self.count_walk(origin, hide);
         self.pair_budget.set(budget);
         self.unscored.replace(unscored);
         self.sides_left.set(left.0);
         self.pairs_unlisted.set(left.1);
+        self.room_wanted.set(left.2);
         counted
     }
 
@@ -716,6 +724,8 @@ impl Worktree {
                 None if self.pair_scores.borrow().len() + self.unscored.borrow().len()
                     >= PAIRS_KEPT =>
                 {
+                    self.room_wanted.set(true);
+                    self.pairs_unlisted.set(true);
                     continue;
                 }
                 None if cost + rename::PAIR_COST <= self.pair_budget.get() => {
@@ -820,12 +830,25 @@ impl Worktree {
         self.pair_budget.set(rename::FRAME_BUDGET);
         self.unscored.borrow_mut().clear();
         self.sides_left.set(false);
+        self.room_wanted.set(false);
         self.pairs_unlisted.set(false);
     }
 
     /// Whether this frame's walks left a side unweighed for want of budget.
     pub(crate) fn sides_left(&self) -> bool {
         self.sides_left.get()
+    }
+
+    /// Whether a pair waits for room that the next frame makes, by dropping
+    /// a score this frame did not ask for.
+    pub(crate) fn room_coming(&self) -> bool {
+        let frame = self.pair_frame.get();
+        self.room_wanted.get()
+            && self
+                .pair_scores
+                .borrow()
+                .values()
+                .any(|dated| dated.frame < frame)
     }
 
     /// Whether this frame's walks had more pairs for the worker than they listed.

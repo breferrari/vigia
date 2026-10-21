@@ -2,6 +2,8 @@
 
 mod support;
 
+use std::time::{Duration, SystemTime};
+
 use support::{Scratch, changes_sorted, noise, tail_changed};
 use vigia_core::{ChangeKind, FileChange, Frame, pair_score};
 
@@ -311,6 +313,11 @@ fn full_record_makes_room() {
     frame.advance().expect("advance");
     assert_eq!(kind_of(frame.files(), "b.bin"), &ChangeKind::Added);
     assert_eq!(frame.pair_epoch(), 0, "a current score was evicted");
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        Some(Duration::ZERO),
+        "the pair waits for room and no frame comes to make it"
+    );
     // A frame later the fillers are stale, and the pair is asked for again.
     frame.advance().expect("advance");
     assert_eq!(frame.pair_epoch(), 1);
@@ -441,8 +448,13 @@ fn record_keeps_current_pairs() {
     for n in 0..4096u64 {
         frame.learn_pair((u64::MAX - n, n), 0);
     }
-    // Filed at frame 0, they go at the second advance.
+    // Filed at frame 0, they last the first frame, which asks for the next.
     frame.advance().expect("advance");
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        Some(Duration::ZERO),
+        "the pair waits for room and no frame comes to make it"
+    );
     frame.advance().expect("advance");
     assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
     assert_eq!(
@@ -519,6 +531,11 @@ fn record_over_cap() {
         for _ in 0..5 {
             frame.advance().expect("advance");
         }
+        assert_eq!(
+            frame.settles_in(SystemTime::now()),
+            None,
+            "late {late}: a record of live pairs asked for a frame"
+        );
         assert_eq!(
             frame.pair_epoch(),
             0,
