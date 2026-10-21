@@ -1542,7 +1542,8 @@ fn lfs_rename_unfetched() {
 #[test]
 fn lfs_rename_pointer_worktree() {
     // A file that is its own pointer, as a clone that skipped the smudge
-    // leaves it, is stored as it is, so moved it is a rename.
+    // leaves it, is stored as it is: moved and added with `-N`, gix leaves it
+    // unpaired, and git pairs it.
     let old = noise(136, 300_000);
     let Some(scratch) = lfs_moved("rename-lfs-pointer", &[("a.png", old)], &[]) else {
         return;
@@ -1550,10 +1551,18 @@ fn lfs_rename_pointer_worktree() {
     let pointer = scratch.git(&["show", "HEAD:a.png"]);
     assert!(pointer.starts_with("version https://git-lfs"), "{pointer}");
     scratch.write("b.png", pointer);
-    assert_eq!(
-        lfs_kinds(&scratch, "b.png", ("R a.png", "b.png")),
-        (renamed("a.png"), renamed("a.png"))
+    scratch.git(&["add", "-N", "b.png"]);
+    let git = scratch.git(&["diff", "-M", "--name-status"]);
+    assert!(
+        git.starts_with("R100\ta.png\tb.png"),
+        "the fixture is wrong: {git}"
     );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(kind_of(frame.files(), "b.png"), &renamed("a.png"));
 }
 
 #[test]
