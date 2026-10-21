@@ -439,45 +439,66 @@ fn record_keeps_current_pairs() {
 #[test]
 fn record_over_cap() {
     // 65 by 65 binaries is 4,225 live pairs, more than the record holds. Once
-    // it is full of them it must drop none, or the worker scores them again.
-    let olds: Vec<(String, Vec<u8>)> = (0..65)
-        .map(|n| (format!("old/{n:02}.bin"), noise(300 + n, 1_000)))
-        .collect();
-    let news: Vec<(String, Vec<u8>)> = (0..65)
-        .map(|n| (format!("new/{n:02}.bin"), noise(400 + n, 1_000)))
-        .collect();
-    let scratch = moved("rename-over-cap", &refs(&olds), &refs(&news));
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    // The worker answers a frame late, so every pair stays listed one frame.
-    let (mut quiet, mut late) = (0, Vec::new());
-    for _ in 0..200 {
-        frame.advance().expect("advance");
-        for candidate in std::mem::replace(&mut late, frame.unscored_pairs()) {
-            frame.learn_pair(candidate.key, 0);
-        }
-        if late.is_empty() {
-            quiet += 1;
-            if quiet == 5 {
-                break;
+    // it is full of them it must drop none, or the worker scores them again,
+    // whether it answers before the next frame or after it.
+    for late in [false, true] {
+        let olds: Vec<(String, Vec<u8>)> = (0..65)
+            .map(|n| (format!("old/{n:02}.bin"), noise(300 + n, 1_000)))
+            .collect();
+        let news: Vec<(String, Vec<u8>)> = (0..65)
+            .map(|n| (format!("new/{n:02}.bin"), noise(400 + n, 1_000)))
+            .collect();
+        let scratch = moved(
+            &format!("rename-over-cap-{late}"),
+            &refs(&olds),
+            &refs(&news),
+        );
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        let (mut quiet, mut asked, mut learned) = (0, Vec::new(), 0);
+        for _ in 0..200 {
+            frame.advance().expect("advance");
+            let listed = frame.unscored_pairs();
+            let answered = if late {
+                std::mem::replace(&mut asked, listed)
+            } else {
+                listed
+            };
+            learned += answered.len() as u64;
+            for candidate in answered {
+                frame.learn_pair(candidate.key, 0);
             }
-            continue;
+            if frame.unscored_pairs().is_empty() && asked.is_empty() {
+                quiet += 1;
+                if quiet == 5 {
+                    break;
+                }
+                continue;
+            }
+            quiet = 0;
         }
-        quiet = 0;
+        assert_eq!(
+            quiet, 5,
+            "late {late}: the frames never stopped listing pairs"
+        );
+        let scored = frame.stats().pairs_scored;
+        assert!(
+            learned + scored >= 4096,
+            "late {late}: the record stopped at {} scores",
+            learned + scored
+        );
+        for _ in 0..5 {
+            frame.advance().expect("advance");
+        }
+        assert_eq!(
+            frame.pair_epoch(),
+            0,
+            "late {late}: a record of live pairs dropped some, so the worker scores them again"
+        );
+        assert_eq!(
+            frame.stats().pairs_scored,
+            scored,
+            "late {late}: a full record scored again"
+        );
     }
-    assert_eq!(quiet, 5, "the frames never stopped listing pairs");
-    let scored = frame.stats().pairs_scored;
-    for _ in 0..5 {
-        frame.advance().expect("advance");
-    }
-    assert_eq!(
-        frame.pair_epoch(),
-        0,
-        "a record of live pairs dropped some, so the worker scores them again"
-    );
-    assert_eq!(
-        frame.stats().pairs_scored,
-        scored,
-        "a full record scored again"
-    );
 }
