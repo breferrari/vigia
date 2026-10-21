@@ -255,6 +255,32 @@ pub enum Panel {
     Sliced(SlicedProtocol),
 }
 
+impl Panel {
+    /// Whether the terminal paints it over the cells, so an overlay drawn on
+    /// top would not hide it.
+    pub fn drawn_by_terminal(&self) -> bool {
+        !matches!(self, Self::Sliced(SlicedProtocol::Halfblocks(_)))
+    }
+
+    /// Draw it into `area`, its first `above` rows scrolled off the top.
+    pub fn render(
+        &self,
+        area: ratatui::layout::Rect,
+        buf: &mut ratatui::buffer::Buffer,
+        above: u16,
+    ) {
+        use ratatui::widgets::Widget;
+        match self {
+            Self::Kitty(image) => image.render(area, buf, above),
+            Self::Sliced(protocol) => {
+                let above = i16::try_from(above).unwrap_or(i16::MAX);
+                ratatui_image::sliced::SlicedImage::new(protocol, (0, -above).into())
+                    .render(area, buf);
+            }
+        }
+    }
+}
+
 /// A picture built and encoded, ready to draw.
 pub struct Built {
     /// Each panel's place and its encoded cells.
@@ -1651,7 +1677,6 @@ fn panel(
         let id = kitty_id();
         let cells = ratatui_image::Resize::natural_size(&image, picker.font_size());
         let rgba = image.to_rgba8();
-        let compress = compress && crate::kitty::worth_deflating(rgba.as_raw());
         let kitty = crate::kitty::Image::new(
             rgba.as_raw(),
             rgba.dimensions(),
@@ -1941,14 +1966,8 @@ mod tests {
             width: 100,
             rows: 50,
         };
-        let mut seed = 0x9e37_79b9_u32;
-        let noise = RgbImage::from_fn(1000, 1000, |_, _| {
-            seed ^= seed << 13;
-            seed ^= seed >> 17;
-            seed ^= seed << 5;
-            let [r, g, b, _] = seed.to_le_bytes();
-            image::Rgb([r, g, b])
-        });
+        let noise = RgbImage::from_raw(1000, 1000, crate::kitty::noise(1000 * 1000 * 3))
+            .expect("a whole image");
         let (panel, _) =
             panel(noise, None, slot, Paint::Plain, inks, &picker, true).expect("a panel");
         let Panel::Kitty(image) = panel else {
