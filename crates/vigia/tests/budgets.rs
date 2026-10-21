@@ -3308,7 +3308,7 @@ fn pictures_first_draw_large() {
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
         return;
     }
-    let draw = |protocol, settled| {
+    let draw = |protocol| {
         pictures_frame_at(
             protocol,
             "a/screen.png",
@@ -3316,7 +3316,7 @@ fn pictures_first_draw_large() {
             support::screen_png(200),
             Rect::new(0, 0, 300, 100),
             Some((20, 40)),
-            settled,
+            false,
         )
     };
     // The round with the least thread CPU, so wall and CPU are one frame's.
@@ -3328,12 +3328,11 @@ fn pictures_first_draw_large() {
         (Duration::MAX, Duration::MAX),
     );
     let mut sent = 0;
-    for round in 0..3 {
-        // The settled frames once each, at this size.
-        let (bytes, first) = draw(ProtocolType::Kitty, round == 0);
+    for _ in 0..3 {
+        let (bytes, first) = draw(ProtocolType::Kitty);
         sent = bytes;
         kitty = best(kitty, first);
-        halfblocks = best(halfblocks, draw(ProtocolType::Halfblocks, round == 0).1);
+        halfblocks = best(halfblocks, draw(ProtocolType::Halfblocks).1);
     }
     let over = |kitty: Duration, halfblocks: Duration| {
         kitty.as_secs_f64() > halfblocks.as_secs_f64() * 1.5 + 0.002
