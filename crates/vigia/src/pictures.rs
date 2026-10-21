@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 
 use image::{DynamicImage, ImageFormat, RgbImage, RgbaImage};
-use ratatui::layout::Size;
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Rect, Size};
+use ratatui::widgets::Widget;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::halfblocks::Halfblocks;
 use ratatui_image::sliced::SlicedProtocol;
@@ -262,14 +264,13 @@ impl Panel {
         !matches!(self, Self::Sliced(SlicedProtocol::Halfblocks(_)))
     }
 
+    /// Whether it is a Kitty image sent deflated.
+    pub fn deflated(&self) -> bool {
+        matches!(self, Self::Kitty(image) if image.deflated())
+    }
+
     /// Draw it into `area`, its first `above` rows scrolled off the top.
-    pub fn render(
-        &self,
-        area: ratatui::layout::Rect,
-        buf: &mut ratatui::buffer::Buffer,
-        above: u16,
-    ) {
-        use ratatui::widgets::Widget;
+    pub fn render(&self, area: Rect, buf: &mut Buffer, above: u16) {
         match self {
             Self::Kitty(image) => image.render(area, buf, above),
             Self::Sliced(protocol) => {
@@ -1884,7 +1885,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
         };
         if let Some(id) = id {
             kitty.push(id);
-            let deflated = matches!(&protocol, Panel::Kitty(image) if image.deflated());
+            let deflated = protocol.deflated();
             // An uncompressed transmit is base64 of the pixels, four bytes to three.
             stored += if deflated {
                 pixels * 4
@@ -2203,6 +2204,59 @@ mod tests {
             None
         );
         assert_eq!(at(&window(100, 30, 1, 1)), Some((1, 1)));
+    }
+
+    #[test]
+    fn sixel_font_change() {
+        // A Sixel picture built after the cell doubles is drawn at the new
+        // cell's pixels, through the picker rebuilt at that size.
+        let mut base = Picker::halfblocks();
+        base.set_protocol_type(ProtocolType::Sixel);
+        let inks = Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        };
+        let slot = Slot {
+            x: 0,
+            width: 4,
+            rows: 2,
+        };
+        let width = |cell: Cell| {
+            let picker = picker_at(&base, cell);
+            assert_eq!(
+                picker.tmux_detected(),
+                base.tmux_detected(),
+                "the rebuild lost tmux"
+            );
+            let pixels = pixels_of(slot, (100, 100), &picker);
+            let (panel, _) = panel(
+                RgbImage::new(pixels.0, pixels.1),
+                None,
+                slot,
+                Paint::Plain,
+                inks,
+                &picker,
+                false,
+            )
+            .expect("a panel");
+            let area = Rect::new(0, 0, 4, 2);
+            let mut buf = Buffer::empty(area);
+            panel.render(area, &mut buf, 0);
+            let sent: String = buf.content().iter().map(|cell| cell.symbol()).collect();
+            // The raster attributes: aspect, aspect, width, height.
+            let raster = sent.split("\"1;1;").nth(1).expect("a Sixel image");
+            raster
+                .split(';')
+                .next()
+                .expect("a width")
+                .parse::<u32>()
+                .expect("a number")
+        };
+        assert_eq!(
+            (width((10, 20)), width((20, 40))),
+            (40, 80),
+            "a Sixel picture was not drawn at the new cell's pixels"
+        );
     }
 
     #[test]

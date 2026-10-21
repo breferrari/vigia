@@ -66,8 +66,7 @@ fn transmit(
 const SAMPLE: usize = 64 * 1024;
 
 /// Whether deflating `rgba` pays: a sample from across the image shrinks at
-/// least twice. A photograph shrinks about 1.5 times and costs 40 to 130 ms
-/// to deflate whole; the sample costs under half a millisecond.
+/// least twice, which a photograph's does not.
 fn worth_deflating(rgba: &[u8]) -> bool {
     if rgba.len() <= SAMPLE {
         return true;
@@ -94,7 +93,7 @@ fn zlib(raw: &[u8]) -> Vec<u8> {
 }
 
 /// Draw image `id`'s placeholder cells over `area`, an image `size` cells big,
-/// its first `skip` rows above the area. `first` goes in front of the first
+/// its first `skip` rows above the area. `leading` goes in front of the first
 /// cell, as the transmit does on the frame that sends it.
 fn placeholders(
     area: Rect,
@@ -102,7 +101,7 @@ fn placeholders(
     id: u32,
     skip: u16,
     buf: &mut Buffer,
-    mut first: Option<&str>,
+    mut leading: Option<&str>,
 ) {
     let [high, r, g, b] = id.to_be_bytes();
     let fg = Color::Rgb(r, g, b);
@@ -110,7 +109,7 @@ fn placeholders(
     // rather than drawn at the wrong offset.
     let most = DIACRITICS.len() as u16;
     let width = area.width.min(size.width).min(most);
-    let height = area.height.min(size.height).min(most);
+    let height = area.height.min(size.height).min(most.saturating_sub(skip));
     let mut symbol = String::with_capacity(64);
     for y in 0..height {
         for x in 0..width {
@@ -118,8 +117,8 @@ fn placeholders(
                 continue;
             };
             symbol.clear();
-            if let Some(first) = first.take() {
-                symbol.push_str(first);
+            if let Some(leading) = leading.take() {
+                symbol.push_str(leading);
             }
             symbol.push(PLACEHOLDER);
             if x == 0 {
@@ -189,7 +188,12 @@ impl Image {
     /// Draw it into `area` with its first `above` rows scrolled above the
     /// area's top. The first draw carries the transmit.
     pub fn render(&self, area: Rect, buf: &mut Buffer, above: u16) {
-        if area.is_empty() || above >= self.cells.height {
+        let first_cell = (area.x, area.y).into();
+        // Otherwise no cell would carry the transmit, and it would be lost.
+        if area.is_empty()
+            || above >= self.cells.height.min(DIACRITICS.len() as u16)
+            || !buf.area().contains(first_cell)
+        {
             return;
         }
         let room = Rect {
@@ -411,6 +415,73 @@ mod tests {
         assert!(
             first > second + 1000 && second > 0,
             "the transmit was not sent exactly once: {first} then {second} bytes of cells"
+        );
+    }
+
+    #[test]
+    fn chunk_edges() {
+        // 3072 bytes of pixels are exactly one full chunk, and 6144 exactly two.
+        for (height, count) in [(24, 1), (48, 2)] {
+            let pixels = image(32, height);
+            let sent = transmit(
+                pixels.as_raw(),
+                pixels.dimensions(),
+                Size::new(4, 2),
+                5,
+                false,
+                false,
+            );
+            let chunks: Vec<&str> = sent.split_inclusive("\x1b\\").collect();
+            assert_eq!(
+                chunks.len(),
+                count,
+                "{} bytes split into {} chunks",
+                pixels.len(),
+                chunks.len()
+            );
+            let last = chunks.last().expect("a chunk");
+            let data = last.split_once(';').expect("keys then data").1;
+            assert_eq!(data.len(), CHUNK + 2, "the last chunk is not a full one");
+            assert!(last.contains("m=0"), "the last chunk is not marked last");
+        }
+    }
+
+    #[test]
+    fn far_rows_scrolled() {
+        // Scrolled 10 rows, the rows that would be 297 and past are left undrawn
+        // rather than drawn as row 0.
+        let cells = Size::new(1, 300);
+        let pixels = image(10, 3000);
+        let image = Image::new(pixels.as_raw(), pixels.dimensions(), cells, 7, false, false);
+        let area = Rect::new(0, 0, 1, 290);
+        let mut buf = Buffer::empty(area);
+        image.render(area, &mut buf, 10);
+        let drawn = |y: u16| buf[(0, y)].symbol().contains(PLACEHOLDER);
+        assert!(drawn(286), "row 296 was not drawn");
+        assert!(
+            !drawn(287),
+            "row 297, past the table, was drawn as another row"
+        );
+    }
+
+    #[test]
+    fn transmit_kept_offscreen() {
+        // A draw that lands outside the buffer leaves the transmit for the next.
+        let pixels = image(40, 40);
+        let image = Image::new(
+            pixels.as_raw(),
+            pixels.dimensions(),
+            Size::new(4, 2),
+            3,
+            false,
+            false,
+        );
+        let mut buf = Buffer::empty(Rect::new(0, 0, 4, 2));
+        image.render(Rect::new(10, 10, 4, 2), &mut buf, 0);
+        image.render(Rect::new(0, 0, 4, 2), &mut buf, 0);
+        assert!(
+            buf[(0, 0)].symbol().contains("_Gq=2,i=3"),
+            "a draw outside the buffer spent the transmit"
         );
     }
 
