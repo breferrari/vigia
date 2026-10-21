@@ -641,17 +641,15 @@ impl<'repo> Watcher<'repo> {
         if within(&self.store, path).is_some() {
             return Some((Path::new(".git"), false));
         }
-        // A directory on the way to a store in the git dir: inotify watches it
-        // only once it exists, so what landed in it first raised no event.
-        let in_git = within(&self.git_dir, path);
-        if in_git.is_some_and(|inside| !inside.as_os_str().is_empty())
-            && self.store.iter().any(|spelling| spelling.starts_with(path))
-        {
-            return Some((Path::new(".git"), false));
-        }
         // A git-dir event comes back as `.git`, which `followable` never follows.
         if let Some(inside) = within(&self.git_dir, path) {
-            let watched = if inside == Path::new("index") {
+            // A directory on the way to the store: inotify watches a new one only
+            // once it exists, so files made in it first send no event.
+            let on_way = !inside.as_os_str().is_empty()
+                && self.store.iter().any(|spelling| spelling.starts_with(path));
+            let watched = if on_way {
+                true
+            } else if inside == Path::new("index") {
                 self.index.moved()
             } else {
                 self.reload_due |= inside == Path::new("config");
@@ -1108,15 +1106,9 @@ mod tests {
     /// A repository using LFS whose store, with its `objects`, sits outside it:
     /// the directory holding both, the worktree and the store.
     fn outside_store(name: &str) -> (Removed, PathBuf, PathBuf) {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos());
-        let base = Removed(
-            std::env::temp_dir().join(format!("vigia-{name}-{}-{stamp}", std::process::id())),
-        );
-        let (tree, store) = (base.0.join("tree"), base.0.join("store"));
+        let (base, tree) = fresh_repo(name);
+        let store = base.0.join("store");
         std::fs::create_dir_all(store.join("objects")).expect("store");
-        std::fs::create_dir_all(&tree).expect("tree");
         let git = |args: &[&str]| {
             let out = std::process::Command::new("git")
                 .arg("-C")
@@ -1126,7 +1118,6 @@ mod tests {
                 .expect("run git");
             assert!(out.status.success(), "git {args:?}");
         };
-        git(&["init", "-q"]);
         git(&["config", "lfs.storage", &store.to_string_lossy()]);
         std::fs::create_dir_all(tree.join(".git").join("info")).expect("info");
         std::fs::write(tree.join(".git/info/attributes"), "*.png filter=lfs\n")
