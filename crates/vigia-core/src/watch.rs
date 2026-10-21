@@ -645,9 +645,9 @@ impl<'repo> Watcher<'repo> {
         if let Some(inside) = within(&self.git_dir, path) {
             // A directory on the way to the store: inotify watches a new one only
             // once it exists, so files made in it first send no event.
-            let on_way = !inside.as_os_str().is_empty()
+            let toward_store = !inside.as_os_str().is_empty()
                 && self.store.iter().any(|spelling| spelling.starts_with(path));
-            let watched = if on_way {
+            let watched = if toward_store {
                 true
             } else if inside == Path::new("index") {
                 self.index.moved()
