@@ -68,9 +68,7 @@ pub fn with_decode_limit<T>(
 #[cfg(feature = "std")]
 pub fn fallback_capacity(bytes: u64, data: &[u8]) -> (bool, usize) {
     let mut seen = (false, 0);
-    let _ = with_decode_limit(bytes, || {
-        seen = crate::filter::lzw_flate::flate::capacity(data)
-    });
+    let _ = with_decode_limit(bytes, || seen = crate::filter::lzw_flate::flate::capacity(data));
     seen
 }
 
