@@ -1591,7 +1591,7 @@ fn unpaired_frame(scratch: &Scratch, binary: bool) {
 /// neither holds I9; that absolute gate is the open issue on weighing rename
 /// candidates without the full matrix every walk.
 #[test]
-fn unpaired_text_no_worse_than_binary() {
+fn unpaired_text_ratchet() {
     let (text, binary) = (
         Scratch::new("budget-unpaired-text"),
         Scratch::new("budget-unpaired-binary"),
