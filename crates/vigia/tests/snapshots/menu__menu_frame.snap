@@ -14,8 +14,8 @@ expression: "text_of(&buf, area())"
    2 - fn befo│    Notes                                   on    │             │
    3 - fn befo│    File icons                             off    │             │
    4 - fn befo│    Path links                              on    │             │
-   5 - fn befo│    Update check  next launch               on    │             │
-   6 - fn befo│    Pictures      next launch             auto    │             │
+   5 - fn befo│    Check for updates                       on    │             │
+   6 - fn befo│    Picture protocol                      auto    │             │
    7 - fn befo│                                                  │             │
    8 - fn befo│    ──────────────────────────────────────────    │             │
    9 - fn befo│                                                  │             │

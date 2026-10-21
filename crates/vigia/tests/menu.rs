@@ -1007,7 +1007,8 @@ fn a_refused_write_turns_remembering_off_rather_than_only_saying_so() {
         apply(app, frame, area(), Action::TogglePersist);
         assert!(app.settings().persist, "remembering did not turn on");
 
-        let refused = vigia::config::save(&blocked, &app.config()).expect_err("a blocked save");
+        let refused =
+            vigia::config::save(&blocked, &app.config(), &[]).expect_err("a blocked save");
         assert!(
             refused.to_string().contains("config"),
             "the refusal does not name the file: {refused}"
@@ -1184,8 +1185,8 @@ fn launch_rows_drawn() {
                 .find(|line| line.contains(setting.label()))
                 .unwrap_or_else(|| panic!("no row for {:?}:\n{text}", setting.label()));
             assert!(
-                row.contains("next launch"),
-                "{:?} does not say it applies at the next launch:\n{text}",
+                !row.contains(vigia::ENV),
+                "{:?} says env with no variable set:\n{text}",
                 setting.label()
             );
         }
@@ -1243,10 +1244,15 @@ fn env_marker_drawn() {
 }
 
 #[test]
-fn launch_rows_narrow() {
-    // At the narrowest box the hint gives way, and the name and the word survive.
-    let mut pane = Pane::open("menu-launch-narrow");
+fn env_marker_narrow() {
+    // At the narrowest box the value after the marker may go, and the marker, the
+    // name and the widest word stay.
+    let mut pane = Pane::open("menu-env-narrow");
     pane.with(|app, frame, highlighter, history| {
+        app.set_overrides(vigia::Overrides {
+            update: Some(false),
+            pictures: Some(vigia::pictures::Choice::Iterm2),
+        });
         for _ in 0..4 {
             apply(app, frame, area(), Setting::Pictures.action());
         }
@@ -1268,9 +1274,87 @@ fn launch_rows_narrow() {
             "halfblocks",
             "the widest word does not fit the narrowest box:\n{text}"
         );
-        assert!(
-            text.contains(Setting::Pictures.label()),
-            "the pictures row lost its name:\n{text}"
-        );
+        for setting in [Setting::Update, Setting::Pictures] {
+            let row = text
+                .lines()
+                .find(|line| line.contains(setting.label()))
+                .unwrap_or_else(|| panic!("no row for {:?}:\n{text}", setting.label()));
+            assert!(
+                row.contains(" env"),
+                "{:?} hides its override at the narrowest box:\n{text}",
+                setting.label()
+            );
+        }
     });
+}
+
+#[test]
+fn unflipped_keys_kept() {
+    let mut pane = Pane::open("menu-unflipped");
+    pane.with(|app, frame, _highlighter, _history| {
+        assert_eq!(app.unflipped(), ["update", "pictures"]);
+        apply(app, frame, area(), Setting::Update.action());
+        assert_eq!(app.unflipped(), ["pictures"], "a flipped key is still kept");
+        apply(app, frame, area(), Setting::Pictures.action());
+        assert!(app.unflipped().is_empty(), "a cycled key is still kept");
+    });
+}
+
+#[test]
+fn restart_notice_words() {
+    use vigia::menu::launch_notice;
+    let saved = vigia::Settings {
+        persist: true,
+        update: true,
+        ..Default::default()
+    };
+    assert_eq!(launch_notice(saved, saved), None, "nothing moved");
+    let rail = vigia::Settings {
+        rail: true,
+        ..saved
+    };
+    assert_eq!(
+        launch_notice(saved, rail),
+        None,
+        "a live toggle asks for no restart"
+    );
+
+    let flipped = vigia::Settings {
+        update: false,
+        ..saved
+    };
+    assert_eq!(
+        launch_notice(saved, flipped).as_deref(),
+        Some(vigia::RESTART)
+    );
+
+    let unsaved = vigia::Settings {
+        persist: false,
+        ..saved
+    };
+    let cycled = vigia::Settings {
+        pictures: vigia::pictures::Choice::Kitty,
+        ..unsaved
+    };
+    assert_eq!(
+        launch_notice(unsaved, cycled).as_deref(),
+        Some(vigia::UNSAVED),
+        "a flip with Save settings off says it is not saved"
+    );
+
+    let overridden = vigia::Settings {
+        env: vigia::Overrides {
+            pictures: Some(vigia::pictures::Choice::Sixel),
+            update: None,
+        },
+        ..saved
+    };
+    let cycled = vigia::Settings {
+        pictures: vigia::pictures::Choice::Kitty,
+        ..overridden
+    };
+    assert_eq!(
+        launch_notice(overridden, cycled).as_deref(),
+        Some("VIGIA_PICTURES wins over this"),
+    );
 }

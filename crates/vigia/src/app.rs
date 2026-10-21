@@ -158,6 +158,9 @@ pub struct App {
     picture_choice: crate::pictures::Choice,
     /// What the environment sets over those two.
     env: Overrides,
+    /// The two as the pane launched with them, so a save can leave a key the
+    /// reader never flipped to whatever the file says now.
+    launched: (bool, crate::pictures::Choice),
     /// Whether a flip is written back into the reader's own file. `SPEC.md` §11.2
     /// B22, and the one setting that is about the file rather than about the pane.
     persist: bool,
@@ -289,6 +292,7 @@ impl Default for App {
             update: true,
             picture_choice: crate::pictures::Choice::Auto,
             env: Overrides::default(),
+            launched: (true, crate::pictures::Choice::Auto),
             persist: false,
             staged_files: 0,
             sheet: None,
@@ -340,6 +344,7 @@ impl App {
             links: config.links,
             update: config.update,
             picture_choice: config.pictures,
+            launched: (config.update, config.pictures),
             persist: config.persist,
             ..Self::new()
         }
@@ -779,6 +784,20 @@ impl App {
             persist: it.persist,
             hide: None,
         }
+    }
+
+    /// The launch-only keys still at their launch value, which a save leaves as the
+    /// file has them: a hand edit made while the pane is open survives.
+    #[must_use]
+    pub fn unflipped(&self) -> Vec<&'static str> {
+        let mut kept = Vec::new();
+        if self.update == self.launched.0 {
+            kept.push("update");
+        }
+        if self.picture_choice == self.launched.1 {
+            kept.push("pictures");
+        }
+        kept
     }
 
     /// Say what the environment sets over the file, for the menu to draw.

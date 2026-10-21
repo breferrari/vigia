@@ -478,10 +478,12 @@ impl Choice {
         Self::Halfblocks,
     ];
 
-    /// The choice `word` spells, or `None` for a word that is not one.
+    /// The choice `word` spells in any case, or `None` for a word that is not one.
     #[must_use]
     pub fn named(word: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|choice| choice.word() == word)
+        Self::ALL
+            .into_iter()
+            .find(|choice| choice.word().eq_ignore_ascii_case(word))
     }
 
     /// What the file and the variable spell it as.
@@ -521,33 +523,19 @@ impl Choice {
     }
 }
 
-/// The choice [`PICTURES_VAR`] makes, or `None` where it is unset or empty.
+/// The choice [`PICTURES_VAR`] makes, or `None` where it is unset or empty,
+/// which leaves it to the config file's `pictures` key.
 ///
 /// # Errors
 ///
 /// The variable holds a word that is not a [`Choice`].
-pub fn env_choice(
-    lookup: &impl Fn(&str) -> Option<String>,
-) -> Result<Option<Choice>, PicturesError> {
+pub fn forced(lookup: &impl Fn(&str) -> Option<String>) -> Result<Option<Choice>, PicturesError> {
     let Some((raw, value)) = crate::colour::override_of(lookup, PICTURES_VAR) else {
         return Ok(None);
     };
     Choice::named(&value)
         .map(Some)
         .ok_or(PicturesError { value: raw })
-}
-
-/// The protocol to force: [`PICTURES_VAR`] where it is set, then `file`, the
-/// config file's choice. `None` is `auto`.
-///
-/// # Errors
-///
-/// The variable holds a word that is not a [`Choice`].
-pub fn forced(
-    lookup: &impl Fn(&str) -> Option<String>,
-    file: Choice,
-) -> Result<Option<ProtocolType>, PicturesError> {
-    Ok(env_choice(lookup)?.unwrap_or(file).protocol())
 }
 
 /// The protocol the answer and the table give, without the override.
@@ -3126,7 +3114,11 @@ mod tests {
         answer: Answer,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<ProtocolType, PicturesError> {
-        Ok(protocol_of(forced(&lookup, Choice::Auto)?, answer, &lookup))
+        Ok(protocol_of(
+            forced(&lookup)?.unwrap_or_default().protocol(),
+            answer,
+            &lookup,
+        ))
     }
 
     const KNOWN: Answer = Answer {
@@ -3180,22 +3172,22 @@ mod tests {
     fn file_choice_precedence() {
         let kitty = Choice::Kitty;
         assert_eq!(
-            forced(&env(&[]), kitty),
+            forced(&env(&[])).map(|env| env.unwrap_or(kitty).protocol()),
             Ok(Some(ProtocolType::Kitty)),
             "the file's choice was not used with the variable unset"
         );
         assert_eq!(
-            forced(&env(&[(PICTURES_VAR, "sixel")]), kitty),
+            forced(&env(&[(PICTURES_VAR, "sixel")])).map(|env| env.unwrap_or(kitty).protocol()),
             Ok(Some(ProtocolType::Sixel)),
             "the file's choice won over the variable"
         );
         assert_eq!(
-            forced(&env(&[(PICTURES_VAR, "auto")]), kitty),
+            forced(&env(&[(PICTURES_VAR, "auto")])).map(|env| env.unwrap_or(kitty).protocol()),
             Ok(None),
             "a variable set to auto did not win over the file"
         );
         assert_eq!(
-            forced(&env(&[(PICTURES_VAR, "")]), kitty),
+            forced(&env(&[(PICTURES_VAR, "")])).map(|env| env.unwrap_or(kitty).protocol()),
             Ok(Some(ProtocolType::Kitty)),
             "an empty variable did not fall back to the file"
         );

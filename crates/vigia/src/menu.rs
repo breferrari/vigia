@@ -89,20 +89,35 @@ pub const CHOICE_WIDTH: usize = {
     widest
 };
 
-/// What a row read only at launch says beside its name.
-pub const NEXT_LAUNCH: &str = "next launch";
-
-/// What it says instead when the environment overrides the file.
+/// What a row read only at launch says beside its name when the environment
+/// overrides the file.
 pub const ENV: &str = "env";
 
-/// What a row read only at launch says beside its name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hint {
-    /// A flip applies at the next launch: [`NEXT_LAUNCH`].
-    Launch,
-    /// The environment sets it, to this word, whatever the file says.
-    Env(&'static str),
+/// What the footer says after a row read only at launch is flipped and written.
+pub const RESTART: &str = "restart to apply";
+
+/// And when it is flipped and not written.
+pub const UNSAVED: &str = "not saved: turn on Save settings";
+
+/// What the footer says after a flip that moved a row read only at launch, or
+/// `None` where none of them moved. An overridden row names the variable that
+/// wins, because a restart would not apply it.
+#[must_use]
+pub fn launch_notice(before: Settings, after: Settings) -> Option<String> {
+    let mut moved = SETTINGS
+        .into_iter()
+        .filter(|setting| setting.at_launch() && setting.word(before) != setting.word(after))
+        .peekable();
+    moved.peek()?;
+    let overridden = moved.find(|setting| setting.env(after).is_some());
+    Some(match overridden {
+        _ if !after.persist => UNSAVED.to_owned(),
+        Some(Setting::Update) => format!("{} wins over this", crate::UPDATE_VAR),
+        Some(_) => format!("{} wins over this", crate::pictures::PICTURES_VAR),
+        None => RESTART.to_owned(),
+    })
 }
+
 impl Setting {
     /// What the row spells.
     #[must_use]
@@ -117,8 +132,8 @@ impl Setting {
             Self::Notes => "Notes",
             Self::Icons => "File icons",
             Self::Links => "Path links",
-            Self::Update => "Update check",
-            Self::Pictures => "Pictures",
+            Self::Update => "Check for updates",
+            Self::Pictures => "Picture protocol",
             Self::Persist => "Save settings",
         }
     }
@@ -172,19 +187,27 @@ impl Setting {
         }
     }
 
-    /// What it says beside its name, for the two rows read only at launch.
+    /// Whether the pane reads it only at launch, so a flip changes the file and
+    /// not the pane.
     #[must_use]
-    pub const fn hint(self, settings: Settings) -> Option<Hint> {
+    pub const fn at_launch(self) -> bool {
+        matches!(self, Self::Update | Self::Pictures)
+    }
+
+    /// The value the environment sets over the file, for a row read only at
+    /// launch, or `None` where it sets nothing.
+    #[must_use]
+    pub const fn env(self, settings: Settings) -> Option<&'static str> {
         match self {
-            Self::Update => Some(match settings.env.update {
-                Some(true) => Hint::Env("auto"),
-                Some(false) => Hint::Env(OFF),
-                None => Hint::Launch,
-            }),
-            Self::Pictures => Some(match settings.env.pictures {
-                Some(choice) => Hint::Env(choice.word()),
-                None => Hint::Launch,
-            }),
+            Self::Update => match settings.env.update {
+                Some(true) => Some("auto"),
+                Some(false) => Some(OFF),
+                None => None,
+            },
+            Self::Pictures => match settings.env.pictures {
+                Some(choice) => Some(choice.word()),
+                None => None,
+            },
             _ => None,
         }
     }

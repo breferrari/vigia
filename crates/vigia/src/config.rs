@@ -374,9 +374,10 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
 /// and rebuilding it would reformat the file on every flip while their editor put
 /// it back on every save. Comments, blank lines, key order and `hide` survive, and
 /// a key the file lacks is appended, so a hand-written file only grows at the end.
-/// The lines it owns are every toggle and `pictures`.
+/// The lines it owns are every toggle and `pictures`, less the keys in `kept`,
+/// whose lines are left as the file has them and are never appended.
 #[must_use]
-pub fn rewrite(source: &str, config: &Config) -> String {
+pub fn rewrite(source: &str, config: &Config, kept: &[&str]) -> String {
     // Off the front and back on, for the reason `parse` strips it: U+FEFF is `Cf`
     // rather than `White_Space`, so it survives every trim and lands inside the first
     // key, which would then be unrecognised and appended a second time.
@@ -391,7 +392,8 @@ pub fn rewrite(source: &str, config: &Config) -> String {
     if mark {
         out.push('\u{FEFF}');
     }
-    let mut written: Vec<&str> = Vec::with_capacity(SAVED.len());
+    // A kept key counts as written already, so its line is passed through as it is.
+    let mut written: Vec<&str> = kept.to_vec();
     // The first line's ending, so a file written on Windows stays one and an
     // appended key takes what the rest of it has. The first rather than the last
     // because a file carrying both is already inconsistent, and the first is the
@@ -519,11 +521,13 @@ fn landing(path: &Path) -> PathBuf {
 /// What is left is two panes writing in turn, where the last flip wins: closing
 /// that needs a lock, and a lock is a file nobody asked this program to write.
 ///
+/// `kept` names keys to leave as the file has them, which [`rewrite`] describes.
+///
 /// # Errors
 ///
 /// The directory cannot be made, the file cannot be read or no longer parses, or
 /// the write cannot land.
-pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
+pub fn save(path: &Path, config: &Config, kept: &[&str]) -> Result<(), ConfigError> {
     let refuse = |why: std::io::Error| ConfigError::Unwritable {
         path: path.to_owned(),
         why: why.to_string(),
@@ -543,7 +547,7 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
         let _ = std::fs::remove_file(&temp);
         refuse(why)
     };
-    std::fs::write(&temp, rewrite(&source, config)).map_err(wipe)?;
+    std::fs::write(&temp, rewrite(&source, config, kept)).map_err(wipe)?;
     std::fs::rename(&temp, &target).map_err(wipe)
 }
 

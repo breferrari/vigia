@@ -52,19 +52,26 @@ const ANSWER: &str = r#"{"crate":{"id":"vigia","name":"vigia",
 
 #[test]
 fn an_unset_variable_asks_for_the_check() {
-    assert_eq!(wanted(env(&[]), true), Ok(true));
+    assert_eq!(wanted(env(&[])).map(|env| env.unwrap_or(true)), Ok(true));
 }
 
 #[test]
 fn off_declines_it() {
-    assert_eq!(wanted(env(&[(UPDATE_VAR, "off")]), true), Ok(false));
-    assert_eq!(wanted(env(&[(UPDATE_VAR, "  OFF  ")]), true), Ok(false));
+    assert_eq!(
+        wanted(env(&[(UPDATE_VAR, "off")])).map(|env| env.unwrap_or(true)),
+        Ok(false)
+    );
+    assert_eq!(
+        wanted(env(&[(UPDATE_VAR, "  OFF  ")])).map(|env| env.unwrap_or(true)),
+        Ok(false)
+    );
 }
 
 #[test]
 fn a_value_it_does_not_understand_is_refused() {
-    let refused =
-        wanted(env(&[(UPDATE_VAR, "no")]), true).expect_err("a value nobody defined was accepted");
+    let refused = wanted(env(&[(UPDATE_VAR, "no")]))
+        .map(|env| env.unwrap_or(true))
+        .expect_err("a value nobody defined was accepted");
     assert_eq!(refused.value, "no");
     assert!(
         refused.to_string().contains("auto, off"),
@@ -76,29 +83,35 @@ fn a_value_it_does_not_understand_is_refused() {
 fn a_variable_set_to_nothing_is_not_a_value() {
     // A PowerShell `$env:VIGIA_UPDATE = ""` is set and empty, which is the
     // shape the colour ladder already refuses to read as an override.
-    assert_eq!(wanted(env(&[(UPDATE_VAR, "")]), true), Ok(true));
-    assert_eq!(wanted(env(&[(UPDATE_VAR, "   ")]), true), Ok(true));
+    assert_eq!(
+        wanted(env(&[(UPDATE_VAR, "")])).map(|env| env.unwrap_or(true)),
+        Ok(true)
+    );
+    assert_eq!(
+        wanted(env(&[(UPDATE_VAR, "   ")])).map(|env| env.unwrap_or(true)),
+        Ok(true)
+    );
 }
 
 #[test]
 fn file_key_precedence() {
     assert_eq!(
-        wanted(env(&[]), false),
+        wanted(env(&[])).map(|env| env.unwrap_or(false)),
         Ok(false),
         "the file's `update = off` was not used with the variable unset"
     );
     assert_eq!(
-        wanted(env(&[(UPDATE_VAR, "auto")]), false),
+        wanted(env(&[(UPDATE_VAR, "auto")])).map(|env| env.unwrap_or(false)),
         Ok(true),
         "the file's `update = off` won over the variable"
     );
     assert_eq!(
-        wanted(env(&[(UPDATE_VAR, "off")]), true),
+        wanted(env(&[(UPDATE_VAR, "off")])).map(|env| env.unwrap_or(true)),
         Ok(false),
         "the file's `update = on` won over the variable"
     );
     assert_eq!(
-        wanted(env(&[(UPDATE_VAR, "")]), false),
+        wanted(env(&[(UPDATE_VAR, "")])).map(|env| env.unwrap_or(false)),
         Ok(false),
         "an empty variable did not fall back to the file"
     );

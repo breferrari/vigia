@@ -61,8 +61,8 @@ pub use input::{
     drag_action, hover_after, patience, repainted, scroll_mark, selection_after, settled,
 };
 pub use menu::{
-    CHOICE_WIDTH, Caret, ENV, Hint, Menu, MenuRoute, NEXT_LAUNCH, OFF, ON, Overrides, RESET, ROWS,
-    SETTINGS, STATE_WIDTH, Setting, Settings, menu_route,
+    CHOICE_WIDTH, Caret, ENV, Menu, MenuRoute, OFF, ON, Overrides, RESET, RESTART, ROWS, SETTINGS,
+    STATE_WIDTH, Setting, Settings, UNSAVED, menu_route,
 };
 pub use motion::{
     ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING_FRAME, BOX_ARRIVING, LEAVING, NOTICE_ARRIVING,
@@ -393,22 +393,22 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // `SPEC.md` §11.2 B6.
     let config = config::from_env(|key| std::env::var(key).ok())?;
 
-    // Only the override is read here, so a value it refuses is reported on a
-    // terminal the reader can still read. The query itself waits for the first
-    // paint.
-    let forced = pictures::forced(&|key: &str| std::env::var(key).ok(), config.pictures)?;
+    // The two variables that win over the file, read once and before the takeover,
+    // so a value they refuse is reported on a terminal the reader can still read.
+    // The picture query itself waits for the first paint.
     let overrides = menu::Overrides {
-        update: update::env_wanted(|key| std::env::var(key).ok())?,
-        pictures: pictures::env_choice(&|key: &str| std::env::var(key).ok())?,
+        update: update::wanted(|key| std::env::var(key).ok())?,
+        pictures: pictures::forced(&|key: &str| std::env::var(key).ok())?,
     };
+    let forced = overrides.pictures.unwrap_or(config.pictures).protocol();
 
     // Resolved beside the read rather than at the first flip: a reader with no home
     // has nowhere to keep settings, and that is a fact about the environment the
     // launch already knows. `SPEC.md` §11.2 B22.
     let config_path = theme::home_file(config::CONFIG_FILE, &|key| std::env::var(key).ok());
 
-    // Read here for that same reason, and acted on after the first paint.
-    let update = update::wanted(|key| std::env::var(key).ok(), config.update)?;
+    // Acted on after the first paint.
+    let update = overrides.update.unwrap_or(config.update);
 
     // Where the reader's notes live, resolved once with the rest of the
     // environment. `None` with no home to keep them under, which the first click
@@ -1492,6 +1492,10 @@ impl Shell {
         if after != before && (before.persist || after.persist) {
             self.remember();
         }
+        // Asked after the save, which turns remembering off when it is refused.
+        if let Some(notice) = menu::launch_notice(before, self.app.settings()) {
+            self.say(notice, Voice::Said, Instant::now());
+        }
         Ok(carried)
     }
 
@@ -1887,7 +1891,7 @@ impl Shell {
             hide: self.hide.clone(),
             ..self.app.config()
         };
-        if let Err(e) = config::save(&path, &wanted) {
+        if let Err(e) = config::save(&path, &wanted, &self.app.unflipped()) {
             self.app.warn(e.to_string());
             self.app.apply_persist(false);
         }

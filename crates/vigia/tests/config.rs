@@ -967,7 +967,7 @@ notes = off
 fn a_rewrite_keeps_every_comment_and_every_line_it_does_not_own() {
     let mut config = config::parse(HAND_WRITTEN).expect("the fixture parses");
     config.single = true;
-    let out = config::rewrite(HAND_WRITTEN, &config);
+    let out = config::rewrite(HAND_WRITTEN, &config, &[]);
 
     for kept in [
         "# the pane I want",
@@ -997,7 +997,7 @@ fn a_rewrite_keeps_every_comment_and_every_line_it_does_not_own() {
 #[test]
 fn a_rewrite_appends_a_key_the_file_lacks_and_never_writes_hide() {
     let config = config::parse(HAND_WRITTEN).expect("the fixture parses");
-    let out = config::rewrite(HAND_WRITTEN, &config);
+    let out = config::rewrite(HAND_WRITTEN, &config, &[]);
     let back = config::parse(&out).expect("the rewrite parses");
     assert_eq!(back, config, "the file no longer round trips");
 
@@ -1030,7 +1030,7 @@ fn a_file_notepad_saved_survives_a_rewrite() {
         rail: true,
         ..config::parse(saved).expect("the fixture parses")
     };
-    let out = config::rewrite(saved, &config);
+    let out = config::rewrite(saved, &config, &[]);
 
     assert!(
         out.starts_with('\u{FEFF}'),
@@ -1059,7 +1059,7 @@ fn a_file_written_on_windows_stays_written_on_windows() {
         rail: true,
         ..config::parse(theirs).expect("the fixture parses")
     };
-    let out = config::rewrite(theirs, &config);
+    let out = config::rewrite(theirs, &config, &[]);
 
     assert!(
         !out.contains('\n') || out.matches("\r\n").count() == out.matches('\n').count(),
@@ -1090,7 +1090,7 @@ fn a_save_refuses_a_file_that_no_longer_parses() {
     let path = home.root().join("config");
     std::fs::write(&path, "rail = off\nrail = on\n").expect("seed a file it refuses");
 
-    let refused = config::save(&path, &Config::default()).expect_err("a save over a bad file");
+    let refused = config::save(&path, &Config::default(), &[]).expect_err("a save over a bad file");
     assert_matches!(
         &refused, ConfigError::RepeatedKey { key, .. } if key == "rail",
         "the refusal is not the parser's own: {refused:?}"
@@ -1123,7 +1123,7 @@ fn a_rewrite_adds_no_line_the_reader_did_not_have() {
         ("both kinds", "rail = off\r\nsingle = off\n", "\r\n"),
     ] {
         let config = Config::default();
-        let out = config::rewrite(source, &config);
+        let out = config::rewrite(source, &config, &[]);
         assert!(
             config::parse(&out).is_ok(),
             "{what}: the rewrite made a file the next launch refuses:\n{out:?}"
@@ -1149,7 +1149,7 @@ fn a_rewrite_adds_no_line_the_reader_did_not_have() {
         // And a second pass is the first, so a flip a minute later changes nothing
         // but the word the reader flipped.
         assert_eq!(
-            config::rewrite(&out, &config),
+            config::rewrite(&out, &config, &[]),
             out,
             "{what}: the rewrite is not settled after one pass"
         );
@@ -1170,7 +1170,7 @@ rail = off
         rail: true,
         ..Config::default()
     };
-    let out = config::rewrite(doubled, &config);
+    let out = config::rewrite(doubled, &config, &[]);
     let rails: Vec<&str> = out
         .lines()
         .filter(|line| line.trim_start().starts_with("rail"))
@@ -1195,14 +1195,14 @@ fn a_rewrite_of_a_file_it_wrote_is_the_same_file() {
     // Idempotence, which is what stops a file growing a line every time a reader
     // flips a row.
     let config = config::parse(HAND_WRITTEN).expect("the fixture parses");
-    let once = config::rewrite(HAND_WRITTEN, &config);
-    let twice = config::rewrite(&once, &config);
+    let once = config::rewrite(HAND_WRITTEN, &config, &[]);
+    let twice = config::rewrite(&once, &config, &[]);
     assert_eq!(once, twice, "a second rewrite is not the first:\n{once}");
 
     // And from nothing: a reader who never had a file gets one that parses back to
     // the same pane. `hide` is the one thing that does not survive, because the menu
     // never writes a pattern and a file written from nothing has none to keep.
-    let fresh = config::rewrite("", &config);
+    let fresh = config::rewrite("", &config, &[]);
     assert_eq!(
         config::parse(&fresh).expect("the fresh file parses"),
         Config {
@@ -1216,7 +1216,7 @@ fn a_rewrite_of_a_file_it_wrote_is_the_same_file() {
         "a file written from nothing carries a pattern nobody wrote:\n{fresh}"
     );
     assert_eq!(
-        config::rewrite(&fresh, &config),
+        config::rewrite(&fresh, &config, &[]),
         fresh,
         "rewriting a file it wrote from nothing changed it"
     );
@@ -1232,7 +1232,7 @@ fn a_save_lands_whole_and_says_which_file_it_could_not_write() {
         ..Config::default()
     };
 
-    config::save(&path, &config).expect("a save into a directory nobody made");
+    config::save(&path, &config, &[]).expect("a save into a directory nobody made");
     assert_eq!(
         config::load(&path).expect("the saved file parses"),
         config,
@@ -1254,7 +1254,7 @@ fn a_save_lands_whole_and_says_which_file_it_could_not_write() {
     // error names the path rather than only the reason.
     let blocked = scratch.root().join("blocked");
     std::fs::create_dir_all(blocked.join("config")).expect("make the blocking directory");
-    let refused = config::save(&blocked.join("config"), &config).expect_err("a blocked save");
+    let refused = config::save(&blocked.join("config"), &config, &[]).expect_err("a blocked save");
     assert!(
         refused.to_string().contains("config"),
         "the refusal does not name the file: {refused}"
@@ -1291,7 +1291,7 @@ fn a_save_writes_through_a_link_rather_than_over_it() {
         rail: true,
         ..Config::default()
     };
-    config::save(&link, &config).expect("a save through the link");
+    config::save(&link, &config, &[]).expect("a save through the link");
 
     assert!(
         std::fs::symlink_metadata(&link)
@@ -1342,7 +1342,7 @@ fn a_save_through_a_link_with_nothing_behind_it_makes_what_it_names() {
             rail: true,
             ..Config::default()
         };
-        config::save(&link, &config).expect("a save through a link with nothing behind it");
+        config::save(&link, &config, &[]).expect("a save through a link with nothing behind it");
 
         assert!(
             std::fs::symlink_metadata(&link)
@@ -1403,9 +1403,12 @@ fn pictures_key_read() {
         said.contains("line 2") && said.contains("halfblocks"),
         "the refusal does not name its line and the words it takes: {said}"
     );
-    assert!(
-        config::parse("pictures = Kitty\n").is_err(),
-        "the file is case-sensitive like every other value in it"
+    assert_eq!(
+        config::parse("pictures = Kitty\n")
+            .expect("a config")
+            .pictures,
+        Choice::Kitty,
+        "the file's word is matched in any case, as the variable's is"
     );
 }
 
@@ -1417,7 +1420,7 @@ fn launch_keys_round_trip() {
         pictures: Choice::Halfblocks,
         ..config::parse(source).expect("the fixture parses")
     };
-    let out = config::rewrite(source, &wanted);
+    let out = config::rewrite(source, &wanted, &[]);
     assert!(
         out.contains("pictures   = halfblocks # the terminal lies\n"),
         "the pictures line lost its spacing or comment:\n{out}"
@@ -1429,7 +1432,7 @@ fn launch_keys_round_trip() {
     assert_eq!(config::parse(&out).expect("the rewrite parses"), wanted);
 
     // A file without either key gains both.
-    let out = config::rewrite("rail = on\n", &wanted);
+    let out = config::rewrite("rail = on\n", &wanted, &[]);
     assert_eq!(config::parse(&out).expect("the rewrite parses"), wanted);
     assert_eq!(
         out.lines()
@@ -1437,5 +1440,25 @@ fn launch_keys_round_trip() {
             .count(),
         1,
         "pictures was appended more than once:\n{out}"
+    );
+}
+
+#[test]
+fn kept_keys_untouched() {
+    // A hand edit made while the pane was open, to keys the reader never flipped.
+    let source = "update = off\npictures = kitty  # by hand\nrail = off\n";
+    let wanted = Config {
+        rail: true,
+        ..Config::default()
+    };
+    let out = config::rewrite(source, &wanted, &["update", "pictures"]);
+    assert!(
+        out.starts_with("update = off\npictures = kitty  # by hand\nrail = on\n"),
+        "a kept key was rewritten:\n{out}"
+    );
+    let missing = config::rewrite("rail = off\n", &wanted, &["update", "pictures"]);
+    assert!(
+        !missing.contains("update") && !missing.contains("pictures"),
+        "a kept key was appended:\n{missing}"
     );
 }

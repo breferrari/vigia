@@ -15,7 +15,7 @@ use vigia_core::{
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, OVERLAY_FRAME, Region, Regions, Selection, Sheet, Token};
-use crate::menu::{self, ENV, Menu, NEXT_LAUNCH, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
+use crate::menu::{self, ENV, Menu, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
 use crate::positions::{self, Positions};
 use crate::quote::Run;
 use crate::theme::Theme;
@@ -3086,23 +3086,22 @@ const MENU_LABEL: usize = {
     widest
 };
 
-/// Where a row's hint starts, counted from its label: past the widest label of
-/// a row that carries one, so the hints share a column.
+/// Where a row's [`ENV`] marker starts, counted from its label: past the widest
+/// label of a row read only at launch, so the markers share a column. One column
+/// of air each side of the marker rather than [`MENU_GAP`], which is what lets
+/// the narrowest box hold it at I6's forty columns; the marker is dim, so it
+/// still reads apart from the name.
 const MENU_HINT_AT: usize = {
     let mut widest = 0;
     let mut at = 0;
     while at < SETTINGS.len() {
         let len = SETTINGS[at].label().len();
-        if matches!(
-            SETTINGS[at],
-            menu::Setting::Update | menu::Setting::Pictures
-        ) && len > widest
-        {
+        if SETTINGS[at].at_launch() && len > widest {
             widest = len;
         }
         at += 1;
     }
-    widest + MENU_GAP
+    widest + 1
 };
 
 /// Where a row's label starts, counted from the box's own left edge, and the gap
@@ -3114,8 +3113,25 @@ const MENU_INSETS: [(usize, usize); 2] = [(5, MENU_AIR), (4, MENU_GAP)];
 /// What one rung costs: the inset at both ends, the widest label, its gap and the
 /// state cell. The frame is inside the inset rather than beside it.
 const fn menu_span(rung: (usize, usize)) -> usize {
-    rung.0 * 2 + MENU_LABEL + rung.1 + STATE_WIDTH
+    let row = MENU_LABEL + rung.1 + STATE_WIDTH;
+    rung.0 * 2 + if row > MENU_HINTED { row } else { MENU_HINTED }
 }
+
+/// What the widest row read at launch needs between the insets: its label field,
+/// [`ENV`] and its state cell, so an overridden row always says so. The value
+/// after the marker may still drop.
+const MENU_HINTED: usize = {
+    let mut widest = 0;
+    let mut at = 0;
+    while at < SETTINGS.len() {
+        let need = MENU_HINT_AT + ENV.len() + 1 + SETTINGS[at].width();
+        if SETTINGS[at].at_launch() && need > widest {
+            widest = need;
+        }
+        at += 1;
+    }
+    widest
+};
 
 /// The narrowest box that can carry a row at all.
 const MENU_FLOOR: usize = menu_span(MENU_INSETS[1]);
@@ -4350,13 +4366,13 @@ impl Painter<'_> {
         let room = usize::from(area.width).saturating_sub(plan.inset * 2 + width);
         let label = setting.label();
         self.put(area.x + inset, y, label, room, name);
-        if let Some(hint) = setting.hint(menu.settings) {
-            let at = MENU_HINT_AT.max(width_of(label) + MENU_GAP);
-            self.menu_hint(
+        if let Some(value) = setting.env(menu.settings) {
+            let at = MENU_HINT_AT.max(width_of(label) + 1);
+            self.menu_env(
                 area.x + inset + u16::try_from(at).unwrap_or(0),
                 y,
-                room.saturating_sub(at + MENU_GAP),
-                hint,
+                room.saturating_sub(at + 1),
+                value,
             );
         }
 
@@ -4373,23 +4389,15 @@ impl Painter<'_> {
         self.put(cell.x + pad, y, word, width_of(word), ink);
     }
 
-    /// What a row read only at launch says after its name, in `room` columns, or
-    /// nothing where even its shortest form does not fit.
-    fn menu_hint(&mut self, x: u16, y: u16, room: usize, hint: menu::Hint) {
+    /// [`ENV`] and the value the environment sets, in `room` columns. The span
+    /// guarantees the marker fits; the value only where it fits whole, because a
+    /// cut word reads as another.
+    fn menu_env(&mut self, x: u16, y: u16, room: usize, value: &str) {
         let ink = self.theme.chrome_dim;
-        match hint {
-            menu::Hint::Launch if width_of(NEXT_LAUNCH) <= room => {
-                self.put(x, y, NEXT_LAUNCH, room, ink);
-            }
-            menu::Hint::Env(word) if width_of(ENV) <= room => {
-                self.put(x, y, ENV, room, ink);
-                // The value only where it fits whole: a cut word reads as another.
-                if width_of(ENV) + 1 + width_of(word) <= room {
-                    let after = u16::try_from(width_of(ENV) + 1).unwrap_or(0);
-                    self.put(x + after, y, word, width_of(word), ink);
-                }
-            }
-            menu::Hint::Launch | menu::Hint::Env(_) => {}
+        self.put(x, y, ENV, room, ink);
+        if width_of(ENV) + 1 + width_of(value) <= room {
+            let after = u16::try_from(width_of(ENV) + 1).unwrap_or(0);
+            self.put(x + after, y, value, width_of(value), ink);
         }
     }
 
