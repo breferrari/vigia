@@ -38,16 +38,20 @@
 # cut. Every failure in the range is named before the exit, so one run shows
 # every PR that needs a label.
 #
-# Usage: changelog-entry.sh <version> <date> [changelog]
+# Usage: changelog-entry.sh <version> <date> [changelog] [summary]
 #   version   the version being released, three numeric components
 #   date      ISO date for the heading
 #   changelog the file to write into (default: ./CHANGELOG.md)
+#   summary   prose to open the section with, when the file exists
+#             (default: ./.github/release-summary.md). The release commit
+#             removes it. Present and empty fails.
 set -eu
 
 [ "$#" -ge 2 ] || { echo "::error::usage: changelog-entry.sh <version> <date> [changelog]"; exit 1; }
 version="$1"
 date="$2"
 changelog="${3:-CHANGELOG.md}"
+summary="${4:-.github/release-summary.md}"
 
 case "$version" in
     [0-9]*.[0-9]*.[0-9]*) ;;
@@ -55,6 +59,11 @@ case "$version" in
 esac
 
 [ -f "$changelog" ] || { echo "::error::${changelog} does not exist"; exit 1; }
+
+if [ -f "$summary" ] && ! grep -q '[^[:space:]]' "$summary"; then
+    echo "::error::${summary} is empty; write the summary or remove the file"
+    exit 1
+fi
 
 # A section for this version already existing means the release is being
 # re-run, or that somebody wrote it by hand. Either way, overwriting it would
@@ -222,10 +231,16 @@ lines="${changelog}.entries"
 printf '%s\n' "$entries" > "$lines"
 
 inserted="${changelog}.inserted"
-awk -v heading="## [${version}] - ${date}" -v lines="$lines" '
+[ -f "$summary" ] || summary=""
+awk -v heading="## [${version}] - ${date}" -v lines="$lines" -v summary="$summary" '
     function emit() {
         print heading
         print ""
+        if (summary != "") {
+            while ((getline line < summary) > 0) print line
+            close(summary)
+            print ""
+        }
         while ((getline entry < lines) > 0) print entry
         close(lines)
     }

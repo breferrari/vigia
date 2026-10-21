@@ -2242,6 +2242,18 @@ fn changelog_entry(
     subjects: &str,
     changelog: &str,
 ) -> (bool, String, String) {
+    changelog_summary(case, version, subjects, changelog, None)
+}
+
+/// [`changelog_entry`], with `summary` as the release summary file when given.
+#[cfg(unix)]
+fn changelog_summary(
+    case: &str,
+    version: &str,
+    subjects: &str,
+    changelog: &str,
+    summary: Option<&str>,
+) -> (bool, String, String) {
     use std::io::Write;
     use std::process::Stdio;
 
@@ -2250,12 +2262,17 @@ fn changelog_entry(
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
     let path = dir.join("CHANGELOG.md");
     std::fs::write(&path, changelog).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+    let summary_path = dir.join("release-summary.md");
+    if let Some(summary) = summary {
+        std::fs::write(&summary_path, summary).expect("write the summary");
+    }
 
     let mut child = Command::new("sh")
         .arg(&script)
         .arg(version)
         .arg("2026-01-01")
         .arg(&path)
+        .arg(&summary_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -2418,6 +2435,44 @@ fn note_replaces() {
             "{case}: the refusal does not say why:\n{said}"
         );
     }
+}
+
+/// A release summary file opens the section above the bullets; without one
+/// the section is the bullets alone; an empty one fails.
+#[cfg(unix)]
+#[test]
+fn release_summary() {
+    let records = "#60\trelease\tRelease-note: A key moves\n";
+    let (passed, left, said) = changelog_summary(
+        "summary",
+        "0.2.0",
+        records,
+        CHANGELOG_BEFORE,
+        Some("Pictures no longer hold up the pane.\n"),
+    );
+    assert!(passed, "the generator refused a summary:\n{said}");
+    assert!(
+        left.contains(
+            "## [0.2.0] - 2026-01-01\n\nPictures no longer hold up the pane.\n\n- A key moves\n"
+        ),
+        "the summary does not open the section above the bullets:\n{left}"
+    );
+    let (passed, left, _) = changelog_entry("no-summary", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        passed && left.contains("## [0.2.0] - 2026-01-01\n\n- A key moves\n"),
+        "without a summary the section is not the bullets alone:\n{left}"
+    );
+    let (passed, left, said) = changelog_summary(
+        "empty-summary",
+        "0.2.0",
+        records,
+        CHANGELOG_BEFORE,
+        Some(" \n\n"),
+    );
+    assert!(
+        !passed && left == CHANGELOG_BEFORE && said.contains("is empty"),
+        "an empty summary did not fail the bump:\n{said}"
+    );
 }
 
 /// A label and a trailer that disagree fail the bump, and so does a pull
