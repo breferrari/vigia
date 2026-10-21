@@ -2073,6 +2073,7 @@ fn thumb_reaches_end() {
     frame.advance().expect("advance");
     let mut pane = Pane::new(100, 30);
     let mut reached = Vec::new();
+    let mut totals = std::collections::BTreeSet::new();
     let mut last = None;
     for _ in 0..400 {
         let view = pane.settled(&mut frame);
@@ -2084,6 +2085,7 @@ fn thumb_reaches_end() {
         if last == Some(at) {
             break;
         }
+        totals.insert(at.2);
         reached.push(at.1);
         last = Some(at);
         pane.scroll(&mut frame, 1);
@@ -2091,6 +2093,11 @@ fn thumb_reaches_end() {
     assert!(
         reached.windows(2).all(|pair| pair[0] <= pair[1]),
         "the thumb moved back while scrolling down: {reached:?}"
+    );
+    assert_eq!(
+        totals.len(),
+        1,
+        "the bar's total changed while scrolling, which moves the drawn thumb: {totals:?}"
     );
     let (_, bottom, total) = last.expect("a frame");
     assert_eq!(

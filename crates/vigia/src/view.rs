@@ -2394,10 +2394,20 @@ impl View {
         };
         // The top file's picture rows already scrolled past: all of them once
         // the top row is past the file's own rows, else those hung under it.
-        let passed = if current > 0 && self.top.row >= span_in(frame, self.top.file)? {
-            current
+        let own = if current > 0 {
+            span_in(frame, self.top.file)?
         } else {
+            0
+        };
+        let passed = if current == 0 {
+            0
+        } else if self.top.row >= own {
+            current
+        } else if self.top.row + 1 == own {
+            // Hung under the size line, the line the pictures hang under.
             self.top.under.min(current)
+        } else {
+            0
         };
         if single {
             self.total_rows = self.current_span;
@@ -2419,11 +2429,13 @@ impl View {
         self.rows_above =
             (above + self.top.row.min(self.current_span) + trimmed).min(self.total_rows);
         let (mut pictured_above, mut pictured_total) = (0usize, 0usize);
-        for index in 0..self.files {
-            let rows = pictured(frame, index, room);
-            pictured_total += rows;
-            if index < self.top.file {
-                pictured_above += rows;
+        if room.is_some() {
+            for index in 0..self.files {
+                let rows = pictured(frame, index, room);
+                pictured_total += rows;
+                if index < self.top.file {
+                    pictured_above += rows;
+                }
             }
         }
         self.pictured_total = pictured_total;

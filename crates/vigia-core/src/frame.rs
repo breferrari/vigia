@@ -948,8 +948,8 @@ impl<'w> Frame<'w> {
     }
 
     /// The diff of the file at `index` as the last read of it left it, or
-    /// `None` for one not read yet: no read and no probe, so a caller outside
-    /// the window can count from it without breaking I4. It can lag a write.
+    /// `None` for one not read yet. Reads nothing and stats nothing, so it can
+    /// lag a write.
     pub fn cached_diff(&self, index: usize) -> Option<(&FileChange, &FileDiff)> {
         let change = self.files.get(index)?;
         self.cached.get(change).map(|cached| (change, &cached.diff))
