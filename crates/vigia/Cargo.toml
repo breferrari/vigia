@@ -42,7 +42,7 @@ image.workspace = true
 ratatui.workspace = true
 ratatui-image.workspace = true
 base64-simd.workspace = true
-flate2.workspace = true
+miniz_oxide.workspace = true
 resvg.workspace = true
 hayro = { workspace = true, optional = true }
 skrifa.workspace = true

@@ -73,10 +73,11 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # defaults pull libchafa through pkg-config and turn image's defaults back on.
 # Pinned to the release candidate whose terminal query fits; see SPEC.md §6.
 ratatui-image = { version = "=12.0.0-rc.3", default-features = false, features = ["crossterm"] }
-# The Kitty transmit vigia encodes itself: the encoder and the deflate
-# ratatui-image uses, so the bytes match its own. SPEC.md section 6.
+# The Kitty transmit vigia encodes itself: ratatui-image's base64 encoder, and
+# miniz_oxide called directly rather than through flate2, whose backend the
+# whole build shares. SPEC.md section 6.
 base64-simd = "0.8"
-flate2 = "1"
+miniz_oxide = "0.8"
 # A changed SVG's pictures, labels included. `memmap-fonts` maps the system's
 # fonts instead of reading every face into memory.
 resvg = { version = "0.48.1", default-features = false, features = ["raster-images", "text", "system-fonts", "memmap-fonts"] }

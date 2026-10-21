@@ -3257,8 +3257,8 @@ fn the_spec_quotes_the_sheets_purpose_lines() {
 /// leaves out on purpose.
 const NOT_DOCUMENTED: [&str; 12] = [
     "base64-simd",
-    "flate2",
     "libc",
+    "miniz_oxide",
     "rustix",
     "rustls-graviola",
     "serde_json",

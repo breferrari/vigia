@@ -207,7 +207,7 @@ fn octant_of(lookup: &impl Fn(&str) -> Option<String>, term: &str) -> Option<Gly
 }
 
 /// `"1.3.1-arch2"` to `(1, 3)`: the leading major and minor, or `None`.
-fn version_of(raw: &str) -> Option<(u32, u32)> {
+pub(crate) fn version_of(raw: &str) -> Option<(u32, u32)> {
     let mut parts = raw.trim().split(['.', '-']);
     let major = parts.next()?.parse().ok()?;
     let minor = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);

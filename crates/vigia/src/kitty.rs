@@ -107,13 +107,10 @@ fn worth_deflating(rgba: &[u8], width: u32) -> bool {
 }
 
 /// Deflate `raw` into the zlib stream `o=z` names, at the fastest level: the
-/// encode is the cost, not the bytes.
+/// encode is the cost, not the bytes. `miniz_oxide` itself, because `flate2`
+/// takes the build's backend, and Ghostty 1.3.1 crashes on `zlib-rs`'s stream.
 fn zlib(raw: &[u8]) -> Vec<u8> {
-    use std::io::Write as _;
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
-    // Into a `Vec`, which cannot fail.
-    encoder.write_all(raw).expect("deflate into a Vec");
-    encoder.finish().expect("deflate into a Vec")
+    miniz_oxide::deflate::compress_to_vec_zlib(raw, 1)
 }
 
 /// Draw image `id`'s placeholder cells over all of `room`, its first `skip`
@@ -454,6 +451,31 @@ mod tests {
         buf
     }
 
+    /// `buf` with each deflated transmit inflated: the streams differ by
+    /// encoder, the pixels and the keys must not.
+    fn inflated(mut buf: Buffer) -> Buffer {
+        for cell in &mut buf.content {
+            let symbol = cell.symbol();
+            if !symbol.contains("_G") {
+                continue;
+            }
+            let (mut keys, mut data, mut rest) = (None, Vec::new(), "");
+            for piece in symbol.split("_G").skip(1) {
+                let (head, tail) = piece.split_once(';').expect("keys");
+                keys.get_or_insert_with(|| head.replace(",m=1", ""));
+                let end = tail.find('\x1b').expect("terminator");
+                data.extend_from_slice(&tail.as_bytes()[..end]);
+                rest = &tail[end..];
+            }
+            let raw = base64_simd::STANDARD.decode_to_vec(&data).expect("base64");
+            let pixels = miniz_oxide::inflate::decompress_to_vec_zlib(&raw).expect("inflate");
+            let rest = rest.trim_start_matches(['\x1b', '\\']);
+            let joined = format!("{keys:?} {pixels:?} {rest}");
+            cell.set_symbol(&joined);
+        }
+        buf
+    }
+
     /// A screen with room around `area`, so a cell drawn outside it shows.
     fn frame(area: Rect) -> Rect {
         Rect::new(0, 0, area.right() + 3, area.bottom() + 3)
@@ -503,6 +525,11 @@ mod tests {
                         skip.min(cells.height - 1),
                     ),
                 );
+                let (theirs, ours) = if compress {
+                    (inflated(theirs), inflated(ours))
+                } else {
+                    (theirs, ours)
+                };
                 assert_eq!(
                     theirs, ours,
                     "{width}x{height} as id {id:#x}, tmux {tmux}, compressed {compress}, \
@@ -668,6 +695,20 @@ mod tests {
     }
 
     #[test]
+    fn deflate_is_miniz() {
+        // Ghostty 1.3.1 crashes on a zlib-rs level 1 stream that inflates
+        // correctly, and flate2 takes zlib-rs for the whole build once `pdf`
+        // turns it on.
+        let raw: Vec<u8> = (0..600_000u32)
+            .map(|i| ((i * 7) ^ (i >> 9)) as u8)
+            .collect();
+        assert!(
+            zlib(&raw) == miniz_oxide::deflate::compress_to_vec_zlib(&raw, 1),
+            "the transmit was not deflated by miniz_oxide"
+        );
+    }
+
+    #[test]
     fn deflate_sample() {
         // Noise, which no deflate shrinks, goes as it is; a screen of flat
         // colour with text-like stripes is deflated; a small image always is.
@@ -756,12 +797,7 @@ mod tests {
                 payload.extend(base64_simd::STANDARD.decode_to_vec(data).expect("base64"));
             }
             let raw = if compress {
-                use std::io::Read as _;
-                let mut out = Vec::new();
-                flate2::read::ZlibDecoder::new(&payload[..])
-                    .read_to_end(&mut out)
-                    .expect("inflate");
-                out
+                miniz_oxide::inflate::decompress_to_vec_zlib(&payload).expect("inflate")
             } else {
                 payload
             };
