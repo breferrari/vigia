@@ -1238,7 +1238,7 @@ mod tests {
     }
 
     /// Every source file the crate ships, for the scans below.
-    const SOURCES: [(&str, &str); 26] = [
+    const SOURCES: [(&str, &str); 27] = [
         ("lib.rs", include_str!("lib.rs")),
         ("main.rs", include_str!("main.rs")),
         ("app.rs", include_str!("app.rs")),
@@ -1248,6 +1248,7 @@ mod tests {
         ("glyphs.rs", include_str!("glyphs.rs")),
         ("icons.rs", include_str!("icons.rs")),
         ("input.rs", include_str!("input.rs")),
+        ("kitty.rs", include_str!("kitty.rs")),
         ("mcp.rs", include_str!("mcp.rs")),
         ("memory.rs", include_str!("memory.rs")),
         ("menu.rs", include_str!("menu.rs")),

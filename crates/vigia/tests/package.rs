@@ -3255,7 +3255,9 @@ fn the_spec_quotes_the_sheets_purpose_lines() {
 
 /// Direct dependencies that the `Built with` table in `docs/ARCHITECTURE.md`
 /// leaves out on purpose.
-const NOT_DOCUMENTED: [&str; 10] = [
+const NOT_DOCUMENTED: [&str; 12] = [
+    "base64-simd",
+    "flate2",
     "libc",
     "rustix",
     "rustls-graviola",

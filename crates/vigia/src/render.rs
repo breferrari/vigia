@@ -4759,7 +4759,7 @@ impl Painter<'_> {
         use ratatui::widgets::Widget;
         use ratatui_image::sliced::SlicedImage;
         let above = i16::try_from(part).unwrap_or(i16::MAX);
-        for (slot, protocol) in &built.panels {
+        for (slot, panel) in &built.panels {
             let x = area.x.saturating_add(slot.x);
             let width = slot.width.min(area.right().saturating_sub(x));
             if width == 0 {
@@ -4769,13 +4769,20 @@ impl Painter<'_> {
             // An image drawn by the terminal is not cells, so an overlay drawn
             // over it would not hide it, and a Kitty image sent under one is lost.
             let real = !matches!(
-                protocol,
-                ratatui_image::sliced::SlicedProtocol::Halfblocks(_)
+                panel,
+                crate::pictures::Panel::Sliced(ratatui_image::sliced::SlicedProtocol::Halfblocks(
+                    _
+                ))
             );
             if real && self.covered.is_some_and(|over| over.intersects(room)) {
                 continue;
             }
-            SlicedImage::new(protocol, (0, -above).into()).render(room, self.buf);
+            match panel {
+                crate::pictures::Panel::Kitty(image) => image.render(room, self.buf, part),
+                crate::pictures::Panel::Sliced(protocol) => {
+                    SlicedImage::new(protocol, (0, -above).into()).render(room, self.buf);
+                }
+            }
         }
         let bar = built.bar.or(key.shape.kind.bar()).map(|bar| match bar {
             crate::pictures::Bar::Added => self.theme.added_bar,

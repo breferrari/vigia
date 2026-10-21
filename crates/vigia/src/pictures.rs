@@ -247,10 +247,18 @@ pub enum Verdict {
     Undecoded,
 }
 
+/// One panel, encoded for the terminal.
+pub enum Panel {
+    /// A Kitty image, which this pane encodes itself.
+    Kitty(crate::kitty::Image),
+    /// Anything else, which `ratatui-image` encodes.
+    Sliced(SlicedProtocol),
+}
+
 /// A picture built and encoded, ready to draw.
 pub struct Built {
     /// Each panel's place and its encoded cells.
-    pub panels: Vec<(Slot, SlicedProtocol)>,
+    pub panels: Vec<(Slot, Panel)>,
     /// What the comparison found.
     pub verdict: Verdict,
     /// Whether the two sides carry different colour profiles.
@@ -1625,14 +1633,16 @@ fn panel(
     inks: Inks,
     picker: &Picker,
     compress: bool,
-) -> Option<(SlicedProtocol, Option<u32>)> {
+) -> Option<(Panel, Option<u32>)> {
     let image = DynamicImage::ImageRgb8(painted(image, hit, paint, inks));
     let size = Size::new(slot.width, slot.rows);
     vigia_core::armed(Stage::Encode);
     // Direct, because the picker's fit would read the grid as font pixels.
     if picker.protocol_type() == ProtocolType::Halfblocks {
         return Some((
-            SlicedProtocol::Halfblocks(Halfblocks::new(image, size).ok()?),
+            Panel::Sliced(SlicedProtocol::Halfblocks(
+                Halfblocks::new(image, size).ok()?,
+            )),
             None,
         ));
     }
@@ -1640,21 +1650,22 @@ fn panel(
         // Built here rather than by the picker, so the id is known for its delete.
         let id = kitty_id();
         let cells = ratatui_image::Resize::natural_size(&image, picker.font_size());
-        let kitty = ratatui_image::protocol::kitty::Kitty::new(
-            image,
+        let rgba = image.to_rgba8();
+        let compress = compress && crate::kitty::worth_deflating(rgba.as_raw());
+        let kitty = crate::kitty::Image::new(
+            rgba.as_raw(),
+            rgba.dimensions(),
             cells,
             id,
             picker.tmux_detected(),
             compress,
-            false,
-        )
-        .ok()?;
-        return Some((SlicedProtocol::Kitty(kitty), Some(id)));
+        );
+        return Some((Panel::Kitty(kitty), Some(id)));
     }
     let sliced =
         SlicedProtocol::new_with_resize(picker, image, size, ratatui_image::Resize::Fit(None))
             .ok()?;
-    Some((sliced, None))
+    Some((Panel::Sliced(sliced), None))
 }
 
 /// A slot's half-block grid: two pixels to a cell's height.
@@ -1848,8 +1859,9 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
         };
         if let Some(id) = id {
             kitty.push(id);
+            let deflated = matches!(&protocol, Panel::Kitty(image) if image.deflated());
             // An uncompressed transmit is base64 of the pixels, four bytes to three.
-            stored += if compress {
+            stored += if deflated {
                 pixels * 4
             } else {
                 pixels * 16 / 3
@@ -1875,7 +1887,6 @@ mod tests {
 
     #[test]
     fn kitty_sent_compressed() {
-        use ratatui::widgets::Widget;
         #[allow(deprecated)]
         let mut picker = Picker::from_fontsize((10, 20).into());
         picker.set_protocol_type(ProtocolType::Kitty);
@@ -1901,8 +1912,10 @@ mod tests {
             .expect("a panel");
             let area = ratatui::layout::Rect::new(0, 0, 4, 2);
             let mut buf = ratatui::buffer::Buffer::empty(area);
-            ratatui_image::sliced::SlicedImage::new(&protocol, (0, 0).into())
-                .render(area, &mut buf);
+            let Panel::Kitty(image) = &protocol else {
+                panic!("a Kitty picker built another panel");
+            };
+            image.render(area, &mut buf, 0);
             buf.content()
                 .iter()
                 .map(|cell| cell.symbol())
@@ -1910,6 +1923,41 @@ mod tests {
         };
         assert!(sent(true).contains("o=z"), "asked to compress, it sent raw");
         assert!(!sent(false).contains("o=z"), "it compressed unasked");
+    }
+
+    #[test]
+    fn photo_sent_raw() {
+        // A picture no deflate shrinks goes uncompressed even to a terminal that
+        // takes compression, and is counted as the base64 kept for it.
+        #[allow(deprecated)]
+        let mut picker = Picker::from_fontsize((10, 20).into());
+        picker.set_protocol_type(ProtocolType::Kitty);
+        let inks = Inks {
+            canvas: (0, 0, 0),
+            changed: (255, 0, 0),
+        };
+        let slot = Slot {
+            x: 0,
+            width: 100,
+            rows: 50,
+        };
+        let mut seed = 0x9e37_79b9_u32;
+        let noise = RgbImage::from_fn(1000, 1000, |_, _| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            let [r, g, b, _] = seed.to_le_bytes();
+            image::Rgb([r, g, b])
+        });
+        let (panel, _) =
+            panel(noise, None, slot, Paint::Plain, inks, &picker, true).expect("a panel");
+        let Panel::Kitty(image) = panel else {
+            panic!("a Kitty picker built another panel");
+        };
+        assert!(
+            !image.deflated(),
+            "noise was deflated though deflating it saves nothing"
+        );
     }
 
     #[test]
