@@ -2731,6 +2731,55 @@ mod tests {
 }
 
 #[cfg(test)]
+mod record {
+    use super::{DatedScore, Worktree};
+
+    /// A full record's stale list, found at the first answer past it, skips a
+    /// score a walk asked for since: that score stays, and the answer goes.
+    #[test]
+    fn stale_list_rechecked() {
+        let dir = std::env::temp_dir().join(format!(
+            "vigia-stale-list-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["init", "-q"])
+            .output()
+            .expect("run git");
+        assert!(out.status.success(), "git init");
+        let worktree = Worktree::discover(&dir).expect("discover");
+        worktree.keep_pairs(4);
+        {
+            let mut scores = worktree.pair_scores.borrow_mut();
+            for n in 0..4u64 {
+                scores.insert((n, n), DatedScore { score: 0, frame: 0 });
+            }
+        }
+        worktree.pair_frame.set(1);
+        worktree.keep_score((10, 10), 0);
+        assert_eq!(worktree.pair_epoch(), 1, "the first answer made no room");
+        // Every score left is asked for again, as a walk between answers asks.
+        for dated in worktree.pair_scores.borrow_mut().values_mut() {
+            dated.frame = 1;
+        }
+        worktree.keep_score((11, 11), 0);
+        assert_eq!(
+            worktree.pair_epoch(),
+            1,
+            "an answer evicted a score a walk had just asked for"
+        );
+        assert!(!worktree.pair_scores.borrow().contains_key(&(11, 11)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
 mod reading {
     /// Nothing `only` reaches past the position's own object reads as a working
     /// tree failing.
