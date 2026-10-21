@@ -414,7 +414,7 @@ fn record_keeps_current_pairs() {
     for n in 0..4096u64 {
         frame.learn_pair((u64::MAX - n, n), 0);
     }
-    // Filed before it, they last the first frame; the next one drops them.
+    // Filed at frame 0, they go at the second advance.
     frame.advance().expect("advance");
     frame.advance().expect("advance");
     assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));

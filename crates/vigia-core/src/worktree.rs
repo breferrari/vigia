@@ -39,6 +39,12 @@ impl Default for ChangeOptions<'_> {
     }
 }
 
+/// A pair's score, and the frame that last asked for it or filed it.
+struct Kept {
+    score: u64,
+    frame: u64,
+}
+
 /// A working tree under observation.
 pub struct Worktree {
     /// The repository under its current configuration. The watcher takes a clone.
@@ -82,8 +88,7 @@ pub struct Worktree {
     /// settles, or at once for a file the walk could not afford.
     lfs_wait: Cell<Option<std::time::SystemTime>>,
     /// Git's score for each pair of versions a walk weighed as a rename.
-    /// With each, the frame that last asked for it or filed it.
-    pair_scores: RefCell<HashMap<rename::PairKey, (u64, u64)>>,
+    pair_scores: RefCell<HashMap<rename::PairKey, Kept>>,
     /// Frames walked, which dates each score.
     pair_frame: Cell<u64>,
     /// Candidate bytes the current frame may still score.
@@ -682,9 +687,9 @@ impl Worktree {
                     .pair_scores
                     .borrow_mut()
                     .get_mut(&pair.key)
-                    .map(|(score, at)| {
-                        *at = self.pair_frame.get();
-                        *score
+                    .map(|kept| {
+                        kept.frame = self.pair_frame.get();
+                        kept.score
                     });
                 if known.is_none() {
                     let to = binary(pair.to, pair.key.1, pair.sizes.1)?;
@@ -802,14 +807,14 @@ impl Worktree {
 
     /// A fresh scoring budget, for the frame about to walk.
     pub(crate) fn renew_pair_budget(&self) {
-        // A full record keeps only what the last frame asked about or the
-        // worker filed since, or scores for files long gone would stop every
-        // new pair from being scored. The worker asks again for what was dropped.
-        let last = self.pair_frame.replace(self.pair_frame.get() + 1);
+        // Scores for files long gone would fill the record and refuse every
+        // new pair.
+        let last = self.pair_frame.get();
+        self.pair_frame.set(last + 1);
         let mut scores = self.pair_scores.borrow_mut();
         if scores.len() >= PAIRS_KEPT {
             let before = scores.len();
-            scores.retain(|_, &mut (_, at)| at == last);
+            scores.retain(|_, kept| kept.frame == last);
             if scores.len() < before {
                 self.pair_epoch.update(|v| v + 1);
             }
@@ -849,7 +854,8 @@ impl Worktree {
             scores.clear();
             self.pair_epoch.update(|v| v + 1);
         }
-        scores.insert(key, (score, self.pair_frame.get()));
+        let frame = self.pair_frame.get();
+        scores.insert(key, Kept { score, frame });
         self.pair_pending.borrow_mut().remove(&key);
     }
 
