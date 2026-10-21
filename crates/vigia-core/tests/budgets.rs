@@ -1556,3 +1556,83 @@ fn fenced_markdown_budget() {
         || redraw(&mut frame, &mut highlighter, "notes.md"),
     );
 }
+
+/// Removals and additions with nothing in common, as many as git's rename
+/// limit allows on each side.
+const UNPAIRED: usize = 1_000;
+/// Frames timed on each side of the ratchet.
+const UNPAIRED_FRAMES: usize = 15;
+
+/// A frame after `UNPAIRED` removals and additions of nothing in common, as
+/// text or as binary.
+fn unpaired_frame(scratch: &Scratch, binary: bool) {
+    let body = |seed: usize| -> Vec<u8> {
+        let text: String = (0..40)
+            .map(|line| format!("{seed:05} {line:02} {}\n", "x".repeat(seed % 7 + line % 5)))
+            .collect();
+        let mut bytes = text.into_bytes();
+        if binary {
+            bytes.push(0);
+        }
+        bytes
+    };
+    for i in 0..UNPAIRED {
+        scratch.write(&format!("old/{i:04}.dat"), body(i));
+    }
+    scratch.commit_all("initial");
+    for i in 0..UNPAIRED {
+        scratch.remove(&format!("old/{i:04}.dat"));
+        scratch.write(&format!("new/{i:04}.dat"), body(UNPAIRED + i * 13));
+    }
+}
+
+/// A ratchet, not I9: weighing unpaired text costs no more than weighing the
+/// same number of binary files, which every release has weighed. At this size
+/// neither holds I9; that absolute gate is the open issue on weighing rename
+/// candidates without the full matrix every walk.
+#[test]
+fn unpaired_text_no_worse_than_binary() {
+    let (text, binary) = (
+        Scratch::new("budget-unpaired-text"),
+        Scratch::new("budget-unpaired-binary"),
+    );
+    unpaired_frame(&text, false);
+    unpaired_frame(&binary, true);
+    let (text_tree, binary_tree) = (text.worktree(), binary.worktree());
+    let (mut text_frame, mut binary_frame) = (text_tree.frame(), binary_tree.frame());
+    text_frame.advance().expect("advance");
+    binary_frame.advance().expect("advance");
+    assert_eq!(
+        text_frame.files().len(),
+        2 * UNPAIRED,
+        "the text fixture paired something"
+    );
+    assert_eq!(
+        binary_frame.files().len(),
+        2 * UNPAIRED,
+        "the binary fixture paired something"
+    );
+
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    // Interleaved, so a machine that slows down slows both.
+    let (mut on_text, mut on_binary) =
+        (Samples::new(UNPAIRED_FRAMES), Samples::new(UNPAIRED_FRAMES));
+    for _ in 0..UNPAIRED_FRAMES {
+        on_text.push(time(|| text_frame.advance().expect("advance")));
+        on_binary.push(time(|| binary_frame.advance().expect("advance")));
+    }
+    let median = |samples: &Samples| samples.percentile(0.5).expect("samples");
+    eprintln!(
+        "unpaired at {UNPAIRED} x {UNPAIRED}: text p50 {:?}, binary p50 {:?}",
+        median(&on_text),
+        median(&on_binary)
+    );
+    assert!(
+        median(&on_text).as_secs_f64() <= median(&on_binary).as_secs_f64() * 1.25,
+        "a frame over unpaired text took {:?} at p50 where binary took {:?}",
+        median(&on_text),
+        median(&on_binary)
+    );
+}

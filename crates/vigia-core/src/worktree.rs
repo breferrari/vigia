@@ -93,8 +93,6 @@ pub struct Worktree {
     pairs_scored: Cell<u64>,
     /// Sides read to weigh or score them, for the same.
     side_reads: Cell<u64>,
-    /// Whether each side version a walk weighed is binary, by its stamp.
-    binaries: RefCell<HashMap<u64, bool>>,
     /// How many times `pair_scores` started again.
     pair_epoch: Cell<u64>,
     /// Each blob's size, as the rename pass found it.
@@ -145,7 +143,6 @@ impl Worktree {
             pair_bytes: Cell::new(0),
             pairs_scored: Cell::new(0),
             side_reads: Cell::new(0),
-            binaries: RefCell::new(HashMap::new()),
             pair_epoch: Cell::new(0),
             blob_sizes: RefCell::new(HashMap::new()),
             sides_left: Cell::new(false),
@@ -598,47 +595,6 @@ impl Worktree {
             charged.borrow_mut().insert(at);
             true
         };
-        // Whether a side is binary, from its first bytes, once per version, or
-        // `None` when the budget cannot pay to learn it this frame. A blob is
-        // read whole to learn it; one past a whole budget counts as binary, and
-        // its pair goes to the worker.
-        let binary = |at: usize, stamp: u64, size: u64| -> Option<bool> {
-            if let Some(&known) = self.binaries.borrow().get(&stamp) {
-                return Some(known);
-            }
-            let change = &changes[at];
-            let whole =
-                change.kind == ChangeKind::Removed || matches!(change.after, Some(Side::Blob(_)));
-            let found = if whole {
-                if size > rename::FRAME_BUDGET {
-                    return Some(true);
-                }
-                if !charge(at, size.max(rename::READ_COST)) {
-                    self.sides_left.set(true);
-                    return None;
-                }
-                bytes_of(at).is_some_and(|bytes| hunk::is_binary(&bytes))
-            } else {
-                if !spend(rename::READ_COST) {
-                    return None;
-                }
-                use std::io::Read;
-                self.side_reads.update(|v| v + 1);
-                let mut head = Vec::new();
-                std::fs::File::open(self.workdir.join(&change.path))
-                    .and_then(|file| {
-                        file.take(hunk::BINARY_SNIFF_LEN as u64)
-                            .read_to_end(&mut head)
-                    })
-                    .is_ok_and(|_| hunk::is_binary(&head))
-            };
-            let mut binaries = self.binaries.borrow_mut();
-            if binaries.len() >= PAIRS_KEPT {
-                binaries.clear();
-            }
-            binaries.insert(stamp, found);
-            Some(found)
-        };
         let added: Vec<_> = added.into_iter().filter_map(sized).collect();
         let mut weighed: Vec<Weighed> = removed
             .iter()
@@ -670,17 +626,9 @@ impl Worktree {
         // worker.
         let weighed: Vec<(Weighed, Option<u64>)> = weighed
             .into_iter()
-            .filter_map(|pair| {
+            .map(|pair| {
                 let known = self.pair_scores.borrow().get(&pair.key).copied();
-                if known.is_none() {
-                    let to = binary(pair.to, pair.key.1, pair.sizes.1)?;
-                    let from = binary(pair.from, pair.key.0, pair.sizes.0)?;
-                    // `gix` scored every pair with no binary side.
-                    if !to && !from {
-                        return None;
-                    }
-                }
-                Some((pair, known))
+                (pair, known)
             })
             .collect();
         for (pair, known) in weighed {
@@ -739,6 +687,22 @@ impl Worktree {
             let same = |&(_, from, to): &(u64, usize, usize)| name(from) == name(to);
             b.0.cmp(&a.0).then_with(|| same(b).cmp(&same(a)))
         });
+        // Git pairs a file name held by one removal and one addition first,
+        // when it clears the higher bar, and only then the best of the rest.
+        let once = |side: &[(usize, u64, u64)], at: usize| {
+            side.iter()
+                .filter(|&&(other, _, _)| name(other) == name(at))
+                .count()
+                == 1
+        };
+        let (by_name, rest): (Vec<_>, Vec<_>) =
+            scored.into_iter().partition(|&(score, from, to)| {
+                name(from) == name(to)
+                    && rename::pairs_by_name(score)
+                    && once(&removed, from)
+                    && once(&added, to)
+            });
+        let scored = by_name.into_iter().chain(rest);
         let mut used = std::collections::HashSet::new();
         for (_, from, to) in scored {
             if used.contains(&from) || used.contains(&to) {

@@ -1,5 +1,6 @@
-//! A changed binary paired as a rename, by git's rule. `gix` never scores a
-//! pair with a binary side, so these pairs are scored here.
+//! A removal and an addition `gix` left unpaired, paired as a rename by git's
+//! rule: `gix` scores text by a line diff, where git counts shared chunks in
+//! any order, and never scores a binary side.
 
 use crate::picture::Sources;
 
@@ -7,6 +8,9 @@ use crate::picture::Sources;
 const MAX_SCORE: u64 = 60_000;
 /// Git's default threshold, 50%.
 const MINIMUM_SCORE: u64 = MAX_SCORE / 2;
+/// Git's bar for a pair with the same file name on both sides, taken before
+/// any other: the threshold plus half of what is left above it.
+const BASENAME_SCORE: u64 = MINIMUM_SCORE + (MAX_SCORE - MINIMUM_SCORE) / 2;
 /// The most unpaired removals, and additions, scored against each other:
 /// git's default `diff.renameLimit`.
 pub(crate) const RENAME_LIMIT: usize = 1000;
@@ -43,8 +47,7 @@ pub(crate) fn sizes_fit(a: u64, b: u64) -> bool {
 
 /// Git's similarity of `old` to `new`, on its scale of 60,000: the bytes of
 /// `old`'s chunks that `new` keeps, over the larger size. A chunk ends at a
-/// line feed or after 64 bytes. Zero when neither side is binary, a pair
-/// `gix` scored itself.
+/// line feed or after 64 bytes.
 pub fn pair_score(old: &[u8], new: &[u8]) -> u64 {
     Spans::of(old).score(&Spans::of(new))
 }
@@ -52,7 +55,6 @@ pub fn pair_score(old: &[u8], new: &[u8]) -> u64 {
 /// One side cut into git's chunks: how many bytes each chunk hash covers,
 /// sorted by hash, as git's `hash_chars` leaves them.
 pub(crate) struct Spans {
-    binary: bool,
     len: u64,
     counts: Vec<(u32, u64)>,
 }
@@ -90,7 +92,6 @@ impl Spans {
             }
         }
         Self {
-            binary,
             len: data.len() as u64,
             counts,
         }
@@ -98,9 +99,6 @@ impl Spans {
 
     /// Git's score of this side, the old one, against `new`.
     pub(crate) fn score(&self, new: &Self) -> u64 {
-        if !self.binary && !new.binary {
-            return 0;
-        }
         let max = self.len.max(new.len);
         if !sizes_fit(self.len, new.len) {
             return 0;
@@ -137,4 +135,9 @@ pub fn candidate_score(candidate: &Candidate) -> u64 {
 /// Whether a score pairs.
 pub fn pairs(score: u64) -> bool {
     score >= MINIMUM_SCORE
+}
+
+/// Whether `score` pairs two sides by their shared file name, before the rest.
+pub(crate) fn pairs_by_name(score: u64) -> bool {
+    score >= BASENAME_SCORE
 }

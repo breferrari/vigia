@@ -3,7 +3,7 @@
 mod support;
 
 use support::{Scratch, changes_sorted, noise, tail_changed};
-use vigia_core::{ChangeKind, FileChange, Frame, pair_score};
+use vigia_core::{ChangeKind, ChangeOptions, FileChange, Frame, Origin, pair_score};
 
 /// `list` with each path borrowed.
 fn refs(list: &[(String, Vec<u8>)]) -> Vec<(&str, Vec<u8>)> {
@@ -232,24 +232,134 @@ fn binary_rename_smallest_first() {
     assert_eq!(kind_of(frame.files(), "t1.bin"), &renamed("s1.bin"));
 }
 
+/// What `git diff --cached -M --name-status` says about the index, as
+/// (status, path) pairs, with a rename's score dropped.
+fn git_staged(scratch: &Scratch) -> Vec<(String, String)> {
+    let out = scratch.git(&["diff", "--cached", "-M", "--name-status", "-z"]);
+    let mut fields = out.split('\0').filter(|field| !field.is_empty());
+    let mut found = Vec::new();
+    while let Some(status) = fields.next() {
+        let letter = status[..1].to_owned();
+        if letter == "R" {
+            let from = fields.next().expect("a source");
+            let to = fields.next().expect("a destination");
+            found.push((format!("R {from}"), to.to_owned()));
+        } else {
+            found.push((letter, fields.next().expect("a path").to_owned()));
+        }
+    }
+    found.sort();
+    found
+}
+
+/// The staged run's changes.
+fn staged(scratch: &Scratch) -> Vec<FileChange> {
+    let worktree = scratch.worktree();
+    worktree
+        .changes_of(Origin::Staged, ChangeOptions::default())
+        .expect("a walk")
+        .collect::<Result<_, _>>()
+        .expect("every change")
+}
+
 #[test]
-fn text_rename_left_to_gix() {
-    // Long lines each changed at the end: git's chunk score keeps most of
-    // them, and gix's line score keeps none. Text keeps gix's score.
+fn text_rename_long_lines() {
+    // Long lines each changed at the end: git's chunks end every 64 bytes, so
+    // most of each line is kept, where gix's line diff keeps none.
     let line = |n: usize, tail: &str| format!("{}{n:04}{tail}\n", "x".repeat(200));
     let old: String = (0..100).map(|n| line(n, "old")).collect();
     let new: String = (0..100).map(|n| line(n, "new")).collect();
-    let old_len = old.len() as u64;
     let scratch = moved(
         "rename-text",
         &[("a.txt", old.into_bytes())],
         &[("b.txt", new.into_bytes())],
     );
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    // Read only to learn the old side is text, and not scored.
-    assert_eq!(scored(&mut frame), old_len, "a text pair was scored");
-    assert_eq!(kind_of(frame.files(), "b.txt"), &ChangeKind::Added);
+    scratch.git(&["add", "-A"]);
+    assert_eq!(
+        git_staged(&scratch),
+        [("R a.txt".to_owned(), "b.txt".to_owned())],
+        "the fixture is wrong"
+    );
+    assert_eq!(kind_of(&staged(&scratch), "b.txt"), &renamed("a.txt"));
+}
+
+#[test]
+fn text_rename_reordered() {
+    // Eight of twelve lines kept in another order: git counts them wherever
+    // they are; a line diff counts most as removed.
+    let lines: Vec<String> = (0..12)
+        .map(|n| format!("line {n} of the original\n"))
+        .collect();
+    let old: String = lines.concat();
+    let mut kept: Vec<String> = lines[..8].to_vec();
+    kept.reverse();
+    let new: String = kept.concat() + &(0..4).map(|n| format!("fresh {n}\n")).collect::<String>();
+    let scratch = moved(
+        "rename-reordered",
+        &[("a.txt", old.into_bytes())],
+        &[("new.txt", new.into_bytes())],
+    );
+    scratch.git(&["add", "-A"]);
+    assert_eq!(
+        git_staged(&scratch),
+        [("R a.txt".to_owned(), "new.txt".to_owned())],
+        "the fixture is wrong"
+    );
+    assert_eq!(kind_of(&staged(&scratch), "new.txt"), &renamed("a.txt"));
+}
+
+#[test]
+fn text_rename_diff_unset() {
+    // A side whose attributes unset `diff` is binary to git, and git still
+    // scores the pair; the sniff alone would call it text and leave it.
+    let lines: Vec<String> = (0..12).map(|n| format!("note {n}\n")).collect();
+    let mut kept: Vec<String> = lines[..9].to_vec();
+    kept.reverse();
+    let scratch = moved(
+        "rename-diff-unset",
+        &[("d.md", lines.concat().into_bytes())],
+        &[("new.txt", (kept.concat() + "added\n").into_bytes())],
+    );
+    scratch.write(".gitattributes", "*.md -diff\n");
+    scratch.git(&["add", "-A"]);
+    assert!(
+        git_staged(&scratch).contains(&("R d.md".to_owned(), "new.txt".to_owned())),
+        "the fixture is wrong: {:?}",
+        git_staged(&scratch)
+    );
+    assert_eq!(kind_of(&staged(&scratch), "new.txt"), &renamed("d.md"));
+}
+
+#[test]
+fn text_rename_basename_first() {
+    // The same file name on both sides pairs first when it scores past git's
+    // basename bar, though another addition scores higher.
+    let lines: Vec<String> = (0..20)
+        .map(|n| format!("entry {n} with some text\n"))
+        .collect();
+    let old = lines.concat();
+    // Reversed, so gix's line diff leaves both to vigia.
+    let reversed = |kept: usize| lines[..kept].iter().rev().cloned().collect::<String>();
+    let near = reversed(17) + "x\ny\nz\n";
+    let closer = reversed(19) + "w\n";
+    let scratch = moved(
+        "rename-basename",
+        &[("d0/notes.txt", old.into_bytes())],
+        &[
+            ("d1/notes.txt", near.into_bytes()),
+            ("d1/other.txt", closer.into_bytes()),
+        ],
+    );
+    scratch.git(&["add", "-A"]);
+    assert!(
+        git_staged(&scratch).contains(&("R d0/notes.txt".to_owned(), "d1/notes.txt".to_owned())),
+        "the fixture is wrong: {:?}",
+        git_staged(&scratch)
+    );
+    assert_eq!(
+        kind_of(&staged(&scratch), "d1/notes.txt"),
+        &renamed("d0/notes.txt")
+    );
 }
 
 #[test]
