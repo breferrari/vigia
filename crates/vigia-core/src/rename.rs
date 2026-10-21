@@ -8,6 +8,8 @@ use crate::picture::Sources;
 const MAX_SCORE: u64 = 60_000;
 /// Git's default threshold, 50%.
 const MINIMUM_SCORE: u64 = MAX_SCORE / 2;
+/// The most removals git weighs for one addition, its best by score.
+pub(crate) const CANDIDATES: usize = 4;
 /// Git's bar for a pair with the same file name on both sides, taken before
 /// any other: the threshold plus half of what is left above it.
 const BASENAME_SCORE: u64 = MINIMUM_SCORE + (MAX_SCORE - MINIMUM_SCORE) / 2;

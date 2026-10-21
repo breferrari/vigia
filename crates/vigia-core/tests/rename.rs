@@ -561,3 +561,96 @@ fn text_rename_crlf_diff_unset() {
         if paired { "paired" } else { "did not pair" }
     );
 }
+
+/// What git says about the worktree against the index, renames included:
+/// everything staged into a scratch index, diffed against the real one's tree.
+fn git_unstaged(scratch: &Scratch) -> Vec<(String, String)> {
+    let dir = scratch.path_of("");
+    let tree = scratch.git(&["write-tree"]);
+    let index = scratch.path_of(".git/scratch-index");
+    std::fs::copy(scratch.path_of(".git/index"), &index).expect("copy the index");
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&dir)
+            .env("GIT_INDEX_FILE", &index)
+            .output()
+            .expect("git runs");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    git(&["add", "-A"]);
+    let out = git(&[
+        "diff-index",
+        "--cached",
+        "-M",
+        "--name-status",
+        "-z",
+        tree.trim(),
+    ]);
+    let mut fields = out.split('\0').filter(|field| !field.is_empty());
+    let mut found = Vec::new();
+    while let Some(status) = fields.next() {
+        let letter = status[..1].to_owned();
+        if letter == "R" {
+            let from = fields.next().expect("a source");
+            let to = fields.next().expect("a destination");
+            found.push((format!("R {from}"), to.to_owned()));
+        } else {
+            found.push((letter, fields.next().expect("a path").to_owned()));
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn four_candidates_per_addition() {
+    // Git weighs only an addition's four best removals. Every addition's best
+    // four here are r1 to r4, so r5, a fair match for all of them, pairs with
+    // none.
+    let base = noise(90, 4_000);
+    let head_changed = |share: f64| {
+        let mut out = base.clone();
+        let to = (out.len() as f64 * share) as usize;
+        for byte in &mut out[..to] {
+            *byte ^= 0x3c;
+        }
+        out
+    };
+    let removals: Vec<(String, Vec<u8>)> = (1..=4)
+        .map(|i| {
+            (
+                format!("r{i}.bin"),
+                tail_changed(&base, 0.005 * f64::from(i)),
+            )
+        })
+        .chain([("r5.bin".to_owned(), tail_changed(&base, 0.4))])
+        .collect();
+    let additions: Vec<(String, Vec<u8>)> = (1..=5)
+        .map(|j| (format!("a{j}.bin"), head_changed(0.004 * f64::from(j))))
+        .collect();
+    let scratch = moved("rename-four", &refs(&removals), &refs(&additions));
+    let git = git_unstaged(&scratch);
+    assert!(
+        git.contains(&("D".to_owned(), "r5.bin".to_owned()))
+            && git
+                .iter()
+                .filter(|(status, _)| status.starts_with('R'))
+                .count()
+                == 4,
+        "the fixture is wrong: {git:?}"
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..4 {
+        frame.advance().expect("advance");
+    }
+    assert!(
+        !frame
+            .files()
+            .iter()
+            .any(|change| change.kind == renamed("r5.bin")),
+        "r5.bin paired where git leaves it, in {:?}",
+        frame.files()
+    );
+}

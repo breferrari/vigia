@@ -674,6 +674,14 @@ impl Worktree {
                 scored.push((score, pair.from, pair.to));
             }
         }
+        // Git keeps an addition's best few removals and weighs no others.
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        let mut kept: HashMap<usize, usize> = HashMap::new();
+        scored.retain(|&(_, _, to)| {
+            let count = kept.entry(to).or_default();
+            *count += 1;
+            *count <= rename::CANDIDATES
+        });
         // Best first; a tie goes to the same file name, as `gix` breaks one.
         let name = |at: usize| changes[at].path.rsplit('/').next().unwrap_or_default();
         scored.sort_by(|a, b| {
