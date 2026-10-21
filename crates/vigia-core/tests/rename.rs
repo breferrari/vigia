@@ -1204,3 +1204,45 @@ fn intent_to_add_rename() {
     }
     assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
 }
+
+#[test]
+fn candidate_slot_ties() {
+    // A tie never takes a slot, and the pairs keep git's slot order: with
+    // five equal removals y.bin pairs with s1, and when s1 scores a little
+    // lower, s5 takes its slot and pairs ahead of s2.
+    let lined = |seed: u64, len: usize| -> Vec<u8> {
+        noise(seed, len)
+            .into_iter()
+            .enumerate()
+            .map(|(at, byte)| if at % 40 == 39 { b'\n' } else { byte })
+            .collect()
+    };
+    let (p, u, v) = (lined(111, 2_400), lined(112, 1_600), lined(113, 1_920));
+    let y = [&p[..], &u].concat();
+    let equal = [&u[..], &p[..600], &v[..1_800]].concat();
+    let lower = [&u[..], &p[..480], &v].concat();
+    for (case, first, paired) in [("equal", equal.clone(), "s1"), ("lower", lower, "s5")] {
+        let removals: Vec<(String, Vec<u8>)> = [("s1.bin".to_owned(), first)]
+            .into_iter()
+            .chain((2..=5).map(|n| (format!("s{n}.bin"), equal.clone())))
+            .collect();
+        let scratch = moved(
+            &format!("rename-slot-{case}"),
+            &refs(&removals),
+            &[("y.bin", y.clone())],
+        );
+        let want = (format!("R {paired}.bin"), "y.bin".to_owned());
+        let git = git_unstaged(&scratch);
+        assert!(git.contains(&want), "{case}: the fixture is wrong: {git:?}");
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        for _ in 0..4 {
+            frame.advance().expect("advance");
+        }
+        assert_eq!(
+            kind_of(frame.files(), "y.bin"),
+            &renamed(&format!("{paired}.bin")),
+            "{case}"
+        );
+    }
+}
