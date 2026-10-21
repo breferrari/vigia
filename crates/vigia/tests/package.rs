@@ -2421,6 +2421,16 @@ fn note_replaces() {
             "Release-note-replaces: 41",
             "41, which is not a pull request number",
         ),
+        (
+            "replaces-prefix",
+            "Release-note-replaces: #4",
+            "#4, which has no record",
+        ),
+        (
+            "replaces-self",
+            "Release-note-replaces: #50",
+            "replaces itself",
+        ),
     ] {
         let records = format!(
             "#50\trelease\tRelease-note: A key moves\n#50\trelease\t{line}\n#41\trelease\tOld (#41)\n"
@@ -2448,7 +2458,7 @@ fn release_summary() {
         "0.2.0",
         records,
         CHANGELOG_BEFORE,
-        Some("Pictures no longer hold up the pane.\n"),
+        Some("Pictures no longer hold up the pane.\n\n"),
     );
     assert!(passed, "the generator refused a summary:\n{said}");
     assert!(

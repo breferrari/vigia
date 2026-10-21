@@ -47,7 +47,7 @@
 #             removes it. Present and empty fails.
 set -eu
 
-[ "$#" -ge 2 ] || { echo "::error::usage: changelog-entry.sh <version> <date> [changelog]"; exit 1; }
+[ "$#" -ge 2 ] || { echo "::error::usage: changelog-entry.sh <version> <date> [changelog] [summary]"; exit 1; }
 version="$1"
 date="$2"
 changelog="${3:-CHANGELOG.md}"
@@ -87,7 +87,7 @@ noted=$(printf '%s\n' "$records" | awk -F '\t' '
 ')
 
 # The pull requests a later one's `Release-note-replaces:` drops, each as
-# `#<n>=<who replaced it>`, and every pull request the range names.
+# `#<n>=<who replaced it>`.
 replaced=$(printf '%s\n' "$records" | awk -F '\t' '
     NF == 3 && $3 ~ /^Release-note-replaces:/ {
         list = $3
@@ -96,6 +96,7 @@ replaced=$(printf '%s\n' "$records" | awk -F '\t' '
         for (i = 1; i <= n; i++) if (numbers[i] != "") printf ",%s=%s", numbers[i], $1
     }
 ')
+# Every pull request the range names.
 named=$(printf '%s\n' "$records" | awk -F '\t' 'NF == 3 { printf ",%s", $1 }')
 
 unknown=0
@@ -106,6 +107,11 @@ for pair in $(printf '%s' "$replaced" | tr ',' ' '); do
         \#[0-9]*) ;;
         *) echo "::error::${by} replaces ${gone}, which is not a pull request number"; unknown=1; continue ;;
     esac
+    if [ "$gone" = "$by" ]; then
+        echo "::error::${by} replaces itself"
+        unknown=1
+        continue
+    fi
     case "${named}," in
         *",${gone},"*) ;;
         *) echo "::error::${by} replaces ${gone}, which has no record in this range"; unknown=1 ;;
@@ -237,7 +243,13 @@ awk -v heading="## [${version}] - ${date}" -v lines="$lines" -v summary="$summar
         print heading
         print ""
         if (summary != "") {
-            while ((getline line < summary) > 0) print line
+            # Its own trailing blank lines dropped, so one blank line follows.
+            blanks = 0
+            while ((getline line < summary) > 0) {
+                if (line ~ /^[ \t]*$/) { blanks++; continue }
+                for (; blanks > 0; blanks--) print ""
+                print line
+            }
             close(summary)
             print ""
         }
