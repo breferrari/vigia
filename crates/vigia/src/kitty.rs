@@ -264,7 +264,7 @@ impl Image {
     }
 
     /// The bytes its upload puts on the wire.
-    pub fn size_sent(&self) -> usize {
+    pub fn wire_len(&self) -> usize {
         self.transmit.len()
     }
 

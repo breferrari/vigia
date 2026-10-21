@@ -92,6 +92,9 @@ const CREDIT_CEILING: usize = 1024 * 1024;
 /// The fewest bytes one write must carry for its time to count toward the drain.
 const DRAIN_SAMPLE: usize = 1024;
 
+/// How much of the drain rate one new write's measure moves.
+const DRAIN_WEIGHT: f64 = 0.2;
+
 /// The longest one wait for room to write lasts, so a stop is noticed this soon.
 const POLL: Duration = Duration::from_millis(50);
 
@@ -166,6 +169,13 @@ impl Shared {
 
     fn stopping(&self) -> bool {
         self.abandon.load(Ordering::Acquire) || POISONED.load(Ordering::SeqCst)
+    }
+}
+
+impl Upload {
+    /// How far into `data` its first `sent` chunks reach.
+    fn written_to(&self, sent: usize) -> usize {
+        sent.checked_sub(1).map_or(0, |last| self.ends[last])
     }
 }
 
@@ -249,7 +259,7 @@ impl Lanes {
             if !which(upload.id) {
                 return true;
             }
-            let from = sent.checked_sub(1).map_or(0, |last| upload.ends[last]);
+            let from = upload.written_to(*sent);
             shared
                 .graphics
                 .fetch_sub(upload.data.len() - from, Ordering::AcqRel);
@@ -270,6 +280,11 @@ impl Lanes {
         shared: &Shared,
         wakes: &Wakes,
     ) -> io::Result<bool> {
+        if self.starved_since.is_some() && !self.waiting() {
+            // Cancelled or stopped since: the next to wait starts afresh.
+            self.starved_since = None;
+            self.chunk_owed = false;
+        }
         // Past the cap, the upload waiting longest takes every other turn
         // until it is done, so it moves while a frame waits one chunk at most.
         let starved = self
@@ -277,7 +292,7 @@ impl Lanes {
             .is_some_and(|since| since.elapsed() >= STARVED);
         let chunk_turn = starved && std::mem::take(&mut self.chunk_owed);
         if !chunk_turn && let Some(frame) = self.text.pop_front() {
-            if self.waiting() && self.starved_since.is_none() {
+            if self.starved_since.is_none() && self.waiting() {
                 self.starved_since = Some(Instant::now());
             }
             self.chunk_owed = starved;
@@ -308,7 +323,7 @@ impl Lanes {
                     let slot = SENT_NEXT.fetch_add(1, Ordering::AcqRel) % SENT.len();
                     SENT[slot].store(bits, Ordering::Release);
                 }
-                let from = sent.checked_sub(1).map_or(0, |last| upload.ends[last]);
+                let from = upload.written_to(*sent);
                 let to = upload.ends[*sent];
                 timed_out(out, &upload.data.as_bytes()[from..to], shared, &mut |_| {})?;
                 shared.graphics.fetch_sub(to - from, Ordering::AcqRel);
@@ -399,7 +414,11 @@ impl Writer {
     /// How many upload bytes may be queued ahead of the terminal: what it
     /// drains in [`CREDIT_TIME`], within the floor and the ceiling.
     pub fn credit(&self) -> usize {
-        let rate = self.shared.drain.load(Ordering::Acquire) as f64;
+        let rate = f64::from_bits(self.shared.drain.load(Ordering::Acquire));
+        if rate == 0.0 {
+            // It has never made a write wait, so it keeps up.
+            return CREDIT_CEILING;
+        }
         ((rate * CREDIT_TIME.as_secs_f64()) as usize).clamp(CREDIT_FLOOR, CREDIT_CEILING)
     }
 
@@ -566,8 +585,8 @@ pub trait Out {
     fn write_some(&mut self, bytes: &[u8], wait: Duration) -> io::Result<usize>;
 }
 
-/// Write all of `bytes` in pieces, counting each as it goes, unless told to stop.
-/// [`write_out`], with the time it took folded into the drain rate.
+/// [`write_out`], its time folded into the drain rate when the terminal made
+/// it wait: a write the kernel takes at once says nothing of the terminal.
 fn timed_out(
     out: &mut impl Out,
     bytes: &[u8],
@@ -575,46 +594,50 @@ fn timed_out(
     count: &mut dyn FnMut(usize),
 ) -> io::Result<()> {
     let began = Instant::now();
-    write_out(out, bytes, shared, count)?;
+    let waited = write_out(out, bytes, shared, count)?;
     let took = began.elapsed().as_secs_f64();
-    if bytes.len() >= DRAIN_SAMPLE && took > 0.0 {
+    if waited && bytes.len() >= DRAIN_SAMPLE && took > 0.0 {
         let rate = bytes.len() as f64 / took;
-        let before = shared.drain.load(Ordering::Acquire) as f64;
+        let before = f64::from_bits(shared.drain.load(Ordering::Acquire));
         let after = if before == 0.0 {
             rate
         } else {
-            before * 0.8 + rate * 0.2
+            before * (1.0 - DRAIN_WEIGHT) + rate * DRAIN_WEIGHT
         };
-        shared.drain.store(after as u64, Ordering::Release);
+        shared.drain.store(after.to_bits(), Ordering::Release);
     }
     Ok(())
 }
 
+/// Write all of `bytes` in pieces, counting each as it goes, unless told to
+/// stop. Whether the terminal ever had less room than a piece.
 fn write_out(
     out: &mut impl Out,
     bytes: &[u8],
     shared: &Shared,
     count: &mut dyn FnMut(usize),
-) -> io::Result<()> {
+) -> io::Result<bool> {
     let mut rest = bytes;
+    let mut waited = false;
     while !rest.is_empty() {
         // Marked before the check, so `poison` either stops this write or waits for it.
         WRITING.store(true, Ordering::SeqCst);
         if shared.stopping() {
             WRITING.store(false, Ordering::SeqCst);
             count(rest.len());
-            return Ok(());
+            return Ok(waited);
         }
         let piece = &rest[..rest.len().min(PIECE)];
         let written = out.write_some(piece, POLL);
         WRITING.store(false, Ordering::SeqCst);
         let written = written?;
+        waited |= written < piece.len();
         if written > 0 {
             count(written);
             rest = &rest[written..];
         }
     }
-    Ok(())
+    Ok(waited)
 }
 
 /// The terminal standard output names, opened again for this process alone.
@@ -1190,16 +1213,72 @@ mod tests {
         )
     }
 
-    #[test]
-    fn starvation_cap() {
-        // Frames that keep a slow terminal busy: past the cap the upload still
-        // completes, a turn at a time, while the frames go on.
+    /// A writer over a terminal taking 400 KB a second, and a sink for it.
+    fn slow_writer() -> (Writer, Sink) {
         let out = Slow {
             bytes: Arc::new(Mutex::new(Vec::new())),
             rate: 400_000.0,
         };
         let writer = Writer::start(out, Wakes::none());
+        let sink = writer.sink();
+        (writer, sink)
+    }
+
+    /// A terminal that takes `piece` bytes a write, one write a millisecond.
+    struct Trickle {
+        piece: usize,
+    }
+
+    impl Out for Trickle {
+        fn write_some(&mut self, bytes: &[u8], _: Duration) -> io::Result<usize> {
+            std::thread::sleep(Duration::from_millis(1));
+            Ok(bytes.len().min(self.piece))
+        }
+    }
+
+    #[test]
+    fn credit_measured() {
+        // A terminal that never makes a write wait keeps up, so the credit is
+        // the ceiling; one that takes 512 bytes a millisecond drains about
+        // 512 KB a second, so the credit falls to the floor.
+        let fast = Taken::default();
+        fast.room.store(usize::MAX, Ordering::Release);
+        let writer = Writer::start(fast, Wakes::none());
         let mut sink = writer.sink();
+        sink.write_all(&[b'f'; 64 * 1024]).expect("write");
+        sink.flush().expect("flush");
+        assert!(
+            writer.drain(Duration::from_secs(5)),
+            "the frame was not written"
+        );
+        assert_eq!(
+            writer.credit(),
+            CREDIT_CEILING,
+            "a terminal that kept up was given less"
+        );
+        let writer = Writer::start(Trickle { piece: 512 }, Wakes::none());
+        let mut sink = writer.sink();
+        for _ in 0..4 {
+            sink.write_all(&[b'f'; 8 * 1024]).expect("write");
+            sink.flush().expect("flush");
+        }
+        assert!(
+            writer.drain(Duration::from_secs(5)),
+            "the frames were not written"
+        );
+        assert_eq!(
+            writer.credit(),
+            CREDIT_FLOOR,
+            "a slow terminal's credit is {}",
+            writer.credit()
+        );
+    }
+
+    #[test]
+    fn starvation_cap() {
+        // Frames that keep a slow terminal busy: past the cap the upload still
+        // completes, a turn at a time, while the frames go on.
+        let (_writer, mut sink) = slow_writer();
         let (upload, held) = big_upload(21, 20, 4000);
         sink.write_all(&[b'f'; 8000]).expect("write");
         sink.flush().expect("flush");
@@ -1220,12 +1299,7 @@ mod tests {
     fn starved_on_screen() {
         // Two waiting behind the frames, the older stopped as off screen: the
         // other goes, and the stopped one never finishes.
-        let out = Slow {
-            bytes: Arc::new(Mutex::new(Vec::new())),
-            rate: 400_000.0,
-        };
-        let writer = Writer::start(out, Wakes::none());
-        let mut sink = writer.sink();
+        let (_writer, mut sink) = slow_writer();
         let (older, older_held) = big_upload(31, 20, 4000);
         let (newer, newer_held) = big_upload(32, 20, 4000);
         sink.write_all(&[b'f'; 8000]).expect("write");

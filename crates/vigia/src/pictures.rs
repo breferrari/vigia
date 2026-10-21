@@ -1090,7 +1090,7 @@ impl Pictures {
                 if !image.waits() {
                     continue;
                 }
-                let size = image.size_sent();
+                let size = image.wire_len();
                 if held > 0 && held + size > credit {
                     break 'screen;
                 }
