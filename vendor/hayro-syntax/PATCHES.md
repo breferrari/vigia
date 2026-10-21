@@ -32,7 +32,7 @@ The budget is checked where each decode produces its output:
 
 ## `0002-name-the-fork.patch`
 
-The manifest only: the package is named `vigia-hayro-syntax`, with a description that points at upstream, docs.rs and repository links for the fork, and `Cargo.toml.orig`, `PATCHES.md` and `patches/` left out of the package. The library is still named `hayro_syntax`.
+The manifest only, with a change notice at its top: the package is named `vigia-hayro-syntax`, with a description that points at upstream, docs.rs and repository links for the fork, and `Cargo.toml.orig`, `PATCHES.md` and `patches/` left out of the package. The library is still named `hayro_syntax`.
 
 ## `0003-fork-notice.patch`
 

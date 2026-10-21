@@ -1,8 +1,12 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index 5b3bd3f..385d8c9 100644
+index 5b3bd3f..460a753 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -12,7 +12,7 @@
+@@ -9,10 +9,11 @@
+ # will likely look very different (and much more reasonable).
+ # See Cargo.toml.orig for the original contents.
+ 
++# Changed for vigia-hayro: the package name, description and links, the excluded files, and the dependency below it. See PATCHES.md.
  [package]
  edition = "2024"
  rust-version = "1.92"
@@ -11,7 +15,7 @@ index 5b3bd3f..385d8c9 100644
  version = "0.8.0"
  authors = ["Laurenz Stampfl <laurenz.stampfl@gmail.com>"]
  build = false
-@@ -21,10 +21,16 @@ autobins = false
+@@ -21,10 +22,16 @@ autobins = false
  autoexamples = false
  autotests = false
  autobenches = false
@@ -30,7 +34,7 @@ index 5b3bd3f..385d8c9 100644
  resolver = "2"
  
  [features]
-@@ -59,7 +65,9 @@ features = ["bytemuck_derive"]
+@@ -59,7 +66,9 @@ features = ["bytemuck_derive"]
  version = "1.0.0"
  
  [dependencies.hayro-interpret]

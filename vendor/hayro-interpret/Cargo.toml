@@ -9,6 +9,7 @@
 # will likely look very different (and much more reasonable).
 # See Cargo.toml.orig for the original contents.
 
+# Changed for vigia-hayro-interpret: the package name, description and links, the excluded files, and the dependency below it. See PATCHES.md.
 [package]
 edition = "2024"
 rust-version = "1.92"

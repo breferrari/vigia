@@ -10,7 +10,7 @@ This directory is that crate as published, with the patches in `patches/` applie
 
 ## `0001-name-the-fork.patch`
 
-The manifest only: the package is named `vigia-hayro-interpret`, its dependency is `vigia-hayro-syntax` under its upstream name, with a path for this workspace that `cargo publish` drops, a description that points at upstream, docs.rs and repository links for the fork, and `Cargo.toml.orig`, `PATCHES.md` and `patches/` left out of the package.
+The manifest only, with a change notice at its top: the package is named `vigia-hayro-interpret`, its dependency is `vigia-hayro-syntax` under its upstream name, with a path for this workspace that `cargo publish` drops, a description that points at upstream, docs.rs and repository links for the fork, and `Cargo.toml.orig`, `PATCHES.md` and `patches/` left out of the package.
 
 ## `0002-fork-notice.patch`
 
