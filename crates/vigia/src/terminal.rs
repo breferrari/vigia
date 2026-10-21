@@ -251,22 +251,13 @@ impl Session {
         self.sends.upload(upload)
     }
 
-    /// Queue graphics bytes, such as a delete, after the uploads before them.
+    /// Delete Kitty image `id` with `bytes`, after stopping its upload.
     ///
     /// # Errors
     ///
     /// The writer has stopped.
-    pub fn graphic(&mut self, bytes: String) -> io::Result<()> {
-        self.sends.graphic(bytes.into_bytes())
-    }
-
-    /// Stop image `id`'s upload, closing it if it is part sent.
-    ///
-    /// # Errors
-    ///
-    /// The writer has stopped.
-    pub fn cancel(&mut self, id: u32) -> io::Result<()> {
-        self.sends.cancel(id)
+    pub fn delete(&mut self, id: u32, bytes: String) -> io::Result<()> {
+        self.sends.delete(id, bytes.into_bytes())
     }
 }
 
@@ -300,16 +291,31 @@ pub fn panic_mid_frame() {
 /// Kitty image 4242 too large to go out at once, and panic while it is part sent.
 #[doc(hidden)]
 pub fn panic_mid_upload() {
-    install_panic_hook();
-    let mut session = Session::enter(crate::writer::Wakes::none()).expect("take the terminal");
     let rgba: Vec<u8> = (0..400u32 * 400 * 4)
         .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
         .collect();
+    let _held = upload_and_wait(&rgba, (400, 400), 4242);
+    panic!("mid-upload on purpose");
+}
+
+/// For a test in a child process: send Kitty image 4343 whole, then panic.
+#[doc(hidden)]
+pub fn panic_after_upload() {
+    let session = upload_and_wait(&[7; 16 * 16 * 4], (16, 16), 4343);
+    let _ = session.writer().drain(std::time::Duration::from_secs(2));
+    panic!("after an upload on purpose");
+}
+
+/// Take the terminal with the panic hook in place, hand the writer `rgba` as
+/// Kitty image `id`, and give it a moment.
+fn upload_and_wait(rgba: &[u8], pixels: (u32, u32), id: u32) -> Session {
+    install_panic_hook();
+    let mut session = Session::enter(crate::writer::Wakes::none()).expect("take the terminal");
     let image = crate::kitty::Image::new(
-        &rgba,
-        (400, 400),
+        rgba,
+        pixels,
         ratatui::layout::Size::new(40, 20),
-        4242,
+        id,
         false,
         false,
     );
@@ -317,28 +323,7 @@ pub fn panic_mid_upload() {
         .upload(image.upload().expect("an upload"))
         .expect("hand over the upload");
     std::thread::sleep(std::time::Duration::from_millis(150));
-    panic!("mid-upload on purpose");
-}
-
-/// For a test in a child process: send Kitty image 4343 whole, then panic.
-#[doc(hidden)]
-pub fn panic_after_upload() {
-    install_panic_hook();
-    let mut session = Session::enter(crate::writer::Wakes::none()).expect("take the terminal");
-    let image = crate::kitty::Image::new(
-        &[7; 16 * 16 * 4],
-        (16, 16),
-        ratatui::layout::Size::new(2, 1),
-        4343,
-        false,
-        false,
-    );
     session
-        .upload(image.upload().expect("an upload"))
-        .expect("hand over the upload");
-    let _ = session.writer().drain(std::time::Duration::from_secs(2));
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    panic!("after an upload on purpose");
 }
 
 /// For a test: whether standard output is nonblocking before the writer opens

@@ -3,7 +3,7 @@
 
 use std::fmt::Write as _;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use std::num::NonZeroU16;
 
@@ -24,7 +24,7 @@ const UNIT_WIDTH: CellDiffOption = CellDiffOption::ForcedWidth(NonZeroU16::MIN);
 
 /// The transmit of `rgba`, `width` by `height` pixels, as image `id` placed
 /// virtually over `cells`: one escape a chunk, and under tmux each in its own
-/// passthrough. With where each chunk ends.
+/// passthrough, and where each chunk ends.
 fn transmit(
     rgba: &[u8],
     (width, height): (u32, u32),
@@ -144,11 +144,16 @@ pub struct Image {
     ends: Arc<[usize]>,
     tmux: bool,
     deflated: bool,
-    /// Handed to the writer, and not cancelled since.
-    queued: AtomicBool,
-    /// Written whole, so its cells may be drawn.
-    uploaded: AtomicBool,
+    /// [`IDLE`], [`QUEUED`] or [`WRITTEN`].
+    state: AtomicU8,
 }
+
+/// Not with the writer.
+const IDLE: u8 = 0;
+/// Handed to the writer and not yet written whole.
+const QUEUED: u8 = 1;
+/// Written whole, so its cells may be drawn.
+const WRITTEN: u8 = 2;
 
 impl Image {
     /// `rgba`, `width` by `height` pixels, as image `id` over `cells`,
@@ -182,8 +187,7 @@ impl Image {
             ends: ends.into(),
             tmux,
             deflated: compress,
-            queued: AtomicBool::new(false),
-            uploaded: AtomicBool::new(false),
+            state: AtomicU8::new(IDLE),
         }
     }
 
@@ -194,36 +198,39 @@ impl Image {
 
     /// Its transmit, once: none if it is already with the writer or written.
     pub fn upload(&self) -> Option<crate::writer::Upload> {
-        (!self.uploaded() && !self.queued.swap(true, Ordering::AcqRel)).then(|| {
-            crate::writer::Upload {
-                id: self.id,
-                data: Arc::clone(&self.transmit),
-                ends: Arc::clone(&self.ends),
-                close: cancel(self.tmux).into(),
-                tmux: self.tmux,
-            }
+        let handed = self
+            .state
+            .compare_exchange(IDLE, QUEUED, Ordering::AcqRel, Ordering::Acquire);
+        handed.is_ok().then(|| crate::writer::Upload {
+            id: self.id,
+            data: Arc::clone(&self.transmit),
+            ends: Arc::clone(&self.ends),
+            close: cancel(self.tmux).into(),
+            tmux: self.tmux,
         })
     }
 
     /// Whether the terminal has all of it, so its cells place it.
     pub fn uploaded(&self) -> bool {
-        self.uploaded.load(Ordering::Acquire)
+        self.state.load(Ordering::Acquire) == WRITTEN
     }
 
     /// The writer wrote its last chunk.
     pub fn mark_uploaded(&self) {
-        self.uploaded.store(true, Ordering::Release);
+        self.state.store(WRITTEN, Ordering::Release);
     }
 
     /// Its upload was cancelled, or never finished: send it again when next
     /// shown.
     pub fn unsent(&self) {
-        self.queued.store(false, Ordering::Release);
+        let _ = self
+            .state
+            .compare_exchange(QUEUED, IDLE, Ordering::AcqRel, Ordering::Acquire);
     }
 
     /// Whether it is with the writer and not yet written whole.
     pub fn in_flight(&self) -> bool {
-        self.queued.load(Ordering::Acquire) && !self.uploaded()
+        self.state.load(Ordering::Acquire) == QUEUED
     }
 
     /// Whether its transmit is deflated.

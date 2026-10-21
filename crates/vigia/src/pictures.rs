@@ -1017,8 +1017,19 @@ impl Pictures {
         self.retire_where(|_, built| !built.kitty.is_empty());
     }
 
-    /// The Kitty deletes owed since the last call, as escapes. Empty for any
-    /// other protocol.
+    /// For a test with no writer: hand out the uploads due and take each as
+    /// written whole at once.
+    #[doc(hidden)]
+    pub fn written_at_once(&mut self) -> Vec<crate::writer::Upload> {
+        let (uploads, _) = self.uploads();
+        for upload in &uploads {
+            self.uploaded(upload.id);
+        }
+        uploads
+    }
+
+    /// The Kitty deletes owed since the last call, as escapes, for a test to
+    /// read. Empty for any other protocol.
     pub fn retired(&mut self) -> String {
         self.retired_ids()
             .into_iter()
@@ -1040,11 +1051,9 @@ impl Pictures {
     /// The uploads of on-screen Kitty images not yet handed to the writer, and
     /// the images off screen whose upload has to stop.
     pub fn uploads(&mut self) -> (Vec<crate::writer::Upload>, Vec<u32>) {
-        let shown = self
-            .shown
-            .lock()
-            .map(|shown| shown.clone())
-            .unwrap_or_default();
+        let Ok(shown) = self.shown.lock() else {
+            return (Vec::new(), Vec::new());
+        };
         let (mut uploads, mut stopped) = (Vec::new(), Vec::new());
         for (key, ready) in &self.built {
             for (_, panel) in &ready.0.panels {

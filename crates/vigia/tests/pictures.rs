@@ -82,21 +82,26 @@ impl Pane {
 
     /// One frame: the view, with the pictures attached as the shell attaches them.
     fn view(&mut self, frame: &mut Frame) -> View {
+        let mut view = self.unsent(frame);
+        // What the shell's writer does with an upload, at once: write it whole.
+        let uploads = self.pictures.written_at_once();
+        if !uploads.is_empty() {
+            for upload in uploads {
+                self.sent.push_str(&upload.data);
+            }
+            self.pictures.attach(&mut view.rows, frame);
+        }
+        view
+    }
+
+    /// [`Pane::view`] with no upload written.
+    fn unsent(&mut self, frame: &mut Frame) -> View {
         let body = self.body(frame);
         let mut view = self
             .app
             .view(frame, &mut self.highlighter, &self.history, body)
             .expect("view");
         self.pictures.attach(&mut view.rows, frame);
-        // What the shell's writer does with an upload, at once: write it whole.
-        let (uploads, _) = self.pictures.uploads();
-        if !uploads.is_empty() {
-            for upload in uploads {
-                self.sent.push_str(&upload.data);
-                self.pictures.uploaded(upload.id);
-            }
-            self.pictures.attach(&mut view.rows, frame);
-        }
         view
     }
 
@@ -879,12 +884,7 @@ fn placed_after_upload() {
     pane.settled(&mut frame);
     pane.pictures.refresh();
     pane.pictures.retired();
-    let body = pane.body(&frame);
-    let mut view = pane
-        .app
-        .view(&mut frame, &mut pane.highlighter, &pane.history, body)
-        .expect("view");
-    pane.pictures.attach(&mut view.rows, &frame);
+    let mut view = pane.unsent(&mut frame);
     assert!(
         pane.pictures
             .settle(support::ceiling(Duration::from_secs(60))),
@@ -921,27 +921,19 @@ fn upload_stopped_away() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let attach = |pane: &mut Pane, frame: &mut Frame| {
-        let body = pane.body(frame);
-        let mut view = pane
-            .app
-            .view(frame, &mut pane.highlighter, &pane.history, body)
-            .expect("view");
-        pane.pictures.attach(&mut view.rows, frame);
-    };
-    attach(&mut pane, &mut frame);
+    pane.unsent(&mut frame);
     assert!(
         pane.pictures
             .settle(support::ceiling(Duration::from_secs(60))),
         "the pictures were not built"
     );
-    attach(&mut pane, &mut frame);
+    pane.unsent(&mut frame);
     let (uploads, _) = pane.pictures.uploads();
     let ids: Vec<u32> = uploads.iter().map(|upload| upload.id).collect();
     assert_eq!(ids.len(), 3, "three uploads were not handed out");
 
     pane.scroll(&mut frame, 150);
-    attach(&mut pane, &mut frame);
+    pane.unsent(&mut frame);
     let (again, mut stopped) = pane.pictures.uploads();
     stopped.sort_unstable();
     let mut sorted = ids.clone();
@@ -956,7 +948,7 @@ fn upload_stopped_away() {
     );
 
     pane.scroll(&mut frame, -150);
-    attach(&mut pane, &mut frame);
+    pane.unsent(&mut frame);
     let (back, stopped) = pane.pictures.uploads();
     assert!(stopped.is_empty(), "an upload on screen was stopped");
     assert_eq!(

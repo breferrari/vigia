@@ -1250,10 +1250,15 @@ impl Shell {
     /// Send the Kitty deletes owed. A failed write leaves the images to the
     /// terminal's own quota.
     fn write_retired(&mut self) {
+        let retired = self.pictures.retired_ids();
+        self.delete_images(retired);
+    }
+
+    /// Delete Kitty images `ids`, each after its upload stops.
+    fn delete_images(&mut self, ids: Vec<u32>) {
         let tmux = self.pictures.tmux();
-        for id in self.pictures.retired_ids() {
-            let _ = self.session.cancel(id);
-            let _ = self.session.graphic(kitty::delete(id, tmux));
+        for id in ids {
+            let _ = self.session.delete(id, kitty::delete(id, tmux));
         }
     }
 
@@ -1262,11 +1267,7 @@ impl Shell {
     /// hold part of it.
     fn write_uploads(&mut self) {
         let (uploads, stopped) = self.pictures.uploads();
-        let tmux = self.pictures.tmux();
-        for id in stopped {
-            let _ = self.session.cancel(id);
-            let _ = self.session.graphic(kitty::delete(id, tmux));
-        }
+        self.delete_images(stopped);
         for upload in uploads {
             let _ = self.session.upload(upload);
         }

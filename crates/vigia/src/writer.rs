@@ -159,10 +159,11 @@ enum Job {
     Frame(Vec<u8>),
     /// An image to send, chunk by chunk, between frames.
     Upload(Upload),
-    /// Graphics bytes to write in turn with the uploads, such as a delete.
+    /// Graphics bytes to write in turn with the uploads.
     Graphic(Vec<u8>),
-    /// Drop the image's chunks not yet written; close it if it is part sent.
-    Cancel(u32),
+    /// Delete image `id`: its upload is cancelled first, so the delete never
+    /// lands inside its chunks.
+    Delete { id: u32, bytes: Vec<u8> },
     /// The end `stop` queues, which a sink still open would otherwise keep
     /// from coming.
     Stop,
@@ -198,7 +199,10 @@ impl Lanes {
             }
             Job::Upload(_) => {}
             Job::Graphic(bytes) => self.graphics.push_back(Graphic::Raw(bytes)),
-            Job::Cancel(id) => self.cancel(|of| of == id),
+            Job::Delete { id, bytes } => {
+                self.cancel(|of| of == id);
+                self.graphics.push_back(Graphic::Raw(bytes));
+            }
             Job::Stop => {
                 self.stopping = true;
                 self.cancel(|_| true);
@@ -208,16 +212,21 @@ impl Lanes {
 
     /// Drop the uploads `which` names; one part sent is closed in its place.
     fn cancel(&mut self, which: impl Fn(u32) -> bool) {
-        self.graphics = std::mem::take(&mut self.graphics)
-            .into_iter()
-            .filter_map(|graphic| match graphic {
-                Graphic::Upload(upload, sent) if which(upload.id) => (sent > 0).then(|| {
-                    OPEN.store(0, Ordering::SeqCst);
-                    Graphic::Raw(upload.close.as_bytes().to_vec())
-                }),
-                other => Some(other),
-            })
-            .collect();
+        self.graphics.retain_mut(|graphic| {
+            let Graphic::Upload(upload, sent) = graphic else {
+                return true;
+            };
+            if !which(upload.id) {
+                return true;
+            }
+            if *sent == 0 {
+                return false;
+            }
+            OPEN.store(0, Ordering::SeqCst);
+            let close = upload.close.as_bytes().to_vec();
+            *graphic = Graphic::Raw(close);
+            true
+        });
     }
 
     /// Write the next thing due: a frame, else one graphics chunk whole.
@@ -249,11 +258,7 @@ impl Lanes {
                     let slot = SENT_NEXT.fetch_add(1, Ordering::AcqRel) % SENT.len();
                     SENT[slot].store(bits, Ordering::Release);
                 }
-                let from = if *sent == 0 {
-                    0
-                } else {
-                    upload.ends[*sent - 1]
-                };
+                let from = sent.checked_sub(1).map_or(0, |last| upload.ends[last]);
                 let to = upload.ends[*sent];
                 write_out(out, &upload.data.as_bytes()[from..to], shared, &mut |_| {})?;
                 *sent += 1;
@@ -441,14 +446,14 @@ impl Sink {
         self.job(Job::Graphic(bytes))
     }
 
-    /// Cancel image `id`'s upload: what is not written is dropped, and a part
-    /// sent is closed.
+    /// Delete image `id` with `bytes`, after cancelling its upload: what is
+    /// not written is dropped, and a part sent is closed.
     ///
     /// # Errors
     ///
     /// The writer has stopped.
-    pub fn cancel(&mut self, id: u32) -> io::Result<()> {
-        self.job(Job::Cancel(id))
+    pub fn delete(&mut self, id: u32, bytes: Vec<u8>) -> io::Result<()> {
+        self.job(Job::Delete { id, bytes })
     }
 
     fn job(&mut self, job: Job) -> io::Result<()> {
@@ -854,8 +859,9 @@ mod tests {
 
     /// An upload of three chunks, each its own escape.
     fn three_chunks(id: u32) -> Upload {
+        let first = format!("\x1b_Gi={id},m=1;AAAA\x1b\\");
         let chunks = [
-            "\x1b_Gi=7,m=1;AAAA\x1b\\",
+            first.as_str(),
             "\x1b_Gm=1;BBBB\x1b\\",
             "\x1b_Gm=0;CCCC\x1b\\",
         ];
@@ -874,12 +880,17 @@ mod tests {
         }
     }
 
-    /// Wait until `out` has taken `len` bytes.
-    fn taken_len(out: &Taken, len: usize) {
+    /// Wait up to 5 s for what `out` took to satisfy `done`.
+    fn wait_for(out: &Taken, done: impl Fn(&str) -> bool) {
         let until = Instant::now() + Duration::from_secs(5);
-        while out.bytes.lock().expect("bytes").len() < len && Instant::now() < until {
+        while !done(&written(out)) && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    /// Wait until `out` has taken `len` bytes.
+    fn taken_len(out: &Taken, len: usize) {
+        wait_for(out, |taken| taken.len() >= len);
         assert_eq!(
             out.bytes.lock().expect("bytes").len(),
             len,
@@ -925,10 +936,7 @@ mod tests {
             writer.drain(Duration::from_secs(5)),
             "the frames were not written"
         );
-        let until = Instant::now() + Duration::from_secs(5);
-        while !written(&out).ends_with("<delete>") && Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        wait_for(&out, |taken| taken.ends_with("<delete>"));
         assert_eq!(
             written(&out),
             "<frame1>\x1b_Gi=7,m=1;AAAA\x1b\\\x1b_Gm=1;BBBB\x1b\\<frame2>\x1b_Gm=0;CCCC\x1b\\<delete>",
@@ -962,17 +970,13 @@ mod tests {
         sink.upload(upload).expect("upload");
         out.room.store(first, Ordering::Release);
         taken_len(&out, first);
-        sink.cancel(9).expect("cancel");
-        sink.graphic(b"<delete>".to_vec()).expect("delete");
+        sink.delete(9, b"<delete>".to_vec()).expect("delete");
         std::thread::sleep(Duration::from_millis(20));
         out.room.store(usize::MAX, Ordering::Release);
-        let until = Instant::now() + Duration::from_secs(5);
-        while !written(&out).ends_with("<delete>") && Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        wait_for(&out, |taken| taken.ends_with("<delete>"));
         assert_eq!(
             written(&out),
-            "\x1b_Gi=7,m=1;AAAA\x1b\\\x1b_Gm=1;BBBB\x1b\\\x1b_Gm=0,q=2;\x1b\\<delete>",
+            "\x1b_Gi=9,m=1;AAAA\x1b\\\x1b_Gm=1;BBBB\x1b\\\x1b_Gm=0,q=2;\x1b\\<delete>",
             "a cancelled upload was not closed, then deleted"
         );
         assert!(
@@ -992,13 +996,9 @@ mod tests {
         // The writer holds the frame while these arrive.
         std::thread::sleep(Duration::from_millis(20));
         sink.upload(three_chunks(11)).expect("upload");
-        sink.cancel(11).expect("cancel");
-        sink.graphic(b"<delete>".to_vec()).expect("delete");
+        sink.delete(11, b"<delete>".to_vec()).expect("delete");
         out.room.store(usize::MAX, Ordering::Release);
-        let until = Instant::now() + Duration::from_secs(5);
-        while !written(&out).ends_with("<delete>") && Instant::now() < until {
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        wait_for(&out, |taken| taken.ends_with("<delete>"));
         assert_eq!(
             written(&out),
             "<frame><delete>",

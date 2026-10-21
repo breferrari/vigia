@@ -3719,11 +3719,7 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
         pictures.attach(&mut view.rows, frame);
         // What the shell's writer does with an upload, here at once: a Kitty
         // picture draws once the terminal holds it.
-        let (uploads, _) = pictures.uploads();
-        if !uploads.is_empty() {
-            for upload in uploads {
-                pictures.uploaded(upload.id);
-            }
+        if !pictures.written_at_once().is_empty() {
             pictures.attach(&mut view.rows, frame);
         }
         render(&mut buf, pane, &view, &theme, Glyphs::default(), &chrome);
