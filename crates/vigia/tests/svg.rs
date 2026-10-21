@@ -328,13 +328,38 @@ fn fanned(leaf: &str, fan: usize, levels: usize) -> String {
 }
 
 /// The verdict on `body` drawn over a plain square.
+/// A 1024x1024 document over the same 24 units, so a side compares at the
+/// filter budget's size rather than below it.
+fn large(body: &str) -> String {
+    svg(body).replacen(
+        r#"width="24" height="24">"#,
+        r#"width="1024" height="1024" viewBox="0 0 24 24">"#,
+        1,
+    )
+}
+
 fn verdict_of(name: &str, body: &str) -> Option<Verdict> {
     drawn(
         name,
-        Some(&svg(r#"<rect width="2" height="2"/>"#)),
-        &svg(body),
+        Some(&large(r#"<rect width="2" height="2"/>"#)),
+        &large(body),
     )
     .verdict
+}
+
+#[test]
+fn svg_counted_natural() {
+    // A changed 24x24 icon is compared at its own pixels.
+    let drawn = drawn(
+        "svg-natural",
+        Some(&svg(r#"<circle cx="12" cy="12" r="10" fill="red"/>"#)),
+        &svg(r#"<circle cx="12" cy="12" r="10" fill="blue"/>"#),
+    );
+    assert_eq!(
+        rendered(drawn.verdict),
+        Some(24 * 24),
+        "the count is not out of the icon's pixels"
+    );
 }
 
 #[test]

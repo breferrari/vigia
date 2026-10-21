@@ -1654,9 +1654,18 @@ fn render_svg(tree: &resvg::usvg::Tree, long: f32) -> Option<RgbaImage> {
     RgbaImage::from_raw(width, height, pixmap.take_demultiplied())
 }
 
-/// Each side of a changed SVG rendered at one long side, so the two compare,
-/// or `None` when either cannot be drawn.
-fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>)> {
+/// A changed SVG's sides, kept to be drawn again at each panel's size.
+struct SvgDrawn {
+    old: Option<resvg::usvg::Tree>,
+    new: Option<resvg::usvg::Tree>,
+    /// The longest side the filter budget lets either render at.
+    long: f32,
+}
+
+/// Each side of a changed SVG rendered at its own size, no larger than the
+/// filter budget allows, so the two compare at the document's pixels, or
+/// `None` when either cannot be drawn.
+fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>, SvgDrawn)> {
     let tree = |source: &Option<Source>| match source {
         Some(source) => svg_tree(&read_counted(source)?).map(Some),
         None => Some(None),
@@ -1668,11 +1677,14 @@ fn svg_sides(job: &Job) -> Option<(Option<Decoded>, Option<Decoded>)> {
         .map(|tree| (prices(tree), tree.size().width().max(tree.size().height())))
         .collect();
     let long = long_side(&sides)?;
-    let render = |tree: Option<resvg::usvg::Tree>| match tree {
-        Some(tree) => render_svg(&tree, long).map(|image| Some((image, None))),
+    let own = sides.iter().map(|(_, size)| *size).fold(1.0_f32, f32::max);
+    let compared = long.min(own.ceil());
+    let render = |tree: &Option<resvg::usvg::Tree>| match tree {
+        Some(tree) => render_svg(tree, compared).map(|image| Some((image, None))),
         None => Some(None),
     };
-    Some((render(old)?, render(new)?))
+    let (before, after) = (render(&old)?, render(&new)?);
+    Some((before, after, SvgDrawn { old, new, long }))
 }
 
 /// What the worker draws of a changed PDF.
@@ -1843,7 +1855,7 @@ fn pixels_of(slot: Slot, (width, height): (u32, u32), picker: &Picker) -> (u32, 
     }
 }
 
-/// Which cells of a half-block grid `width` by `height` changed.
+/// Which pixels of a grid `width` by `height` changed.
 struct Hits {
     cells: Vec<bool>,
     width: u32,
@@ -1908,9 +1920,12 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
     if vector(Format::Pdf) && job.key.shape.slots.is_empty() {
         return pdf::sized(job);
     }
-    let (mut page, mut alone) = (None, None);
+    let (mut page, mut alone, mut vectors) = (None, None, None);
     let sides = if vector(Format::Svg) {
-        svg_sides(job)
+        svg_sides(job).map(|(old, new, drawn)| {
+            vectors = Some(drawn);
+            (old, new)
+        })
     } else if vector(Format::Pdf) {
         pdf::drawn(job).map(|drawn| {
             (page, alone) = (drawn.note, drawn.alone);
@@ -1973,9 +1988,29 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
             return undecoded();
         };
         let to = pixels_of(slot, image.dimensions(), picker);
+        let tree = vectors.as_ref().and_then(|drawn| match side {
+            Side::Old => drawn.old.as_ref().map(|tree| (tree, drawn.long)),
+            Side::New => drawn.new.as_ref().map(|tree| (tree, drawn.long)),
+        });
         let small = shrunk
             .entry((side, to.0, to.1))
             .or_insert_with(|| {
+                // An SVG is drawn again at the panel's pixels, so it is sharp
+                // at the size it is shown.
+                if let Some((tree, long)) = tree
+                    && let Some(mut drawn) = render_svg(tree, long.min(to.0.max(to.1) as f32))
+                {
+                    if drawn.dimensions() != to {
+                        drawn = image::imageops::resize(
+                            &drawn,
+                            to.0,
+                            to.1,
+                            image::imageops::FilterType::Triangle,
+                        );
+                    }
+                    flatten(&mut drawn, inks.canvas);
+                    return DynamicImage::ImageRgba8(drawn).to_rgb8();
+                }
                 // Averaged on the way down; kept sharp on the way up, so an icon
                 // smaller than its panel stays a picture of pixels.
                 let filter = if to.0 < image.width() {
@@ -1989,7 +2024,9 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
             .clone();
         let hit = match (paint, &mask) {
             (Paint::Mask, Some(mask)) => {
-                let grid = grid_of(slot);
+                // At the panel's own pixels, pooled where they are fewer than
+                // the picture's, so a change is marked as finely as it is drawn.
+                let grid = (to.0.min(image.width()), to.1.min(image.height()));
                 Some(Hits {
                     cells: shrink_mask(mask, image.dimensions(), grid),
                     width: grid.0,
