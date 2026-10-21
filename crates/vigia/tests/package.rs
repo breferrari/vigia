@@ -2276,7 +2276,7 @@ fn changelog_summary(
     let path = dir.join("CHANGELOG.md");
     std::fs::write(&path, changelog).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
     // A file a trailer could glob to, were the script to expand one.
-    std::fs::write(dir.join("#41"), "").expect("write the glob bait");
+    std::fs::write(dir.join("#41=#50"), "").expect("write the glob bait");
     let summary_path = dir.join("release-summary.md");
     if let Some(summary) = summary {
         std::fs::write(&summary_path, summary).expect("write the summary");
