@@ -641,6 +641,13 @@ impl<'repo> Watcher<'repo> {
         if within(&self.store, path).is_some() {
             return Some((Path::new(".git"), false));
         }
+        // A directory on the way to a store in the git dir: inotify watches it
+        // only once it exists, so what landed in it first raised no event.
+        if within(&self.git_dir, path).is_some_and(|inside| !inside.as_os_str().is_empty())
+            && self.store.iter().any(|spelling| spelling.starts_with(path))
+        {
+            return Some((Path::new(".git"), false));
+        }
         // A git-dir event comes back as `.git`, which `followable` never follows.
         if let Some(inside) = within(&self.git_dir, path) {
             let watched = if inside == Path::new("index") {
@@ -1154,6 +1161,51 @@ mod tests {
             .ok()
             .and_then(|secs| secs.parse().ok())
             .map_or(guard, |secs| guard.min(Duration::from_secs(secs)))
+    }
+
+    /// A store inside the git dir, appearing whole in one burst: inotify
+    /// watches each new directory only after it exists, so the burst can leave
+    /// only the first directory's own event. That event ticks.
+    #[test]
+    fn store_ancestor_ticks() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let base = Removed(std::env::temp_dir().join(format!(
+            "vigia-store-ancestor-{}-{stamp}",
+            std::process::id()
+        )));
+        let tree = base.0.join("tree");
+        std::fs::create_dir_all(&tree).expect("tree");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&tree)
+            .args(["init", "-q"])
+            .output()
+            .expect("run git");
+        assert!(out.status.success(), "git init");
+        let repo = gix::open(&tree).expect("open");
+        let mut watcher = watch_with(&tree, &repo, |backend, path, mode| {
+            backend.watch(path, mode)
+        });
+        let created = |path: PathBuf| {
+            Message::Event(Box::new(
+                notify::Event::new(EventKind::Create(notify::event::CreateKind::Folder))
+                    .add_path(path),
+            ))
+        };
+        let git = tree.join(".git");
+        let lfs = watcher
+            .accept(created(git.join("lfs")))
+            .expect("not a stop");
+        assert!(lfs.relevant, "the store's first directory did not tick");
+        let elsewhere = watcher
+            .accept(created(git.join("hooks").join("x")))
+            .expect("not a stop");
+        assert!(
+            !elsewhere.relevant,
+            "a directory off the store's path ticked"
+        );
     }
 
     /// A store arm that fails as a full inotify table does.
