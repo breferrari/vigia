@@ -359,6 +359,11 @@ fn deleted_once() {
         .filter(|id| id.bytes().all(|b| b.is_ascii_digit()))
         .collect();
     assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
+    let last_upload = shown.rfind(",a=T").expect("an upload");
+    assert!(
+        shown[last_upload..].contains('\u{10EEEE}'),
+        "the pictures were never placed once their uploads were written"
+    );
     for id in &sent {
         assert_eq!(
             shown.matches(&format!("a=d,d=I,i={id},q=2")).count(),
