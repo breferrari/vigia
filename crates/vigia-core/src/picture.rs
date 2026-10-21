@@ -518,6 +518,11 @@ pub(crate) fn lfs_oid(bytes: &[u8]) -> Option<&str> {
     (oid.len() == 64 && oid.bytes().all(|b| b.is_ascii_hexdigit())).then_some(oid)
 }
 
+/// The pointer git-lfs stores for the object `oid` of `size` bytes.
+pub(crate) fn lfs_pointer_text(oid: &str, size: u64) -> String {
+    format!("version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {size}\n")
+}
+
 /// The object an LFS pointer names, and the size it records.
 pub(crate) fn lfs_pointer(bytes: &[u8]) -> Option<(&str, u64)> {
     let oid = lfs_oid(bytes)?;

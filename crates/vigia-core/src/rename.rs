@@ -38,6 +38,10 @@ pub struct Candidate {
     pub key: PairKey,
     /// The removed side, then the added side.
     pub sides: Sources,
+    /// For an LFS file in the worktree, the score its pointer takes when its
+    /// bytes are not the removed side's object; it scores in full only when
+    /// they are, as git scores the two pointers.
+    pub exact: Option<u64>,
 }
 
 /// Whether git scores a pair of these sizes at all: one whose sizes differ by
@@ -134,8 +138,19 @@ fn hash(first: u32, second: u32) -> u32 {
 /// when either cannot be read.
 pub fn candidate_score(candidate: &Candidate) -> u64 {
     let read = |side: &Option<crate::picture::Source>| side.as_ref().and_then(|s| s.read());
-    match (read(&candidate.sides.before), read(&candidate.sides.after)) {
-        (Some(old), Some(new)) => pair_score(&old, &new),
+    match (
+        read(&candidate.sides.before),
+        read(&candidate.sides.after),
+        candidate.exact,
+    ) {
+        (Some(old), Some(new), Some(differ)) => {
+            if old == new {
+                MAX_SCORE
+            } else {
+                differ
+            }
+        }
+        (Some(old), Some(new), None) => pair_score(&old, &new),
         _ => 0,
     }
 }

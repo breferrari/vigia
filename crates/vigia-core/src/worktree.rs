@@ -326,6 +326,38 @@ impl Worktree {
         same_bytes(path, &object, size)
     }
 
+    /// Git's score for an LFS file in the worktree, of `raw` bytes, against the
+    /// removed blob `old`: its pointer's, which names `old`'s object only when
+    /// the bytes are that object. Past the walk's compare budget, the score its
+    /// pointer takes when they are not, for the worker to compare.
+    fn lfs_score(&self, old: &[u8], to: &FileChange, raw: u64) -> std::result::Result<u64, u64> {
+        let score = |oid: &str| {
+            let pointer = picture::lfs_pointer_text(oid, raw);
+            rename::Spans::of_side(old, false)
+                .score(&rename::Spans::of_side(pointer.as_bytes(), false))
+        };
+        let differ = score(NO_OID);
+        let Some((oid, size)) = picture::lfs_pointer(old) else {
+            return Ok(differ);
+        };
+        // An object not fetched cannot be compared; git would hash the bytes.
+        let Ok(object) = self.lfs_path(oid) else {
+            return Ok(differ);
+        };
+        if size != raw {
+            return Ok(differ);
+        }
+        if raw > self.lfs_budget.get() {
+            return Err(differ);
+        }
+        self.lfs_budget.update(|v| v - raw);
+        self.lfs_compares.update(|v| v + 1);
+        match same_bytes(&self.workdir.join(&to.path), &object, raw) {
+            Some(true) => Ok(score(oid)),
+            _ => Ok(differ),
+        }
+    }
+
     /// The object and size the blob `id` names when it is an LFS pointer, read
     /// once per blob, with no read of a blob too large to be one.
     fn stored_pointer(&self, id: gix::ObjectId, path: &str) -> Option<(String, u64)> {
@@ -556,6 +588,27 @@ impl Worktree {
             true
         };
         // Each side's size and stamp, from a header or a `stat`, before a byte.
+        // A worktree side git cleans through LFS, by its raw size: git scores
+        // the pointer it would store, not these bytes.
+        let lfs: RefCell<HashMap<usize, Option<u64>>> = RefCell::default();
+        let lfs_raw = |at: usize| -> Option<u64> {
+            if let Some(&known) = lfs.borrow().get(&at) {
+                return known;
+            }
+            let change = &changes[at];
+            let raw = (change.after == Some(Side::Worktree))
+                .then(|| std::fs::symlink_metadata(self.workdir.join(&change.path)).ok())
+                .flatten()
+                .filter(|meta| {
+                    meta.is_file()
+                        && self
+                            .with_filter(|filter| filter.diff_attribute(&change.path))
+                            .is_ok_and(|(_, lfs)| lfs)
+                })
+                .map(|meta| meta.len());
+            lfs.borrow_mut().insert(at, raw);
+            raw
+        };
         let sized = |at: usize| -> Option<(usize, u64, u64)> {
             let change = &changes[at];
             let side = match change.kind {
@@ -586,8 +639,12 @@ impl Worktree {
                 }
                 Side::Worktree => {
                     let meta = std::fs::symlink_metadata(self.workdir.join(&change.path)).ok()?;
+                    let size = match lfs_raw(at) {
+                        Some(raw) => picture::lfs_pointer_text(NO_OID, raw).len() as u64,
+                        None => meta.len(),
+                    };
                     meta.is_file()
-                        .then(|| (at, meta.len(), picture::path_stamp(&change.path, &meta)))
+                        .then(|| (at, size, picture::path_stamp(&change.path, &meta)))
                 }
             }
         };
@@ -683,6 +740,21 @@ impl Worktree {
         let mut score_all = |weighed: Vec<Weighed>| -> Vec<(u64, usize, usize)> {
             let mut scored = Vec::new();
             for pair in weighed {
+                // Lists `pair` for the worker, an LFS one with its score apart.
+                let mut list = |exact: Option<u64>| {
+                    if self.unscored.borrow().len() >= rename::LISTED_MAX {
+                        self.pairs_unlisted.set(true);
+                    } else if listed.insert(pair.key) {
+                        let homes = homes.get_or_insert_with(|| {
+                            (self.repo().git_dir().to_owned(), self.lfs_store())
+                        });
+                        self.unscored.borrow_mut().push(rename::Candidate {
+                            key: pair.key,
+                            sides: self.pair_sources(&changes[pair.from], &changes[pair.to], homes),
+                            exact,
+                        });
+                    }
+                };
                 let known = self
                     .pair_scores
                     .borrow_mut()
@@ -714,31 +786,32 @@ impl Worktree {
                     None if cost + rename::PAIR_COST <= self.pair_budget.get() => {
                         charge(pair.from, pair.sizes.0.max(rename::READ_COST));
                         charge(pair.to, pair.sizes.1.max(rename::READ_COST));
+                        let lfs = lfs_raw(pair.to).map(|raw| {
+                            let old = bytes_of(pair.from).unwrap_or_default();
+                            self.lfs_score(&old, &changes[pair.to], raw)
+                        });
+                        // Past the compare budget the worker compares the bytes.
+                        if let Some(Err(differ)) = lfs {
+                            list(Some(differ));
+                            continue;
+                        }
                         self.pair_budget.update(|v| v - rename::PAIR_COST);
                         self.pairs_scored.update(|v| v + 1);
-                        let score = match (spans_of(pair.from), spans_of(pair.to)) {
-                            (Some(old), Some(new)) => old.score(&new),
+                        let score = match (lfs, spans_of(pair.from), spans_of(pair.to)) {
+                            (Some(Ok(score)), _, _) => score,
+                            (None, Some(old), Some(new)) => old.score(&new),
                             _ => 0,
                         };
                         self.keep_score(pair.key, score);
                         score
                     }
+                    // Two pointers cost a later frame little, which this wakes.
+                    None if lfs_raw(pair.to).is_some() => {
+                        self.sides_left.set(true);
+                        continue;
+                    }
                     None => {
-                        if self.unscored.borrow().len() >= rename::LISTED_MAX {
-                            self.pairs_unlisted.set(true);
-                        } else if listed.insert(pair.key) {
-                            let homes = homes.get_or_insert_with(|| {
-                                (self.repo().git_dir().to_owned(), self.lfs_store())
-                            });
-                            self.unscored.borrow_mut().push(rename::Candidate {
-                                key: pair.key,
-                                sides: self.pair_sources(
-                                    &changes[pair.from],
-                                    &changes[pair.to],
-                                    homes,
-                                ),
-                            });
-                        }
+                        list(None);
                         continue;
                     }
                 };
@@ -2666,6 +2739,9 @@ mod composing {
 /// What an LFS verdict holds for: the worktree file's fingerprint and its
 /// stored blob.
 type LfsKey = (Fingerprint, gix::ObjectId);
+
+/// An oid no LFS object has, for a pointer whose object is not the one compared.
+const NO_OID: &str = "----------------------------------------------------------------";
 
 /// Bytes one status walk may compare between LFS files and their objects.
 const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;

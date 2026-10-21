@@ -1341,3 +1341,130 @@ fn candidate_slot_name() {
     }
     assert_eq!(kind_of(frame.files(), "y.bin"), &renamed("z/y.bin"));
 }
+
+/// A repository whose `*.png` files git-lfs cleans, with `files` committed and
+/// then removed, and `written` in the worktree; `None`, said so, without
+/// git-lfs.
+fn lfs_moved(
+    name: &str,
+    files: &[(&str, Vec<u8>)],
+    written: &[(&str, Vec<u8>)],
+) -> Option<Scratch> {
+    let installed = std::process::Command::new("git")
+        .args(["lfs", "version"])
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if !installed {
+        eprintln!("skipped: git-lfs is not installed");
+        return None;
+    }
+    let scratch = Scratch::new(name);
+    scratch.git(&["lfs", "install", "--local"]);
+    scratch.write(
+        ".gitattributes",
+        "*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    for (path, bytes) in files {
+        scratch.write(path, bytes);
+    }
+    scratch.commit_all("initial");
+    for (path, _) in files {
+        std::fs::remove_file(scratch.path_of(path)).expect("remove");
+    }
+    for (path, bytes) in written {
+        scratch.write(path, bytes);
+    }
+    Some(scratch)
+}
+
+/// The kinds of `paths` after a few frames, unstaged, then staged.
+fn lfs_kinds(scratch: &Scratch, path: &str) -> (ChangeKind, ChangeKind) {
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    let unstaged = kind_of(frame.files(), path).clone();
+    scratch.git(&["add", "-A"]);
+    (unstaged, kind_of(&staged(scratch), path).clone())
+}
+
+#[test]
+fn lfs_rename_unchanged() {
+    // Git scores the pointers it stores, so an LFS file moved unchanged is
+    // a rename in both runs.
+    let old = noise(130, 300_000);
+    let Some(scratch) = lfs_moved(
+        "rename-lfs-same",
+        &[("a.png", old.clone())],
+        &[("b.png", old)],
+    ) else {
+        return;
+    };
+    let git = git_unstaged(&scratch);
+    assert!(
+        git.contains(&("R a.png".to_owned(), "b.png".to_owned())),
+        "the fixture is wrong: {git:?}"
+    );
+    assert_eq!(
+        lfs_kinds(&scratch, "b.png"),
+        (renamed("a.png"), renamed("a.png"))
+    );
+}
+
+#[test]
+fn lfs_rename_edited() {
+    // Two pointers to different objects score under git's bar, so an LFS file
+    // moved and edited is no rename, under its own name or another.
+    let old = noise(131, 300_000);
+    for (case, from, to) in [
+        ("other", "a.png", "b.png"),
+        ("same", "d0/x.png", "d1/x.png"),
+    ] {
+        let Some(scratch) = lfs_moved(
+            &format!("rename-lfs-edit-{case}"),
+            &[(from, old.clone())],
+            &[(to, tail_changed(&old, 0.01))],
+        ) else {
+            return;
+        };
+        let git = git_unstaged(&scratch);
+        assert!(
+            git.contains(&("A".to_owned(), to.to_owned())),
+            "{case}: the fixture is wrong: {git:?}"
+        );
+        assert_eq!(
+            lfs_kinds(&scratch, to),
+            (ChangeKind::Added, ChangeKind::Added),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn lfs_rename_past_budget() {
+    // An LFS file past what a walk may compare goes to the worker, which pairs
+    // it only when its bytes are the removed object.
+    let old = noise(132, 17 * 1024 * 1024);
+    let Some(scratch) = lfs_moved(
+        "rename-lfs-large",
+        &[("a.png", old.clone())],
+        &[("b.png", old)],
+    ) else {
+        return;
+    };
+    let git = git_unstaged(&scratch);
+    assert!(
+        git.contains(&("R a.png".to_owned(), "b.png".to_owned())),
+        "the fixture is wrong: {git:?}"
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let pending = frame.unscored_pairs();
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert!(pending[0].exact.is_some(), "listed as an ordinary pair");
+    frame.learn_pair(pending[0].key, vigia_core::candidate_score(&pending[0]));
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "b.png"), &renamed("a.png"));
+}
