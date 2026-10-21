@@ -727,3 +727,129 @@ fn symlink_never_renamed() {
     }
     assert_eq!(kind_of(frame.files(), "plain.txt"), &ChangeKind::Added);
 }
+
+#[cfg(unix)]
+#[test]
+fn executable_rename() {
+    // An executable is a regular file to git, so one moved and edited pairs,
+    // in either run.
+    use std::os::unix::fs::PermissionsExt;
+    let old = noise(91, 4_000);
+    let scratch = Scratch::new("rename-executable");
+    let executable = |path: &str, bytes: &[u8]| {
+        scratch.write(path, bytes);
+        std::fs::set_permissions(
+            scratch.path_of(path),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .expect("chmod");
+    };
+    executable("old/tool.bin", &old);
+    scratch.commit_all("initial");
+    std::fs::remove_file(scratch.path_of("old/tool.bin")).expect("remove");
+    executable("new/tool.bin", &tail_changed(&old, 0.1));
+    let moved = ("R old/tool.bin".to_owned(), "new/tool.bin".to_owned());
+    assert!(
+        git_unstaged(&scratch).contains(&moved),
+        "the fixture is wrong: {:?}",
+        git_unstaged(&scratch)
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(
+        kind_of(frame.files(), "new/tool.bin"),
+        &renamed("old/tool.bin")
+    );
+    scratch.git(&["add", "-A"]);
+    assert_eq!(
+        kind_of(&staged(&scratch), "new/tool.bin"),
+        &renamed("old/tool.bin")
+    );
+}
+
+#[test]
+fn basename_before_cap() {
+    // Git pairs a shared file name before it keeps an addition's four best
+    // removals, so x.bin pairs by name though four others score higher.
+    let new = noise(92, 4_000);
+    let removals: Vec<(String, Vec<u8>)> = (1..=4)
+        .map(|i| (format!("r{i}.bin"), tail_changed(&new, 0.01 * f64::from(i))))
+        .chain([("d0/x.bin".to_owned(), tail_changed(&new, 0.15))])
+        .collect();
+    let scratch = moved(
+        "rename-basename-cap",
+        &refs(&removals),
+        &[("d1/x.bin", new)],
+    );
+    let by_name = ("R d0/x.bin".to_owned(), "d1/x.bin".to_owned());
+    assert!(
+        git_unstaged(&scratch).contains(&by_name),
+        "the fixture is wrong: {:?}",
+        git_unstaged(&scratch)
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(kind_of(frame.files(), "d1/x.bin"), &renamed("d0/x.bin"));
+}
+
+#[test]
+fn basename_past_limit() {
+    // Git pairs a shared file name before it applies its limit, so past
+    // 1,000 times 1,000 the shared name still pairs.
+    let shared = noise(93, 4_000);
+    let files: Vec<(String, Vec<u8>)> = (0..1000)
+        .map(|n| (format!("old/o{n:04}.txt"), format!("old {n}\n").into_bytes()))
+        .chain([("old/shared.bin".to_owned(), shared.clone())])
+        .collect();
+    let written: Vec<(String, Vec<u8>)> = (0..999)
+        .map(|n| (format!("new/n{n:04}.txt"), format!("new {n}\n").into_bytes()))
+        .chain([("new/shared.bin".to_owned(), tail_changed(&shared, 0.1))])
+        .collect();
+    let scratch = moved("rename-basename-limit", &refs(&files), &refs(&written));
+    let by_name = ("R old/shared.bin".to_owned(), "new/shared.bin".to_owned());
+    assert!(
+        git_unstaged(&scratch).contains(&by_name),
+        "the fixture is wrong"
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(
+        kind_of(frame.files(), "new/shared.bin"),
+        &renamed("old/shared.bin")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_names_count() {
+    // A symlink is never scored, but its file name still counts, so x.bin is
+    // no shared name and the best score pairs instead.
+    let new = noise(94, 4_000);
+    let scratch = Scratch::new("rename-symlink-name");
+    scratch.write("d0/x.bin", tail_changed(&new, 0.15));
+    scratch.write("r.bin", tail_changed(&new, 0.02));
+    std::fs::create_dir_all(scratch.path_of("l")).expect("mkdir");
+    std::os::unix::fs::symlink("elsewhere", scratch.path_of("l/x.bin")).expect("symlink");
+    scratch.commit_all("initial");
+    for path in ["d0/x.bin", "r.bin", "l/x.bin"] {
+        std::fs::remove_file(scratch.path_of(path)).expect("remove");
+    }
+    scratch.write("d1/x.bin", &new);
+    let best = ("R r.bin".to_owned(), "d1/x.bin".to_owned());
+    assert!(
+        git_unstaged(&scratch).contains(&best),
+        "the fixture is wrong: {:?}",
+        git_unstaged(&scratch)
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(kind_of(frame.files(), "d1/x.bin"), &renamed("r.bin"));
+}

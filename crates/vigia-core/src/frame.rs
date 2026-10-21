@@ -1134,6 +1134,7 @@ mod tests {
             // These unit tests are over [`reusable`], which does not consult it:
             // the field decides how a file is *read*, and nothing here reads one.
             maybe_symlink: false,
+            regular: true,
             mode_changed: false,
         }
     }
@@ -1147,6 +1148,7 @@ mod tests {
             before,
             after: after.map(Side::Blob),
             maybe_symlink: true,
+            regular: true,
             mode_changed: false,
         }
     }

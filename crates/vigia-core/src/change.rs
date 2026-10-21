@@ -70,6 +70,8 @@ pub struct FileChange {
     pub(crate) after: Option<Side>,
     /// Whether the working-tree side may be a symlink, as the status walk saw it.
     pub(crate) maybe_symlink: bool,
+    /// Whether the side a rename pairs on is a regular file, executable or not.
+    pub(crate) regular: bool,
     /// Whether the status walk saw the executable bit change.
     pub(crate) mode_changed: bool,
 }
