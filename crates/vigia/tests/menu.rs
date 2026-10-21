@@ -18,19 +18,20 @@ use vigia_core::{Frame, Highlighter, History, Standing};
 use support::{Scratch, materialise};
 
 const WIDE: u16 = 80;
-const TALL: u16 = 24;
+const TALL: u16 = 44;
 const FILES: usize = 3;
 
 /// The word the menu's own title bar spells, restated rather than imported: a
 /// gate that reads the constant it is checking cannot fail when the constant is
 /// wrong.
-const TITLE: &str = "config menu";
+const TITLE: &str = "Settings";
 
 /// The close control's glyph, restated for [`TITLE`]'s reason.
 const CLOSE: char = '✕';
 
-/// The mark on the row the caret is on, restated for [`TITLE`]'s reason.
-const CARET: char = '▸';
+/// The bar on the row the caret is on, restated for [`TITLE`]'s reason. The
+/// plain tier's, which is what [`Glyphs::default`] draws.
+const CARET: char = '>';
 
 fn area() -> Rect {
     Rect::new(0, 0, WIDE, TALL)
@@ -358,10 +359,13 @@ fn the_caret_moves_and_space_flips_the_row_it_is_on() {
             "the caret did not move a row down:\n{text}"
         );
 
-        // The second row is the rail, which is off, and `Space` is what flips it.
-        assert!(!app.settings().rail, "the rail started on");
+        // The second row is staged changes, which is off, and `Space` flips it.
+        assert!(!app.settings().staged, "staged changes started on");
         apply(app, frame, area(), Action::MenuFlip);
-        assert!(app.settings().rail, "the flip did not reach the rail");
+        assert!(
+            app.settings().staged,
+            "the flip did not reach staged changes"
+        );
 
         // And it clamps rather than wrapping, on the last row a caret may sit on.
         for _ in 0..ROWS.len() * 2 {
@@ -371,7 +375,7 @@ fn the_caret_moves_and_space_flips_the_row_it_is_on() {
         let (text, _) = drawn(&buf, &laid);
         assert_eq!(
             carets(&text),
-            first + ROWS.len() - 1,
+            first + ROWS.len() - 1 - vigia::FIRST,
             "the caret wrapped past the last row instead of stopping:\n{text}"
         );
     });
@@ -465,17 +469,22 @@ fn a_click_anywhere_on_a_row_flips_that_row() {
         let (_, laid) = paint(app, frame, highlighter, history, area());
         let menu = laid.menu.expect("a menu region");
 
-        // The second drawn row is the rail. The name is the target, not the state
-        // cell: three columns is a hostile thing to aim at.
-        let row = menu.top + 3;
+        // The rail's drawn row, under its group's header. The name is the target,
+        // not the state cell: three columns is a hostile thing to aim at.
+        let at = ROWS
+            .iter()
+            .position(|row| *row == vigia::menu::Row::Toggle(Setting::Rail))
+            .expect("a rail row");
+        let offset = u16::try_from(at).expect("a short list");
+        let row = menu.top + 2 + offset;
         let on_name = click(menu.left + 6, row);
         assert_eq!(
             menu_route(&on_name, Some(menu)),
-            MenuRoute::Row(1),
+            MenuRoute::Row(offset),
             "a press on a row's name is not that row's"
         );
 
-        apply(app, frame, area(), Action::MenuRow(1));
+        apply(app, frame, area(), Action::MenuRow(offset));
         assert!(app.settings().rail, "the click did not reach the rail");
         // The caret follows the pointer, so arrowing after a click does not jump
         // somewhere stale.
@@ -669,8 +678,8 @@ fn the_menu_draws_inside_the_pane_at_forty_columns() {
         }
         // I6's floor takes the legend's shorter rung rather than dropping it.
         assert!(
-            text.lines().last().is_some_and(|edge| edge.contains("Esc")),
-            "the bottom edge names no keys at forty columns:\n{text}"
+            text.contains("↑↓"),
+            "the footer names no keys at forty columns:\n{text}"
         );
     });
 }
@@ -1042,7 +1051,7 @@ fn a_press_on_the_rule_or_the_air_around_it_moves_nothing() {
                 !inside.is_empty() && inside.chars().all(|c| c == '\u{2500}')
             })
             .expect("the menu draws no rule");
-        let furniture = [rule - 1, rule, rule + 1];
+        let furniture = [rule - 1, rule];
 
         let before = app.settings();
         for row in furniture {
@@ -1065,7 +1074,7 @@ fn a_press_on_the_rule_or_the_air_around_it_moves_nothing() {
 
         // Non-vacuity: the same press on a row that is a toggle does move one, so
         // the loop above is about the furniture rather than about a dead action.
-        let real = u16::try_from(rule - 3).expect("a small row");
+        let real = u16::try_from(rule - 2).expect("a small row");
         apply(app, frame, area(), Action::MenuRow(real - 2));
         assert_ne!(
             app.settings(),
@@ -1164,9 +1173,17 @@ fn refresh_over_overlays() {
 /// The menu as a reader first sees it, for `docs/CONFIG.md`.
 #[test]
 fn menu_frame() {
+    // Staged changes and the rail on, VIGIA_PICTURES=sixel, the caret on the rail.
     let mut pane = Pane::open("menu-frame");
     pane.with(|app, frame, highlighter, history| {
+        app.set_overrides(vigia::Overrides {
+            update: None,
+            pictures: Some(vigia::pictures::Choice::Sixel),
+        });
+        apply(app, frame, area(), Action::ToggleStaged);
+        apply(app, frame, area(), Action::ToggleRail);
         apply(app, frame, area(), Action::ToggleMenu);
+        apply(app, frame, area(), Action::MenuMove(2));
         let (buf, _) = paint(app, frame, highlighter, history, area());
         insta::assert_snapshot!(text_of(&buf, area()));
     });
@@ -1225,15 +1242,15 @@ fn env_marker_drawn() {
                 .to_owned()
         };
         assert!(
-            row(Setting::Update.label()).contains("env off"),
+            row(Setting::Update.label()).contains("env  off"),
             "the update row does not say the environment turns it off:\n{text}"
         );
         assert!(
-            row(Setting::Pictures.label()).contains("env sixel"),
+            row(Setting::Pictures.label()).contains("env  sixel"),
             "the pictures row does not say the environment picks sixel:\n{text}"
         );
-        // The state cell is still the file's, so a flip still shows.
-        assert_eq!(state_of(&text, Setting::Pictures.label()), "auto");
+        // The state cell shows what is in effect, which is the environment's.
+        assert_eq!(state_of(&text, Setting::Pictures.label()), "sixel");
         apply(app, frame, area(), Setting::Pictures.action());
         assert_eq!(
             app.config().pictures,
@@ -1245,17 +1262,13 @@ fn env_marker_drawn() {
 
 #[test]
 fn env_marker_narrow() {
-    // At the narrowest box the value after the marker may go, and the marker, the
-    // name and the widest word stay.
+    // At the narrowest box the marker, the name and the widest word all stay.
     let mut pane = Pane::open("menu-env-narrow");
     pane.with(|app, frame, highlighter, history| {
         app.set_overrides(vigia::Overrides {
             update: Some(false),
-            pictures: Some(vigia::pictures::Choice::Iterm2),
+            pictures: Some(vigia::pictures::Choice::Halfblocks),
         });
-        for _ in 0..4 {
-            apply(app, frame, area(), Setting::Pictures.action());
-        }
         let mut narrowest = None;
         for width in 20..WIDE {
             let at = Rect::new(0, 0, width, TALL);
@@ -1301,60 +1314,219 @@ fn unflipped_keys_kept() {
 }
 
 #[test]
-fn restart_notice_words() {
-    use vigia::menu::launch_notice;
+fn restart_text_described() {
+    use vigia::menu::{Flipped, Row, description};
     let saved = vigia::Settings {
         persist: true,
+        ..vigia::Settings::shipped()
+    };
+    let update = Row::Toggle(Setting::Update);
+    assert_eq!(
+        description(update, saved, Flipped::default()),
+        Setting::Update.description(),
+        "an unflipped row says what it does"
+    );
+    let flipped = Flipped {
         update: true,
-        ..Default::default()
+        pictures: false,
     };
-    assert_eq!(launch_notice(saved, saved), None, "nothing moved");
-    let rail = vigia::Settings {
-        rail: true,
-        ..saved
-    };
-    assert_eq!(
-        launch_notice(saved, rail),
-        None,
-        "a live toggle asks for no restart"
-    );
-
-    let flipped = vigia::Settings {
-        update: false,
-        ..saved
-    };
-    assert_eq!(
-        launch_notice(saved, flipped).as_deref(),
-        Some(vigia::RESTART)
-    );
-
+    assert_eq!(description(update, saved, flipped), vigia::RESTART);
     let unsaved = vigia::Settings {
         persist: false,
         ..saved
     };
-    let cycled = vigia::Settings {
-        pictures: vigia::pictures::Choice::Kitty,
-        ..unsaved
-    };
+    assert_eq!(description(update, unsaved, flipped), vigia::UNSAVED);
     assert_eq!(
-        launch_notice(unsaved, cycled).as_deref(),
-        Some(vigia::UNSAVED),
-        "a flip with Save settings off says it is not saved"
+        description(Row::Toggle(Setting::Pictures), saved, flipped),
+        Setting::Pictures.description(),
+        "a flip of one launch row moved the other's text"
     );
+}
 
-    let overridden = vigia::Settings {
+#[test]
+fn groups_in_order() {
+    use vigia::menu::Row;
+    let mut groups: Vec<(&str, Vec<Setting>)> = Vec::new();
+    for row in ROWS {
+        match row {
+            Row::Header(group) => groups.push((group.title(), Vec::new())),
+            Row::Toggle(setting) => {
+                if let Some((_, members)) = groups.last_mut() {
+                    members.push(setting);
+                }
+            }
+            Row::Gap | Row::Rule | Row::Reset => {}
+        }
+    }
+    let want: Vec<(&str, Vec<Setting>)> = vec![
+        ("What changes", vec![Setting::Follow, Setting::Staged]),
+        (
+            "Layout",
+            vec![
+                Setting::Rail,
+                Setting::Single,
+                Setting::Overview,
+                Setting::Wrap,
+            ],
+        ),
+        ("Look", vec![Setting::Icons, Setting::Links]),
+        ("Pictures", vec![Setting::Pictures]),
+        ("Agent", vec![Setting::Notes]),
+        // Save settings sits under the rule after the last group, not in it.
+        ("App", vec![Setting::Update, Setting::Persist]),
+    ];
+    assert_eq!(groups, want);
+    assert!(
+        ROWS.iter()
+            .filter(|row| matches!(row, Row::Header(_)))
+            .all(|row| !row.selectable()),
+        "a header takes the caret"
+    );
+    assert!(ROWS[vigia::FIRST].selectable() && !ROWS[0].selectable());
+    let rule = ROWS
+        .iter()
+        .position(|row| *row == Row::Rule)
+        .expect("a rule");
+    assert_eq!(ROWS[rule - 1], Row::Gap, "no air above the rule");
+    assert_eq!(ROWS[rule + 1], Row::Toggle(Setting::Persist));
+}
+
+#[test]
+fn marker_follows_defaults() {
+    let shipped = vigia::Settings::shipped();
+    for setting in SETTINGS {
+        assert!(
+            !setting.changed(shipped),
+            "{setting:?} is marked when shipped"
+        );
+    }
+    assert_eq!(shipped.changed(), 0);
+
+    let mine = vigia::Settings {
+        rail: true,
+        staged: true,
+        ..shipped
+    };
+    assert!(Setting::Rail.changed(mine) && Setting::Staged.changed(mine));
+    assert_eq!(mine.changed(), 2);
+
+    // An override counts where it moves what is in effect, and not where it agrees.
+    let env = vigia::Settings {
         env: vigia::Overrides {
             pictures: Some(vigia::pictures::Choice::Sixel),
-            update: None,
+            update: Some(true),
         },
-        ..saved
+        ..mine
     };
-    let cycled = vigia::Settings {
-        pictures: vigia::pictures::Choice::Kitty,
-        ..overridden
-    };
-    assert_eq!(
-        launch_notice(overridden, cycled).as_deref(),
-        Some("VIGIA_PICTURES wins over this"),
+    assert!(
+        Setting::Pictures.changed(env),
+        "an env override is not marked"
     );
+    assert!(
+        !Setting::Update.changed(env),
+        "VIGIA_UPDATE=auto is the shipped value"
+    );
+    assert_eq!(env.changed(), 3);
+}
+
+#[test]
+fn description_wrap() {
+    use vigia::menu::wrap;
+    assert_eq!(wrap("one two three", 7), ["one two", "three"]);
+    assert_eq!(wrap("abcdefgh", 3), ["abc", "def", "gh"]);
+    assert!(wrap("", 10).is_empty());
+    for text in vigia::menu::descriptions() {
+        for line in wrap(text, 12) {
+            assert!(line.chars().count() <= 12, "{line:?} is wider than 12");
+        }
+        assert_eq!(
+            wrap(text, 12).join(" "),
+            text,
+            "wrapping lost or moved words of {text:?}"
+        );
+    }
+}
+
+#[test]
+fn box_height_steady() {
+    let mut pane = Pane::open("menu-steady");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let mut heights = std::collections::BTreeSet::new();
+        let selectable = ROWS.iter().filter(|row| row.selectable()).count();
+        for _ in 0..selectable {
+            let (buf, laid) = paint(app, frame, highlighter, history, area());
+            heights.insert(drawn(&buf, &laid).1.height);
+            apply(app, frame, area(), Action::MenuMove(1));
+        }
+        // And with a launch row flipped, whose text is the restart line.
+        apply(app, frame, area(), Setting::Update.action());
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        heights.insert(drawn(&buf, &laid).1.height);
+        assert_eq!(
+            heights.len(),
+            1,
+            "the menu resized with the caret: {heights:?}"
+        );
+    });
+}
+
+#[test]
+fn short_pane_fallback() {
+    let mut pane = Pane::open("menu-short");
+    pane.with(|app, frame, highlighter, history| {
+        let tall = Rect::new(0, 0, WIDE, 60);
+        apply(app, frame, tall, Action::ToggleMenu);
+        // The rail's text takes two lines, so one line has to cut it.
+        apply(app, frame, tall, Action::MenuMove(2));
+        let (buf, laid) = paint(app, frame, highlighter, history, tall);
+        let (text, _) = drawn(&buf, &laid);
+        assert!(
+            text.contains("changed"),
+            "no footer on a tall pane:\n{text}"
+        );
+        assert!(
+            !text.contains('…'),
+            "a tall pane cut the description:\n{text}"
+        );
+
+        // Short enough that the box keeps one line.
+        let mut cut = None;
+        for height in (8..60).rev() {
+            let at = Rect::new(0, 0, WIDE, height);
+            let (buf, laid) = paint(app, frame, highlighter, history, at);
+            if laid.menu.is_none() {
+                continue;
+            }
+            let (text, _) = drawn(&buf, &laid);
+            if text.contains('…') {
+                cut = Some(text);
+                break;
+            }
+        }
+        let text = cut.expect("no height cut the description to one line");
+        assert!(
+            text.contains("changed"),
+            "the footer went before the box line:\n{text}"
+        );
+
+        // Shorter still, the box goes and the footer stays a while longer.
+        let mut seen_footer_only = false;
+        for height in (4..60).rev() {
+            let at = Rect::new(0, 0, WIDE, height);
+            let (buf, laid) = paint(app, frame, highlighter, history, at);
+            if laid.menu.is_none() {
+                continue;
+            }
+            let (text, _) = drawn(&buf, &laid);
+            // The box's own corner, indented inside the menu's frame.
+            if text.contains("changed") && !text.contains("│  ┌") {
+                seen_footer_only = true;
+            }
+        }
+        assert!(
+            seen_footer_only,
+            "no height drew the footer without the box"
+        );
+    });
 }

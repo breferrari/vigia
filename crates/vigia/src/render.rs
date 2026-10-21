@@ -3042,35 +3042,39 @@ fn sheet_beside_rows(purpose: bool) -> usize {
 }
 
 /// What the config menu's title bar spells, corner excluded.
-const MENU_TITLE: &str = "─ config menu ";
+const MENU_TITLE: &str = "─ Settings ";
 
 /// The same word, spliced into a rounded frame.
-const MENU_SPLICE: &str = " config menu ";
+const MENU_SPLICE: &str = " Settings ";
 
-/// What the menu's bottom edge spells, widest rung first: the note box's ladder
-/// one overlay over, so the keys that change meaning are written where they are
-/// pressed rather than remembered from a sheet somewhere else.
-const MENU_HINT_RUNGS: [&str; 3] = [
-    " ↑↓ move · Space toggles · Esc closes ",
-    " ↑↓ · Space · Esc ",
-    "",
-];
+/// The keys the menu's footer names at its right end, widest rung first.
+const MENU_KEYS: [&str; 3] = ["↑↓ move  ␣ flip", "↑↓ ␣", ""];
 
-/// Columns between the widest label and the state cell at the tight rung. One would
-/// let a full-width label touch the word beside it, and they would read as one run.
+/// Columns between the widest label and the state cell. One would let a
+/// full-width label touch the word beside it, and they would read as one run.
 const MENU_GAP: usize = 2;
-
-/// The gap the roomy rung wants, which is what buys the wider inset.
-const MENU_AIR: usize = 6;
 
 /// Rule cells the bottom edge keeps after its legend, at least. Without them the
 /// widest rung fills the edge and the foot stops reading as a frame.
 const MENU_EDGE_RULE: usize = 2;
 
-/// The widest the box ever gets: the bottom edge's widest rung, its two corners
-/// and a dozen columns of rule. Past it the row's gap grows and the box says
+/// The widest the box ever gets. Past it the row's gap grows and the box says
 /// nothing more for it, which is air a glance crosses for free.
 const MENU_WIDEST: usize = 52;
+
+/// Columns from the box's left edge to where a header, a row's marker, the
+/// description box and the footer start.
+const MENU_EDGE: usize = 3;
+
+/// Where a row's label starts: past the marker and a space.
+const MENU_INSET: usize = MENU_EDGE + 2;
+
+/// Columns from the box's right edge to where content ends: the frame and one
+/// of air.
+const MENU_RIGHT: usize = 2;
+
+/// List rows a short pane keeps before the description box gives up lines.
+const MENU_KEEP: usize = 3;
 
 /// The widest label any row draws, which sets the label field.
 const MENU_LABEL: usize = {
@@ -3086,46 +3090,19 @@ const MENU_LABEL: usize = {
     widest
 };
 
-/// Where a row's [`ENV`] marker starts, counted from its label: past the widest
-/// label of a row read only at launch, so the markers share a column. One column
-/// of air each side of the marker rather than [`MENU_GAP`], which is what lets
-/// the narrowest box hold it at I6's forty columns; the marker is dim, so it
-/// still reads apart from the name.
-const MENU_HINT_AT: usize = {
-    let mut widest = 0;
-    let mut at = 0;
-    while at < SETTINGS.len() {
-        let len = SETTINGS[at].label().len();
-        if SETTINGS[at].at_launch() && len > widest {
-            widest = len;
-        }
-        at += 1;
-    }
-    widest + 1
-};
+/// Columns between [`ENV`] and the value it marks.
+const MENU_ENV_GAP: usize = 2;
 
-/// Where a row's label starts, counted from the box's own left edge, and the gap
-/// that rung wants beside the state cell. Widest first. The caret hangs two
-/// columns inside the inset rather than widening it, so the names keep their
-/// column whichever row is marked.
-const MENU_INSETS: [(usize, usize); 2] = [(5, MENU_AIR), (4, MENU_GAP)];
-
-/// What one rung costs: the inset at both ends, the widest label, its gap and the
-/// state cell. The frame is inside the inset rather than beside it.
-const fn menu_span(rung: (usize, usize)) -> usize {
-    let row = MENU_LABEL + rung.1 + STATE_WIDTH;
-    rung.0 * 2 + if row > MENU_HINTED { row } else { MENU_HINTED }
-}
-
-/// What the widest row read at launch needs between the insets: its label field,
-/// [`ENV`] and its state cell, so an overridden row always says so. The value
-/// after the marker may still drop.
+/// What the widest row read at launch needs from its label on: its label, a
+/// column of air, [`ENV`] and its state cell, so an overridden row always says
+/// so.
 const MENU_HINTED: usize = {
     let mut widest = 0;
     let mut at = 0;
     while at < SETTINGS.len() {
-        let need = MENU_HINT_AT + ENV.len() + 1 + SETTINGS[at].width();
-        if SETTINGS[at].at_launch() && need > widest {
+        let setting = SETTINGS[at];
+        let need = setting.label().len() + 1 + ENV.len() + MENU_ENV_GAP + setting.width();
+        if setting.at_launch() && need > widest {
             widest = need;
         }
         at += 1;
@@ -3133,8 +3110,63 @@ const MENU_HINTED: usize = {
     widest
 };
 
-/// The narrowest box that can carry a row at all.
-const MENU_FLOOR: usize = menu_span(MENU_INSETS[1]);
+/// The narrowest box that can carry every row whole.
+const MENU_FLOOR: usize = {
+    let row = MENU_LABEL + MENU_GAP + STATE_WIDTH;
+    MENU_INSET + if row > MENU_HINTED { row } else { MENU_HINTED } + MENU_RIGHT
+};
+
+// I6's forty-column pane draws the menu whole.
+const _: () = assert!(MENU_FLOOR <= 40);
+
+/// Columns a description line has in a box `width` wide: the box inside the
+/// edges, less its two borders and a column of padding each side.
+const fn menu_text(width: usize) -> usize {
+    width.saturating_sub(MENU_EDGE + MENU_RIGHT + 4)
+}
+
+/// Lines the description box holds at this width: the longest description's, so
+/// moving the caret never resizes the menu.
+fn menu_lines(width: usize) -> usize {
+    menu::descriptions()
+        .map(|text| menu::wrap(text, menu_text(width)).len())
+        .max()
+        .unwrap_or(1)
+}
+
+/// What the menu draws under its rows, from most to least.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuTail {
+    /// The description box at this many lines, and the footer.
+    Full(usize),
+    /// The box at one line, cut with `…`, and the footer.
+    Short,
+    /// The footer alone.
+    Footer,
+    /// Nothing.
+    Bare,
+}
+
+impl MenuTail {
+    /// Rows it costs.
+    const fn rows(self) -> usize {
+        match self {
+            Self::Full(lines) => lines + 3,
+            Self::Short => 4,
+            Self::Footer => 1,
+            Self::Bare => 0,
+        }
+    }
+
+    /// Lines of description it draws.
+    const fn lines(self) -> usize {
+        match self {
+            Self::Full(lines) => lines,
+            Self::Short => 1,
+            Self::Footer | Self::Bare => 0,
+        }
+    }
+}
 
 /// Where the config menu goes, or `None` on a pane that cannot hold one.
 ///
@@ -3147,32 +3179,37 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
     if room < MENU_FLOOR {
         return None;
     }
+    let capacity = usize::from(body).saturating_sub(OVERLAY_FRAME);
+    let total = room.clamp(MENU_FLOOR, MENU_WIDEST);
+
+    // The box and the footer give way before the rows do, the box's lines first.
+    let ladder = [
+        MenuTail::Full(menu_lines(total)),
+        MenuTail::Short,
+        MenuTail::Footer,
+        MenuTail::Bare,
+    ];
+    let keep = MENU_KEEP.min(ROWS.len());
+    let tail = ladder
+        .iter()
+        .copied()
+        .find(|tail| capacity >= tail.rows() + keep)
+        .or_else(|| ladder.iter().copied().find(|tail| capacity > tail.rows()))?;
     // One row is a legal menu: it draws a name and the title bar says the rest are
     // there.
-    let capacity = usize::from(body).saturating_sub(OVERLAY_FRAME);
-    if capacity == 0 {
-        return None;
-    }
-    let rows = capacity.min(ROWS.len());
+    let rows = (capacity - tail.rows()).min(ROWS.len());
 
     // The title bar's own floor, so a box wide enough for its rows is never too
     // narrow for the word on its edge.
     let counter = (rows < ROWS.len()).then(|| overlay_counter(top, rows, ROWS.len()));
     let titled = width_of(MENU_TITLE) + counter.as_deref().map_or(0, width_of) + 5;
-    // Grown with the pane, which puts the names and their states at the two ends of
-    // the box rather than side by side in the middle of it.
-    let total = room.clamp(MENU_FLOOR, MENU_WIDEST).max(titled);
+    let total = total.max(titled);
     if total > room {
         return None;
     }
-    let inset = MENU_INSETS
-        .iter()
-        .find(|rung| menu_span(**rung) <= total)
-        .unwrap_or(&MENU_INSETS[1])
-        .0;
 
     let width = u16::try_from(total).unwrap_or(u16::MAX);
-    let height = u16::try_from(rows + OVERLAY_FRAME).unwrap_or(u16::MAX);
+    let height = u16::try_from(rows + OVERLAY_FRAME + tail.rows()).unwrap_or(u16::MAX);
     let left = area.x + margins.0 + (u16::try_from(room).unwrap_or(u16::MAX) - width) / 2;
     let top_row = area.y + 1 + (body - height) / 2;
     Some(MenuPlan {
@@ -3182,8 +3219,8 @@ fn menu_plan(area: Rect, footer_rows: u16, margins: (u16, u16), top: usize) -> O
             width,
             height,
         },
-        inset,
         rows,
+        tail,
         counter,
         // Three in from the right edge: the corner, the space before it, and this.
         close: (left + width - 3, top_row),
@@ -3414,10 +3451,10 @@ fn overlay_counter(top: usize, rows: usize, of: usize) -> String {
 struct MenuPlan {
     /// The whole box, frame included.
     area: Rect,
-    /// Columns in from the frame where a label starts.
-    inset: usize,
     /// Rows of names it draws, which is every setting on a pane with room.
     rows: usize,
+    /// What it draws under them.
+    tail: MenuTail,
     /// The counter its title bar carries, where it cannot draw them all.
     counter: Option<String>,
     /// The close control's cell.
@@ -3431,17 +3468,20 @@ impl MenuPlan {
     }
 
     /// The state cell, `width` columns wide, of the row `offset` rows down the
-    /// drawn window. It ends `inset` columns from the right edge where a label
-    /// begins `inset` from the left, so the two margins stay equal however wide the
-    /// box is.
+    /// drawn window. It ends [`MENU_RIGHT`] columns from the right edge.
     fn state_cell(&self, offset: usize, width: usize) -> Rect {
-        let x = self.area.x + self.area.width - u16::try_from(self.inset + width).unwrap_or(0);
+        let x = self.area.x + self.area.width - u16::try_from(MENU_RIGHT + width).unwrap_or(0);
         Rect {
             x,
             y: self.area.y + 2 + u16::try_from(offset).unwrap_or(0),
             width: u16::try_from(width).unwrap_or(0),
             height: 1,
         }
+    }
+
+    /// Columns between the edges, where headers, the box and the footer draw.
+    fn inner(&self) -> usize {
+        usize::from(self.area.width).saturating_sub(MENU_EDGE + MENU_RIGHT)
     }
 }
 
@@ -4261,7 +4301,6 @@ impl Painter<'_> {
         }
     }
 
-    /// Draw the gestures sheet over whatever the regions already drew.
     /// The config menu, drawn over cells the regions have already painted.
     /// `SPEC.md` §11.2 B22. It shares the sheet's frame, splice, counter and close
     /// control, so the two read as one kind of thing.
@@ -4288,8 +4327,16 @@ impl Painter<'_> {
             self.menu_row(plan, menu, offset, row, window);
         }
 
-        let hint =
-            widest_fitting_or_last(&MENU_HINT_RUNGS, width.saturating_sub(2 + MENU_EDGE_RULE));
+        let mut y = area.y + 3 + u16::try_from(plan.rows).unwrap_or(0);
+        let lines = plan.tail.lines();
+        if lines > 0 {
+            self.menu_description(plan, menu, y, lines);
+            y += u16::try_from(lines + 2).unwrap_or(0);
+        }
+        if plan.tail != MenuTail::Bare {
+            self.menu_footer(plan, menu, y);
+        }
+
         let corners = if rounded {
             ('╰', '╯')
         } else {
@@ -4300,21 +4347,12 @@ impl Painter<'_> {
             area.y + area.height - 1,
             width,
             corners,
-            (hint, ""),
+            ("", ""),
             frame,
         );
-        if !hint.is_empty() {
-            self.put(
-                area.x + 1,
-                area.y + area.height - 1,
-                hint,
-                width_of(hint),
-                frame,
-            );
-        }
     }
 
-    /// One row: its mark, its name, and the word for where it stands.
+    /// One row: its marker, its name, and the word for where it stands.
     fn menu_row(
         &mut self,
         plan: &MenuPlan,
@@ -4326,78 +4364,175 @@ impl Painter<'_> {
         let area = plan.area;
         let y = area.y + 2 + u16::try_from(offset).unwrap_or(0);
         let at = window + offset;
-        let inset = u16::try_from(plan.inset).unwrap_or(0);
-        if matches!(row, menu::Row::Gap) {
-            return;
+        let edge = area.x + u16::try_from(MENU_EDGE).unwrap_or(0);
+        let inner = plan.inner();
+        let plain = matches!(self.glyphs, Glyphs::Block);
+        match row {
+            menu::Row::Gap => return,
+            menu::Row::Rule => {
+                let rule = RULE.to_string().repeat(inner);
+                self.put(edge, y, &rule, inner, self.theme.chrome_dim);
+                return;
+            }
+            menu::Row::Header(group) => {
+                let title = group.title();
+                self.put(edge, y, title, inner, self.theme.chrome_dim);
+                let after = width_of(title) + 1;
+                let rule = RULE.to_string().repeat(inner.saturating_sub(after));
+                self.put(
+                    edge + u16::try_from(after).unwrap_or(0),
+                    y,
+                    &rule,
+                    inner.saturating_sub(after),
+                    self.theme.chrome_dim,
+                );
+                return;
+            }
+            menu::Row::Toggle(_) | menu::Row::Reset => {}
         }
-        if matches!(row, menu::Row::Rule) {
-            // To the label's own column at both ends, so it separates the rows
-            // rather than the box: a rule to the frame would read as a second edge.
-            let room = usize::from(area.width).saturating_sub(plan.inset * 2);
-            self.put(
-                area.x + inset,
-                y,
-                &RULE.to_string().repeat(room),
-                room,
-                self.theme.chrome_dim,
-            );
-            return;
-        }
+
         let carets = at == menu.caret.at;
-        // The pointer marks its row in the ink the caret's row takes, and the caret
-        // glyph is what tells the two apart.
+        if carets {
+            // The row's whole inner width, frame excluded, then the bar over the
+            // left frame cell.
+            if let Some(bg) = self.theme.selection.bg {
+                for x in area.x + 1..area.x + area.width - 1 {
+                    if let Some(cell) = self.buf.cell_mut((x, y)) {
+                        cell.set_bg(bg);
+                    }
+                }
+            }
+            let bar = if plain { ">" } else { "▌" };
+            self.put(area.x, y, bar, 1, self.theme.pulse);
+        }
+        // The pointer marks its row in the ink a listed path takes under it.
         let pointed = self.hovered == Some(Hovered::MenuRow(y));
-        let name = if carets || pointed {
+        let name = if pointed && !carets {
             self.theme.path_hover
         } else {
             self.theme.chrome
         };
+        let label_x = area.x + u16::try_from(MENU_INSET).unwrap_or(0);
 
-        if carets {
-            self.put(area.x + inset - 2, y, CARET, 1, name);
-        }
         let menu::Row::Toggle(setting) = row else {
             // The reset, which throws something away and so has no state to spell.
-            let room = usize::from(area.width).saturating_sub(plan.inset * 2 + STATE_WIDTH);
-            self.put(area.x + inset, y, RESET, room, name);
+            self.put(label_x, y, RESET, inner.saturating_sub(2), name);
             return;
         };
-        let width = setting.width();
-        let room = usize::from(area.width).saturating_sub(plan.inset * 2 + width);
-        let label = setting.label();
-        self.put(area.x + inset, y, label, room, name);
-        if let Some(value) = setting.env(menu.settings) {
-            let at = MENU_HINT_AT.max(width_of(label) + 1);
-            self.menu_env(
-                area.x + inset + u16::try_from(at).unwrap_or(0),
-                y,
-                room.saturating_sub(at + 1),
-                value,
-            );
+        if setting.changed(menu.settings) {
+            let mark = if plain { "*" } else { "◆" };
+            self.put(edge, y, mark, 1, self.theme.pulse);
         }
+        let width = setting.width();
+        let room = usize::from(area.width).saturating_sub(MENU_INSET + MENU_RIGHT + width + 1);
+        self.put(label_x, y, setting.label(), room, name);
 
-        let word = setting.word(menu.settings);
+        // What is in effect, so an overridden row shows the environment's value
+        // with the marker that says where it came from.
+        let word = setting.effective(menu.settings);
         let ink = match word {
             ON => self.theme.added,
             OFF => self.theme.removed,
             _ => self.theme.chrome,
         };
-        // Right-aligned by placing it: the field and every word are constants, so
-        // the pad is arithmetic rather than an allocation per drawn row.
+        // `on` and `off` share their left edge; a choice keeps the right one.
         let cell = plan.state_cell(offset, width);
-        let pad = u16::try_from(width.saturating_sub(width_of(word))).unwrap_or(0);
+        let pad = if width == STATE_WIDTH {
+            0
+        } else {
+            u16::try_from(width.saturating_sub(width_of(word))).unwrap_or(0)
+        };
         self.put(cell.x + pad, y, word, width_of(word), ink);
+        if setting.env(menu.settings).is_some() {
+            let back = u16::try_from(ENV.len() + MENU_ENV_GAP).unwrap_or(0);
+            self.put(
+                cell.x + pad - back,
+                y,
+                ENV,
+                ENV.len(),
+                self.theme.chrome_dim,
+            );
+        }
     }
 
-    /// [`ENV`] and the value the environment sets, in `room` columns. The span
-    /// guarantees the marker fits; the value only where it fits whole, because a
-    /// cut word reads as another.
-    fn menu_env(&mut self, x: u16, y: u16, room: usize, value: &str) {
+    /// The box under the rows: the caret's row named on its top edge and what it
+    /// does inside, in `lines` lines.
+    fn menu_description(&mut self, plan: &MenuPlan, menu: &Menu, y: u16, lines: usize) {
+        let area = plan.area;
+        let frame = self.theme.chrome_dim;
+        let x = area.x + u16::try_from(MENU_EDGE).unwrap_or(0);
+        let inner = plan.inner();
+        let row = ROWS.get(menu.caret.at).copied().unwrap_or(menu::Row::Reset);
+        let (name, changed) = match row {
+            menu::Row::Toggle(setting) => (setting.label(), setting.changed(menu.settings)),
+            _ => (RESET, false),
+        };
+        let mark = match (changed, matches!(self.glyphs, Glyphs::Block)) {
+            (false, _) => "",
+            (true, true) => "* ",
+            (true, false) => "◆ ",
+        };
+        let title = format!(" {mark}{name} ");
+        self.box_edge(x, y, inner, ('┌', '┐'), (&title, ""), frame);
+
+        let text_x = x + 2;
+        let room = menu_text(usize::from(area.width));
+        let said = menu::description(row, menu.settings, menu.flipped);
+        let mut wrapped = menu::wrap(said, room);
+        if wrapped.len() > lines {
+            // Only a short pane cuts, and only to its one line.
+            let mut cut: String = said.chars().take(room.saturating_sub(1)).collect();
+            cut.push('…');
+            wrapped = vec![cut];
+        }
+        for line in 0..lines {
+            let at = y + 1 + u16::try_from(line).unwrap_or(0);
+            self.put(x, at, "│", 1, frame);
+            self.put(
+                x + u16::try_from(inner.saturating_sub(1)).unwrap_or(0),
+                at,
+                "│",
+                1,
+                frame,
+            );
+            if let Some(text) = wrapped.get(line) {
+                self.put(text_x, at, text, room, self.theme.chrome);
+            }
+        }
+        let bottom = y + 1 + u16::try_from(lines).unwrap_or(0);
+        self.box_edge(x, bottom, inner, ('└', '┘'), ("", ""), frame);
+    }
+
+    /// The caret's row and its value, how many settings differ from the shipped
+    /// pane, and the keys.
+    fn menu_footer(&mut self, plan: &MenuPlan, menu: &Menu, y: u16) {
+        let x = plan.area.x + u16::try_from(MENU_EDGE).unwrap_or(0);
+        let inner = plan.inner();
+        let count = menu.settings.changed();
+        let counted = format!("{count} changed");
+        let named = match ROWS.get(menu.caret.at) {
+            Some(menu::Row::Toggle(setting)) => format!(
+                "{}: {} · {counted}",
+                setting.label(),
+                setting.effective(menu.settings)
+            ),
+            _ => format!("{RESET} · {counted}"),
+        };
+        // The name gives way before the keys do: the box above already names it.
+        let fits = |said: &str| {
+            let keys = widest_fitting_or_last(&MENU_KEYS, inner.saturating_sub(width_of(said) + 2));
+            (!keys.is_empty()).then_some(keys)
+        };
+        let (said, keys) = match (fits(&named), fits(&counted)) {
+            (Some(keys), _) => (named, keys),
+            (None, Some(keys)) => (counted, keys),
+            (None, None) => (named, ""),
+        };
         let ink = self.theme.chrome_dim;
-        self.put(x, y, ENV, room, ink);
-        if width_of(ENV) + 1 + width_of(value) <= room {
-            let after = u16::try_from(width_of(ENV) + 1).unwrap_or(0);
-            self.put(x + after, y, value, width_of(value), ink);
+        self.put(x, y, &said, inner, ink);
+        if !keys.is_empty() {
+            let at = x + u16::try_from(inner - width_of(keys)).unwrap_or(0);
+            self.put(at, y, keys, width_of(keys), ink);
         }
     }
 
@@ -6644,6 +6779,30 @@ mod sheet_tables {
             !purpose_fits(0, true, whole, whole + PURPOSE_ROWS - 1),
             "a page one row short of the whole table and the line took the line \
              anyway, so the sheet would page to pay for prose"
+        );
+    }
+}
+
+#[cfg(test)]
+mod menu_layout {
+    //! The config menu's description box, measured where its widths live.
+
+    use super::*;
+
+    #[test]
+    fn descriptions_two_lines() {
+        let room = menu_text(MENU_WIDEST);
+        for text in menu::descriptions() {
+            let lines = menu::wrap(text, room).len();
+            assert!(
+                lines <= 2,
+                "{text:?} takes {lines} lines at the menu's normal width"
+            );
+        }
+        assert_eq!(
+            menu_lines(MENU_WIDEST),
+            2,
+            "the box is not two lines at its normal width"
         );
     }
 }

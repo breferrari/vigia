@@ -93,7 +93,7 @@ VIGIA_PICTURES=halfblocks   # two pixels a cell, in any terminal with 24-bit col
 VIGIA_PICTURES=auto         # decide for me, which is the default
 ```
 
-To keep a choice, write it in `~/.config/vigia/config` as `pictures = sixel`, or pick it from the `Picture protocol` row of the `m` menu. It takes the same five words, in any case. `VIGIA_PICTURES` wins over the file when it is set, and the menu row then says `env` and the variable's value. The choice is read when the pane starts, so a change applies the next time you open it, and the footer says `restart to apply`.
+To keep a choice, write it in `~/.config/vigia/config` as `pictures = sixel`, or pick it from the `Picture protocol` row of the `m` menu. It takes the same five words, in any case. `VIGIA_PICTURES` wins over the file when it is set, and the menu row then says `env` and the variable's value. The choice is read when the pane starts, so a change applies the next time you open it, and the menu says `restart to apply` under the row.
 
 </details>
 
@@ -157,7 +157,7 @@ set -ga terminal-features ",*:clipboard"
 
 `f`, `r`, `s`, `o`, `a`, `w` and `c` change what the body is made of. Press `m` and flip them there:
 
-![The vigia pane with the config menu open over it: every on and off setting with where it stands, a row to save the settings and a row to reset them.](../assets/frame-menu.svg)
+![The vigia pane with the settings menu open over it: every setting in its group with where it stands, a marker on each one changed from the default, a box saying what the selected row does, a row to save the settings and a row to reset them.](../assets/frame-menu.svg)
 
 Or say so once by hand:
 

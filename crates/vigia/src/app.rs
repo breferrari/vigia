@@ -7,7 +7,7 @@ use vigia_core::{Counted, Frame, Highlighter, History, Note, Reading, Result, Sa
 
 use crate::input::{Action, Pointing};
 use crate::memory;
-use crate::menu::{Caret, Menu, Overrides, ROWS, Row, Settings};
+use crate::menu::{Caret, Flipped, Menu, Overrides, ROWS, Row, Settings};
 use crate::notes::NoteBox;
 use crate::positions::{self, Places, Positions};
 use crate::render::{Body, Chrome, Mode, NoteCount};
@@ -120,7 +120,7 @@ fn flips(at: usize) -> Option<Action> {
     match ROWS.get(at)? {
         Row::Toggle(setting) => Some(setting.action()),
         Row::Reset => Some(Action::MenuReset),
-        Row::Gap | Row::Rule => None,
+        Row::Header(_) | Row::Gap | Row::Rule => None,
     }
 }
 
@@ -671,6 +671,7 @@ impl App {
             menu: self.menu.map(|caret| Menu {
                 caret,
                 settings: self.settings(),
+                flipped: self.flipped(),
             }),
             frame: self.frames.percentile(0.99),
             memory: self.memory,
@@ -790,14 +791,24 @@ impl App {
     /// file has them: a hand edit made while the pane is open survives.
     #[must_use]
     pub fn unflipped(&self) -> Vec<&'static str> {
+        let flipped = self.flipped();
         let mut kept = Vec::new();
-        if self.update == self.launched.0 {
+        if !flipped.update {
             kept.push("update");
         }
-        if self.picture_choice == self.launched.1 {
+        if !flipped.pictures {
             kept.push("pictures");
         }
         kept
+    }
+
+    /// Which launch-only rows no longer hold what the pane launched with.
+    #[must_use]
+    pub fn flipped(&self) -> Flipped {
+        Flipped {
+            update: self.update != self.launched.0,
+            pictures: self.picture_choice != self.launched.1,
+        }
     }
 
     /// Say what the environment sets over the file, for the menu to draw.
@@ -1079,7 +1090,10 @@ impl App {
                 self.sheet = None;
                 self.positions = None;
                 self.menu = match self.menu {
-                    None => Some(Caret::default()),
+                    None => Some(Caret {
+                        at: crate::menu::FIRST,
+                        top: 0,
+                    }),
                     Some(_) => None,
                 };
             }

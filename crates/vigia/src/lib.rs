@@ -61,8 +61,8 @@ pub use input::{
     drag_action, hover_after, patience, repainted, scroll_mark, selection_after, settled,
 };
 pub use menu::{
-    CHOICE_WIDTH, Caret, ENV, Menu, MenuRoute, OFF, ON, Overrides, RESET, RESTART, ROWS, SETTINGS,
-    STATE_WIDTH, Setting, Settings, UNSAVED, menu_route,
+    CHOICE_WIDTH, Caret, ENV, FIRST, Flipped, Group, Menu, MenuRoute, OFF, ON, Overrides, RESET,
+    RESTART, ROWS, SETTINGS, STATE_WIDTH, Setting, Settings, UNSAVED, menu_route,
 };
 pub use motion::{
     ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING_FRAME, BOX_ARRIVING, LEAVING, NOTICE_ARRIVING,
@@ -1491,10 +1491,6 @@ impl Shell {
         let after = self.app.settings();
         if after != before && (before.persist || after.persist) {
             self.remember();
-        }
-        // Asked after the save, which turns remembering off when it is refused.
-        if let Some(notice) = menu::launch_notice(before, self.app.settings()) {
-            self.say(notice, Voice::Said, Instant::now());
         }
         Ok(carried)
     }

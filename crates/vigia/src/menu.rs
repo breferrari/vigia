@@ -48,16 +48,16 @@ pub enum Setting {
 /// state rather than a setting, which is `SPEC.md` §11.2 B22's rule.
 pub const SETTINGS: [Setting; 12] = [
     Setting::Follow,
+    Setting::Staged,
     Setting::Rail,
     Setting::Single,
     Setting::Overview,
-    Setting::Staged,
     Setting::Wrap,
-    Setting::Notes,
     Setting::Icons,
     Setting::Links,
-    Setting::Update,
     Setting::Pictures,
+    Setting::Notes,
+    Setting::Update,
     Setting::Persist,
 ];
 
@@ -93,30 +93,12 @@ pub const CHOICE_WIDTH: usize = {
 /// overrides the file.
 pub const ENV: &str = "env";
 
-/// What the footer says after a row read only at launch is flipped and written.
+/// What the description box says for a row read only at launch once it has been
+/// flipped since launch and written.
 pub const RESTART: &str = "restart to apply";
 
-/// And when it is flipped and not written.
+/// And once it has been flipped and not written.
 pub const UNSAVED: &str = "not saved: turn on Save settings";
-
-/// What the footer says after a flip that moved a row read only at launch, or
-/// `None` where none of them moved. An overridden row names the variable that
-/// wins, because a restart would not apply it.
-#[must_use]
-pub fn launch_notice(before: Settings, after: Settings) -> Option<String> {
-    let mut moved = SETTINGS
-        .into_iter()
-        .filter(|setting| setting.at_launch() && setting.word(before) != setting.word(after))
-        .peekable();
-    moved.peek()?;
-    let overridden = moved.find(|setting| setting.env(after).is_some());
-    Some(match overridden {
-        _ if !after.persist => UNSAVED.to_owned(),
-        Some(Setting::Update) => format!("{} wins over this", crate::UPDATE_VAR),
-        Some(_) => format!("{} wins over this", crate::pictures::PICTURES_VAR),
-        None => RESTART.to_owned(),
-    })
-}
 
 impl Setting {
     /// What the row spells.
@@ -136,6 +118,49 @@ impl Setting {
             Self::Pictures => "Picture protocol",
             Self::Persist => "Save settings",
         }
+    }
+
+    /// One line on what it does, for the box under the rows.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Follow => "Move the view to each change as it lands.",
+            Self::Staged => "Show what is staged beside what is not.",
+            Self::Rail => "The pinned file list beside the diff, from 139 columns.",
+            Self::Single => "Show one file's diff at a time.",
+            Self::Overview => "Show the file list alone, with no diff under it.",
+            Self::Wrap => "Continue a long line on the row below instead of cutting it.",
+            Self::Icons => "A file-type icon before each path. Needs a Nerd Font.",
+            Self::Links => "Make each path a link that opens the file.",
+            Self::Pictures => "How a changed image is drawn. auto asks the terminal.",
+            Self::Notes => "Draw your notes to the agent under the lines they are on.",
+            Self::Update => "At startup, look for a newer vigia and say so in the footer.",
+            Self::Persist => "Write every change made here into the config file.",
+        }
+    }
+
+    /// The word for where it stands in the shipped pane.
+    #[must_use]
+    pub fn shipped(self) -> &'static str {
+        self.word(Settings::shipped())
+    }
+
+    /// The word for what is in effect: the environment's where it sets one, the
+    /// file's otherwise.
+    #[must_use]
+    pub fn effective(self, settings: Settings) -> &'static str {
+        match self.env(settings) {
+            Some("auto") => ON,
+            Some(word) => word,
+            None => self.word(settings),
+        }
+    }
+
+    /// Whether what is in effect differs from the shipped pane, which the row marks.
+    #[must_use]
+    pub fn changed(self, settings: Settings) -> bool {
+        let effective = self.effective(settings);
+        effective != self.shipped()
     }
 
     /// The action that flips it, which is the same action its key sends.
@@ -213,6 +238,152 @@ impl Setting {
     }
 }
 
+impl Settings {
+    /// The shipped pane, which is what [`Setting::changed`] measures against.
+    #[must_use]
+    pub fn shipped() -> Self {
+        let config = crate::Config::default();
+        Self {
+            follow: config.follow,
+            rail: config.rail,
+            single: config.single,
+            overview: config.overview,
+            staged: config.staged,
+            wrap: config.wrap,
+            notes: config.notes,
+            icons: config.icons,
+            links: config.links,
+            update: config.update,
+            pictures: config.pictures,
+            env: Overrides::default(),
+            persist: config.persist,
+        }
+    }
+
+    /// How many settings the row marks as changed.
+    #[must_use]
+    pub fn changed(self) -> usize {
+        SETTINGS
+            .into_iter()
+            .filter(|setting| setting.changed(self))
+            .count()
+    }
+}
+
+/// Which rows read only at launch moved since launch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Flipped {
+    /// `Check for updates`.
+    pub update: bool,
+    /// `Picture protocol`.
+    pub pictures: bool,
+}
+
+/// A titled group of rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    /// What the pane shows changing.
+    Changes,
+    /// How the body is laid out.
+    Layout,
+    /// What a listed path carries.
+    Look,
+    /// How a changed image is drawn.
+    Pictures,
+    /// What the agent's side of the pane draws.
+    Agent,
+    /// The program itself.
+    App,
+}
+
+impl Group {
+    /// What its header spells.
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Changes => "What changes",
+            Self::Layout => "Layout",
+            Self::Look => "Look",
+            Self::Pictures => "Pictures",
+            Self::Agent => "Agent",
+            Self::App => "App",
+        }
+    }
+}
+
+/// What the box under the rows says for the row the caret is on.
+#[must_use]
+pub fn description(row: Row, settings: Settings, flipped: Flipped) -> &'static str {
+    match row {
+        Row::Toggle(setting) => {
+            let moved = match setting {
+                Setting::Update => flipped.update,
+                Setting::Pictures => flipped.pictures,
+                _ => false,
+            };
+            match (moved, settings.persist) {
+                (true, true) => RESTART,
+                (true, false) => UNSAVED,
+                (false, _) => setting.description(),
+            }
+        }
+        Row::Reset => "Put every setting back to how vigia ships.",
+        Row::Header(_) | Row::Gap | Row::Rule => "",
+    }
+}
+
+/// Every text the box can say, which is what its height is measured against.
+pub fn descriptions() -> impl Iterator<Item = &'static str> {
+    SETTINGS.into_iter().map(Setting::description).chain([
+        description(Row::Reset, Settings::default(), Flipped::default()),
+        RESTART,
+        UNSAVED,
+    ])
+}
+
+/// `text` broken at spaces into lines of at most `width` columns. A word wider
+/// than a line is split, so every line fits.
+#[must_use]
+pub fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    if width == 0 {
+        return lines;
+    }
+    for word in text.split_whitespace() {
+        let mut word = word;
+        loop {
+            let used = line.chars().count();
+            let len = word.chars().count();
+            let gap = usize::from(used > 0);
+            if used + gap + len <= width {
+                if gap == 1 {
+                    line.push(' ');
+                }
+                line.push_str(word);
+                break;
+            }
+            if used > 0 {
+                lines.push(std::mem::take(&mut line));
+                continue;
+            }
+            let cut = word
+                .char_indices()
+                .nth(width)
+                .map_or(word.len(), |(at, _)| at);
+            lines.push(word[..cut].to_owned());
+            word = &word[cut..];
+            if word.is_empty() {
+                break;
+            }
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 /// What the environment sets over the file, for the rows that say so.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Overrides {
@@ -263,6 +434,8 @@ pub struct Settings {
 /// around it are rows a caret may not land on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
+    /// A group's title. Drawn dim and skipped.
+    Header(Group),
     /// A toggle, with its state beside it.
     Toggle(Setting),
     /// Air. Drawn blank and skipped.
@@ -275,21 +448,31 @@ pub enum Row {
 }
 
 /// Every drawn row, top to bottom.
-pub const ROWS: [Row; 16] = [
+pub const ROWS: [Row; 26] = [
+    Row::Header(Group::Changes),
     Row::Toggle(Setting::Follow),
+    Row::Toggle(Setting::Staged),
+    Row::Gap,
+    Row::Header(Group::Layout),
     Row::Toggle(Setting::Rail),
     Row::Toggle(Setting::Single),
     Row::Toggle(Setting::Overview),
-    Row::Toggle(Setting::Staged),
     Row::Toggle(Setting::Wrap),
-    Row::Toggle(Setting::Notes),
+    Row::Gap,
+    Row::Header(Group::Look),
     Row::Toggle(Setting::Icons),
     Row::Toggle(Setting::Links),
-    Row::Toggle(Setting::Update),
+    Row::Gap,
+    Row::Header(Group::Pictures),
     Row::Toggle(Setting::Pictures),
     Row::Gap,
-    Row::Rule,
+    Row::Header(Group::Agent),
+    Row::Toggle(Setting::Notes),
     Row::Gap,
+    Row::Header(Group::App),
+    Row::Toggle(Setting::Update),
+    Row::Gap,
+    Row::Rule,
     Row::Toggle(Setting::Persist),
     Row::Reset,
 ];
@@ -321,7 +504,18 @@ pub struct Menu {
     pub caret: Caret,
     /// What the rows say.
     pub settings: Settings,
+    /// Which launch-only rows moved since launch.
+    pub flipped: Flipped,
 }
+
+/// The first row the caret may land on, where it opens.
+pub const FIRST: usize = {
+    let mut at = 0;
+    while !ROWS[at].selectable() {
+        at += 1;
+    }
+    at
+};
 
 impl Caret {
     /// The window's first row, clamped so the caret is always drawn.

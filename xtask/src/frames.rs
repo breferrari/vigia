@@ -96,10 +96,10 @@ pub const FRAMES: &[Frame] = &[
     },
     Frame {
         snapshot: "menu__menu_frame.snap",
-        size: "80x24",
-        rows: &[(0, 24)],
+        size: "80x44",
+        rows: &[(0, 44)],
         file: "frame-menu.svg",
-        label: "The vigia pane with the config menu open over it: every on and off setting with where it stands, a row to save the settings and a row to reset them.",
+        label: "The vigia pane with the settings menu open over it: every setting in its group with where it stands, a marker on each one changed from the default, a box saying what the selected row does, a row to save the settings and a row to reset them.",
         labels: &[],
     },
     Frame {

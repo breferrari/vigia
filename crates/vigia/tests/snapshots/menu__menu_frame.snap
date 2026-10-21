@@ -2,27 +2,47 @@
 source: crates/vigia/tests/menu.rs
 expression: "text_of(&buf, area())"
 ---
-  fixture · main · current ▾ · 3 changed                            +120  -120  
-              ┌─ config menu ───────────────────────────────── ✕ ┐              
-▸ M src/mod_0.│                                                  │   +40   -40  
-  M src/mod_1.│  ▸ Follow changes                          on    │   +40   -40  
-  M src/mod_2.│    Left rail                              off    │   +40   -40  
-──────────────│    Single file                            off    │──────────────
-  M src/mod_0.│    File list only                         off    │   +40   -40 ▲
-  @@ -1,40 +1,│    Staged changes                         off    │             █
-   1 - fn befo│    Wrap lines                             off    │             │
-   2 - fn befo│    Notes                                   on    │             │
-   3 - fn befo│    File icons                             off    │             │
-   4 - fn befo│    Path links                              on    │             │
-   5 - fn befo│    Check for updates                       on    │             │
-   6 - fn befo│    Picture protocol                      auto    │             │
-   7 - fn befo│                                                  │             │
-   8 - fn befo│    ──────────────────────────────────────────    │             │
-   9 - fn befo│                                                  │             │
-  10 - fn befo│    Save settings                          off    │             │
-  11 - fn befo│    Reset to defaults                             │             │
+  fixture · main · current ▾ · 3 changed · 0 staged                 +120  -120  
+                                                                                
+▸ M src/mod_0.rs                         ■■■■■■■■■■■■ ____________   +40   -40  
+  M src/mod_1.rs                         ■■■■■■■■■■■■ ____________   +40   -40  
+  M src/mod_2.┌─ Settings ──────────────────────────────────── ✕ ┐   +40   -40  
+──────────────│                                                  │──────────────
+  M src/mod_0.│  What changes ────────────────────────────────── │   +40   -40 ▲
+  @@ -1,40 +1,│    Follow changes                            on  │             █
+   1 - fn befo│  * Staged changes                            on  │             █
+   2 - fn befo│                                                  │             █
+   3 - fn befo│  Layout ──────────────────────────────────────── │             █
+   4 - fn befo>  * Left rail                                 on  │             │
+   5 - fn befo│    Single file                               off │             │
+   6 - fn befo│    File list only                            off │             │
+   7 - fn befo│    Wrap lines                                off │             │
+   8 - fn befo│                                                  │             │
+   9 - fn befo│  Look ────────────────────────────────────────── │             │
+  10 - fn befo│    File icons                                off │             │
+  11 - fn befo│    Path links                                on  │             │
   12 - fn befo│                                                  │             │
-  13 - fn befo└ ↑↓ move · Space toggles · Esc closes ────────────┘             │
-  14 - fn before_14() { let value = 98; }                                      ▼
+  13 - fn befo│  Pictures ────────────────────────────────────── │             │
+  14 - fn befo│  * Picture protocol                   env  sixel │             │
+  15 - fn befo│                                                  │             │
+  16 - fn befo│  Agent ───────────────────────────────────────── │             │
+  17 - fn befo│    Notes                                     on  │             │
+  18 - fn befo│                                                  │             │
+  19 - fn befo│  App ─────────────────────────────────────────── │             │
+  20 - fn befo│    Check for updates                         on  │             │
+  21 - fn befo│                                                  │             │
+  22 - fn befo│  ─────────────────────────────────────────────── │             │
+  23 - fn befo│    Save settings                             off │             │
+  24 - fn befo│    Reset to defaults                             │             │
+  25 - fn befo│                                                  │             │
+  26 - fn befo│  ┌ * Left rail ────────────────────────────────┐ │             │
+  27 - fn befo│  │ The pinned file list beside the diff, from  │ │             │
+  28 - fn befo│  │ 139 columns.                                │ │             │
+  29 - fn befo│  └─────────────────────────────────────────────┘ │             │
+  30 - fn befo│  Left rail: on · 3 changed       ↑↓ move  ␣ flip │             │
+  31 - fn befo└──────────────────────────────────────────────────┘             │
+  32 - fn before_32() { let value = 224; }                                     │
+  33 - fn before_33() { let value = 231; }                                     │
+  34 - fn before_34() { let value = 238; }                                     ▼
 ────────────────────────────────────────────────────────────────────────────────
   q quit · f follow · m config · ? keys                          follow ▶  1/3
