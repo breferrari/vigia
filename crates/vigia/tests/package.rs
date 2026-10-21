@@ -3837,19 +3837,27 @@ fn fmt_names_members() {
     assert!(output.status.success(), "`cargo metadata` failed");
     let metadata: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("cargo metadata answers JSON");
-    let names = metadata["packages"]
+    let members: BTreeSet<&str> = metadata["packages"]
         .as_array()
         .expect("metadata lists packages")
         .iter()
-        .map(|package| format!("-p {}", package["name"].as_str().expect("a name")))
-        .collect::<Vec<_>>()
-        .join(" ");
+        .map(|package| package["name"].as_str().expect("a name"))
+        .collect();
     for file in [".github/workflows/ci.yml", "CONTRIBUTING.md"] {
         let text = repo_file(file);
-        assert!(
-            text.contains(&format!("cargo fmt {names}")),
-            "{file} does not format exactly the members, `cargo fmt {names}`"
-        );
+        let line = text
+            .lines()
+            .find(|line| line.contains("cargo fmt -p"))
+            .unwrap_or_else(|| panic!("{file} formats no member by name"));
+        let named: BTreeSet<&str> = line
+            .split_whitespace()
+            .skip_while(|word| *word != "fmt")
+            .collect::<Vec<_>>()
+            .windows(2)
+            .filter(|pair| pair[0] == "-p")
+            .map(|pair| pair[1])
+            .collect();
+        assert_eq!(named, members, "{file} does not format exactly the members");
         assert!(
             !text.contains("cargo fmt --all"),
             "{file} runs `cargo fmt --all`, which reformats the forks under vendor/"

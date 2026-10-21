@@ -8,9 +8,14 @@ set -eu
 root=$(git rev-parse --show-toplevel)
 work=$(mktemp -d)
 
-# The files a patch changes, one a line.
+# The files a patch changes, one a line; a patch it cannot read stops the run.
 touched() {
-  sed -n 's#^diff --git a/\([^ ]*\) b/.*#\1#p' "$1"
+  files=$(sed -n 's#^diff --git a/\([^ ]*\) b/.*#\1#p' "$1")
+  if [ -z "$files" ]; then
+    echo "::error::$1 names no file in a git diff header" >&2
+    exit 1
+  fi
+  echo "$files"
 }
 trap 'rm -rf "$work"' EXIT
 

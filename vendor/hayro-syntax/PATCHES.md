@@ -6,7 +6,7 @@ Upstream: `https://github.com/LaurenzV/hayro` at tag `hayro-syntax-v0.8.0`, in `
 
 Suite: `cargo test --locked -p hayro-syntax -p hayro-interpret -p hayro -- --skip pdf_version_header --skip pdf_version_catalog`.
 
-The two skipped tests read PDFs from `hayro-tests/downloads/`, a corpus upstream downloads separately and does not commit; they fail the same way on upstream's own tag. The suite runs `hayro-interpret` and `hayro` too, since both build on the patched crate.
+The two skipped tests read PDFs from `hayro-tests/downloads/`, a corpus upstream downloads separately and does not commit; they fail the same way on upstream's own tag. The suite runs `hayro-interpret` and `hayro` too, since both build on the patched crate; all three tags and all three published crates are upstream commit `ea9c81dc`, so the clone holds what the forks ship.
 
 This directory is that crate as published, with the patches in `patches/` applied in order, and nothing else. It is published to crates.io as `vigia-hayro-syntax`, and the workspace and `vigia-hayro-interpret` take it under the name `hayro-syntax`, so a `cargo install vigia` gets the decode limit too. `.github/scripts/forks.sh` rebuilds this directory from the published crate and the patches, and fails on any difference.
 
@@ -32,7 +32,7 @@ The budget is checked where each decode produces its output:
 
 ## `0002-name-the-fork.patch`
 
-The manifest only: the package is named `vigia-hayro-syntax`, with a description that points at upstream, docs.rs and repository links for the fork, and `Cargo.toml.orig`, `PATCHES.md` and `patches/` left out of the package. The library is still named `hayro_syntax`.
+The manifest only: the package is named `vigia-hayro-syntax`, its `license` is `MIT` (see Licence), with a description that points at upstream, docs.rs and repository links for the fork, and `Cargo.toml.orig`, `PATCHES.md` and `patches/` left out of the package. The library is still named `hayro_syntax`.
 
 ## `0003-fork-notice.patch`
 
