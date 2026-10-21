@@ -599,3 +599,43 @@ fn lfs_wakes_stop_when_decided() {
         "a wake stayed armed once every LFS file was decided"
     );
 }
+
+/// A rename whose old path unsets `diff` is binary, though its new path does
+/// not, as git reads each side's attributes at that side's path.
+#[test]
+fn source_attribute_counts() {
+    let scratch = Scratch::new("attr-source");
+    scratch.write("notes.md", numbered_lines(12));
+    scratch.commit_all("initial");
+    scratch.write(".gitattributes", "*.md -diff\n");
+    std::fs::rename(scratch.path_of("notes.md"), scratch.path_of("notes.txt")).expect("rename");
+    scratch.git(&["add", "-A"]);
+    let staged = scratch.git(&["diff", "--cached", "-M", "--numstat"]);
+    assert!(
+        staged.lines().any(|line| line.starts_with("-\t-\t")),
+        "the fixture is wrong: git did not call the rename binary: {staged}"
+    );
+
+    let worktree = scratch.worktree();
+    let changes: Vec<_> = worktree
+        .changes_of(
+            vigia_core::Origin::Staged,
+            vigia_core::ChangeOptions::default(),
+        )
+        .expect("a walk")
+        .collect::<Result<_, _>>()
+        .expect("every change");
+    let change = changes
+        .iter()
+        .find(|c| c.path == "notes.txt")
+        .expect("listed");
+    assert_eq!(
+        change.kind.source(),
+        Some("notes.md"),
+        "not paired as a rename"
+    );
+    assert!(
+        worktree.diff(change).expect("diff").binary,
+        "git calls the rename from notes.md binary and this diffed it as text"
+    );
+}
