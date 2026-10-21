@@ -3692,10 +3692,10 @@ name = "vigia"
 version = "1.1.0"
 dependencies = [
  "base64-simd",
- "flate2",
  "image",
  "insta",
  "libc",
+ "miniz_oxide",
  "ratatui",
  "ratatui-image",
  "ratatui-textarea",
