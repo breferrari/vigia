@@ -1,6 +1,6 @@
 //! A removal and an addition `gix` left unpaired, paired as a rename by git's
-//! rule: `gix` scores text by a line diff, where git counts shared chunks in
-//! any order, and never scores a binary side.
+//! rule. `gix` pairs only content it finds unchanged; everything else is
+//! scored here, as git counts shared chunks in any order.
 
 use crate::picture::Sources;
 
