@@ -3876,6 +3876,19 @@ fn pdf_feature_shipped() {
         default.contains("\"pdf\""),
         "vigia's default features leave PDFs out: {default:?}"
     );
+    assert!(
+        vigia.contains("\npdf = [\"dep:hayro\", \"vigia-core/pdf\"]"),
+        "vigia's pdf feature no longer turns PDFs on in both crates"
+    );
+    let root = without_comments(&repo_file("Cargo.toml"));
+    let dist = root
+        .split_once("[workspace.metadata.dist]")
+        .map(|(_, rest)| rest.split("\n[").next().unwrap_or(rest))
+        .expect("Cargo.toml has a dist section");
+    assert!(
+        !dist.contains("default-features"),
+        "the release binaries are built without the default features: {dist}"
+    );
     let core = without_comments(&repo_file("crates/vigia-core/Cargo.toml"));
     assert!(
         core.contains("\npdf = [") && !core.contains("\ndefault = ["),
@@ -3884,14 +3897,14 @@ fn pdf_feature_shipped() {
     let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
     assert!(
         !step_block(&ci, "test").contains("--no-default-features"),
-        "the test step runs without PDFs"
+        "the test step passes --no-default-features"
     );
     assert!(
         step_block(&ci, "without PDFs").contains("--test pdf_off"),
         "no step tests a build without PDFs"
     );
     assert!(
-        step_block(&ci, "the default build draws PDFs").contains("--no-tests=fail"),
+        step_block(&ci, "default build PDFs").contains("--no-tests=fail"),
         "no step shows the default build draws PDFs"
     );
 }

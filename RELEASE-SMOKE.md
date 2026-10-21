@@ -111,7 +111,7 @@ The publish is a CI job now, so these steps make sure that the publish is correc
 - [ ] The `Release` workflow is green end to end, including
 `custom-publish-crates-io`. **Read that job specifically and not the overall tick.** The GitHub release is created in `host`, before the registry job runs and with no `--draft`, so public binaries prove nothing about crates.io. A green `announce` does not prove it either: that job is a checkout.
 - [ ] `cargo install vigia` from crates.io, on one machine that has never built
-this repo. This is the true cold path.
+this repo, and a changed PDF draws pictures in it. This is the true cold path.
 - [ ] If the registry job failed while the release went public, that is the
 documented half-failure. **The recovery depends on how far the job got, and a re-run of the job is right for only one of the two cases**, because publishing a version that is already published is an error and not a silent no-op:
       - Nothing was accepted: re-run the job.

@@ -268,9 +268,10 @@ jobs:
         run: cargo nextest run --profile ci -p vigia-core --test pdf_off
         env:
           VIGIA_BUDGET_SLACK: "3"
-      # With no flags, as `cargo install` builds: pdf.rs compiles only with the
-      # feature, so a default without it runs no test and fails here.
-      - name: the default build draws PDFs
+      - name: build without PDFs
+        run: cargo build -p vigia --no-default-features
+      # pdf.rs compiles only with the feature, so a default without it fails.
+      - name: default build PDFs
         run: cargo nextest run --profile ci -p vigia --test pdf --no-tests=fail
         env:
           VIGIA_BUDGET_SLACK: "3"
