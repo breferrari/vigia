@@ -895,7 +895,7 @@ fn placed_after_upload() {
         picture_rows(&view).iter().all(|(_, built)| !built),
         "a Kitty picture drew before the terminal held it"
     );
-    let (uploads, _) = pane.pictures.uploads();
+    let (uploads, _) = pane.pictures.uploads(usize::MAX, 0);
     assert_eq!(uploads.len(), 3, "three uploads were not handed out");
     for upload in uploads {
         upload.ticket.written();
@@ -933,13 +933,13 @@ fn upload_stopped_away() {
         "the pictures were not built"
     );
     pane.unsent(&mut frame);
-    let (uploads, _) = pane.pictures.uploads();
+    let (uploads, _) = pane.pictures.uploads(usize::MAX, 0);
     let ids: Vec<u32> = uploads.iter().map(|upload| upload.id).collect();
     assert_eq!(ids.len(), 3, "three uploads were not handed out");
 
     pane.scroll(&mut frame, 150);
     pane.unsent(&mut frame);
-    let (again, mut stopped) = pane.pictures.uploads();
+    let (again, mut stopped) = pane.pictures.uploads(usize::MAX, 0);
     stopped.sort_unstable();
     let mut sorted = ids.clone();
     sorted.sort_unstable();
@@ -954,7 +954,7 @@ fn upload_stopped_away() {
 
     pane.scroll(&mut frame, -150);
     pane.unsent(&mut frame);
-    let (back, stopped) = pane.pictures.uploads();
+    let (back, stopped) = pane.pictures.uploads(usize::MAX, 0);
     assert!(stopped.is_empty(), "an upload on screen was stopped");
     assert_eq!(
         back.len(),
@@ -1099,7 +1099,7 @@ fn kitty_kept_off_screen() {
         "an image off screen was deleted"
     );
     assert!(
-        pane.pictures.uploads().1.is_empty(),
+        pane.pictures.uploads(usize::MAX, 0).1.is_empty(),
         "an image written whole was stopped when it scrolled off"
     );
     assert_eq!(

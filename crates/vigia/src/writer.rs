@@ -79,6 +79,19 @@ pub struct Upload {
     pub ticket: crate::kitty::Ticket,
 }
 
+/// How long uploads may wait behind frames before the oldest shares their turns.
+const STARVED: Duration = Duration::from_secs(1);
+
+/// How much of the terminal's time the uploads queued ahead of it may take.
+const CREDIT_TIME: Duration = Duration::from_millis(8);
+
+/// The least and most credit, so a wrong estimate of the drain stays bounded.
+const CREDIT_FLOOR: usize = 16 * 1024;
+const CREDIT_CEILING: usize = 1024 * 1024;
+
+/// The fewest bytes one write must carry for its time to count toward the drain.
+const DRAIN_SAMPLE: usize = 1024;
+
 /// The longest one wait for room to write lasts, so a stop is noticed this soon.
 const POLL: Duration = Duration::from_millis(50);
 
@@ -133,6 +146,10 @@ struct Shared {
     abandon: AtomicBool,
     /// The size of the last frame handed over.
     last: AtomicUsize,
+    /// Upload bytes handed over and not yet written.
+    graphics: AtomicUsize,
+    /// What the terminal takes, in bytes a second, averaged over writes.
+    drain: AtomicU64,
 }
 
 impl Shared {
@@ -183,6 +200,10 @@ struct Lanes {
     graphics: VecDeque<Graphic>,
     /// `stop` asked for the end: what is written next is all there is.
     stopping: bool,
+    /// Since when a frame has gone ahead of a waiting upload.
+    starved_since: Option<Instant>,
+    /// Past the cap, the next turn is an upload chunk's.
+    chunk_owed: bool,
 }
 
 impl Lanes {
@@ -190,26 +211,37 @@ impl Lanes {
         self.text.is_empty() && self.graphics.is_empty()
     }
 
-    fn take(&mut self, job: Job) {
+    /// Whether an upload waits.
+    fn waiting(&self) -> bool {
+        self.graphics
+            .iter()
+            .any(|graphic| matches!(graphic, Graphic::Upload(..)))
+    }
+
+    fn take(&mut self, job: Job, shared: &Shared) {
         match job {
             Job::Frame(bytes) => self.text.push_back(bytes),
             Job::Upload(upload) if !self.stopping && !upload.ends.is_empty() => {
                 self.graphics.push_back(Graphic::Upload(upload, 0));
             }
-            Job::Upload(_) => {}
+            Job::Upload(upload) => {
+                shared
+                    .graphics
+                    .fetch_sub(upload.data.len(), Ordering::AcqRel);
+            }
             Job::Delete { id, bytes } => {
-                self.cancel(|of| of == id);
+                self.cancel(|of| of == id, shared);
                 self.graphics.push_back(Graphic::Raw(bytes));
             }
             Job::Stop => {
                 self.stopping = true;
-                self.cancel(|_| true);
+                self.cancel(|_| true, shared);
             }
         }
     }
 
     /// Drop the uploads `which` names; one part sent is closed in its place.
-    fn cancel(&mut self, which: impl Fn(u32) -> bool) {
+    fn cancel(&mut self, which: impl Fn(u32) -> bool, shared: &Shared) {
         self.graphics.retain_mut(|graphic| {
             let Graphic::Upload(upload, sent) = graphic else {
                 return true;
@@ -217,6 +249,10 @@ impl Lanes {
             if !which(upload.id) {
                 return true;
             }
+            let from = sent.checked_sub(1).map_or(0, |last| upload.ends[last]);
+            shared
+                .graphics
+                .fetch_sub(upload.data.len() - from, Ordering::AcqRel);
             if *sent == 0 {
                 return false;
             }
@@ -234,9 +270,19 @@ impl Lanes {
         shared: &Shared,
         wakes: &Wakes,
     ) -> io::Result<bool> {
-        if let Some(frame) = self.text.pop_front() {
-            write_out(out, &frame, shared, &mut |written| {
-                shared.wrote(written, wakes)
+        // Past the cap, the upload waiting longest takes every other turn
+        // until it is done, so it moves while a frame waits one chunk at most.
+        let starved = self
+            .starved_since
+            .is_some_and(|since| since.elapsed() >= STARVED);
+        let chunk_turn = starved && std::mem::take(&mut self.chunk_owed);
+        if !chunk_turn && let Some(frame) = self.text.pop_front() {
+            if self.waiting() && self.starved_since.is_none() {
+                self.starved_since = Some(Instant::now());
+            }
+            self.chunk_owed = starved;
+            timed_out(out, &frame, shared, &mut |written| {
+                shared.wrote(written, wakes);
             })?;
             return Ok(true);
         }
@@ -264,9 +310,12 @@ impl Lanes {
                 }
                 let from = sent.checked_sub(1).map_or(0, |last| upload.ends[last]);
                 let to = upload.ends[*sent];
-                write_out(out, &upload.data.as_bytes()[from..to], shared, &mut |_| {})?;
+                timed_out(out, &upload.data.as_bytes()[from..to], shared, &mut |_| {})?;
+                shared.graphics.fetch_sub(to - from, Ordering::AcqRel);
                 *sent += 1;
                 if *sent == upload.ends.len() && !shared.stopping() {
+                    self.starved_since = None;
+                    self.chunk_owed = false;
                     OPEN.store(0, Ordering::SeqCst);
                     upload.ticket.written();
                     // A redraw, so its cells are drawn.
@@ -313,7 +362,7 @@ impl Writer {
                         jobs.try_recv().ok()
                     };
                     if let Some(job) = job {
-                        lanes.take(job);
+                        lanes.take(job, &theirs);
                         continue;
                     }
                     if theirs.stopping() {
@@ -340,6 +389,18 @@ impl Writer {
             shared: Arc::clone(&self.shared),
             pending: Vec::new(),
         }
+    }
+
+    /// Upload bytes handed over and not yet written.
+    pub fn graphics_queued(&self) -> usize {
+        self.shared.graphics.load(Ordering::Acquire)
+    }
+
+    /// How many upload bytes may be queued ahead of the terminal: what it
+    /// drains in [`CREDIT_TIME`], within the floor and the ceiling.
+    pub fn credit(&self) -> usize {
+        let rate = self.shared.drain.load(Ordering::Acquire) as f64;
+        ((rate * CREDIT_TIME.as_secs_f64()) as usize).clamp(CREDIT_FLOOR, CREDIT_CEILING)
     }
 
     /// The size of the last frame handed over.
@@ -440,7 +501,11 @@ impl Sink {
     ///
     /// The writer has stopped.
     pub fn upload(&mut self, upload: Upload) -> io::Result<()> {
-        self.job(Job::Upload(upload))
+        let len = upload.data.len();
+        self.shared.graphics.fetch_add(len, Ordering::AcqRel);
+        self.job(Job::Upload(upload)).inspect_err(|_| {
+            self.shared.graphics.fetch_sub(len, Ordering::AcqRel);
+        })
     }
 
     /// Delete image `id` with `bytes`, after cancelling its upload: what is
@@ -502,6 +567,29 @@ pub trait Out {
 }
 
 /// Write all of `bytes` in pieces, counting each as it goes, unless told to stop.
+/// [`write_out`], with the time it took folded into the drain rate.
+fn timed_out(
+    out: &mut impl Out,
+    bytes: &[u8],
+    shared: &Shared,
+    count: &mut dyn FnMut(usize),
+) -> io::Result<()> {
+    let began = Instant::now();
+    write_out(out, bytes, shared, count)?;
+    let took = began.elapsed().as_secs_f64();
+    if bytes.len() >= DRAIN_SAMPLE && took > 0.0 {
+        let rate = bytes.len() as f64 / took;
+        let before = shared.drain.load(Ordering::Acquire) as f64;
+        let after = if before == 0.0 {
+            rate
+        } else {
+            before * 0.8 + rate * 0.2
+        };
+        shared.drain.store(after as u64, Ordering::Release);
+    }
+    Ok(())
+}
+
 fn write_out(
     out: &mut impl Out,
     bytes: &[u8],

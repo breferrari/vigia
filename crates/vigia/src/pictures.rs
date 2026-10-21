@@ -604,6 +604,8 @@ pub struct Pictures {
     /// What is on screen, shared with the worker so it skips a job scrolled away
     /// before its turn.
     shown: Arc<Mutex<HashSet<Arc<Key>>>>,
+    /// What is on screen, top first.
+    order: Vec<Arc<Key>>,
     jobs: mpsc::Sender<Job>,
     /// Each finished job, with `None` for one skipped.
     done: mpsc::Receiver<(Arc<Key>, Option<Cell>, Option<Built>)>,
@@ -788,6 +790,7 @@ impl Pictures {
             built: HashMap::new(),
             pending: HashSet::new(),
             shown,
+            order: Vec::new(),
             jobs,
             done,
             retired: Vec::new(),
@@ -1021,7 +1024,7 @@ impl Pictures {
     /// written whole at once.
     #[doc(hidden)]
     pub fn written_at_once(&mut self) -> Vec<crate::writer::Upload> {
-        let (mut uploads, _) = self.uploads();
+        let (mut uploads, _) = self.uploads(usize::MAX, 0);
         for upload in &mut uploads {
             upload.ticket.written();
         }
@@ -1048,23 +1051,52 @@ impl Pictures {
         self.tmux
     }
 
-    /// The uploads of on-screen Kitty images not yet handed to the writer, and
-    /// the images off screen whose upload has to stop.
-    pub fn uploads(&mut self) -> (Vec<crate::writer::Upload>, Vec<u32>) {
+    /// The uploads of on-screen Kitty images to hand the writer, top first,
+    /// while they fit `credit` beside the `queued` bytes it already holds, or
+    /// the first alone when it holds none; and the images off screen whose
+    /// upload has to stop.
+    pub fn uploads(
+        &mut self,
+        credit: usize,
+        queued: usize,
+    ) -> (Vec<crate::writer::Upload>, Vec<u32>) {
         let Ok(shown) = self.shown.lock() else {
             return (Vec::new(), Vec::new());
         };
-        let (mut uploads, mut stopped) = (Vec::new(), Vec::new());
+        let mut stopped = Vec::new();
         for (key, ready) in &self.built {
+            if shown.contains(key) {
+                continue;
+            }
+            for (_, panel) in &ready.0.panels {
+                if let Panel::Kitty(image) = panel
+                    && image.unsent()
+                {
+                    // Sent again if it comes back.
+                    stopped.push(image.id());
+                }
+            }
+        }
+        let mut uploads = Vec::new();
+        let mut held = queued;
+        'screen: for key in &self.order {
+            let Some(ready) = self.built.get(key) else {
+                continue;
+            };
             for (_, panel) in &ready.0.panels {
                 let Panel::Kitty(image) = panel else {
                     continue;
                 };
-                if shown.contains(key) {
-                    uploads.extend(image.upload());
-                } else if image.unsent() {
-                    // Sent again if it comes back.
-                    stopped.push(image.id());
+                if !image.waits() {
+                    continue;
+                }
+                let size = image.size_sent();
+                if held > 0 && held + size > credit {
+                    break 'screen;
+                }
+                if let Some(upload) = image.upload() {
+                    held += size;
+                    uploads.push(upload);
                 }
             }
         }
@@ -1119,7 +1151,8 @@ impl Pictures {
                 hung.push((key, *file, picture));
             }
         }
-        let shown: HashSet<Arc<Key>> = hung.iter().map(|(key, _, _)| Arc::clone(key)).collect();
+        self.order = hung.iter().map(|(key, _, _)| Arc::clone(key)).collect();
+        let shown: HashSet<Arc<Key>> = self.order.iter().cloned().collect();
         // Once per walk, since this reads every file in the diff.
         let walks = frame.stats().walks;
         if walks != self.walked {

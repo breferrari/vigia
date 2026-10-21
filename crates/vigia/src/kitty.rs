@@ -258,6 +258,16 @@ impl Image {
         })
     }
 
+    /// Whether it waits to be handed to the writer.
+    pub fn waits(&self) -> bool {
+        self.state.load(Ordering::Acquire) & STATE == IDLE
+    }
+
+    /// The bytes its upload puts on the wire.
+    pub fn size_sent(&self) -> usize {
+        self.transmit.len()
+    }
+
     /// Whether the terminal has all of it, so its cells place it.
     pub fn uploaded(&self) -> bool {
         self.state.load(Ordering::Acquire) & STATE == WRITTEN
