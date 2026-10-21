@@ -388,7 +388,7 @@ fn the_memory_read_costs_a_fraction_of_the_frame_it_sits_in() {
     // on it: `SPEC.md` §5.1 ships this cell precisely because the read is a syscall on
     // all three tier-1 targets rather than the process spawn `soak.rs` uses, which is
     // 42.8ms median on Windows against this 16ms budget.
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -556,7 +556,7 @@ fn frame_budget_on(
         assert_eq!(view.top.file, 0, "the scroll crossed into another file");
     }
 
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return;
     }
 
@@ -1423,7 +1423,7 @@ fn scroll(name: &str, setup: Scroll) -> Option<Scrolled> {
         );
     }
 
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return None;
     }
 
@@ -1698,7 +1698,7 @@ fn prose_frame(ext: &str) -> Option<ProseRun> {
         "fixture is not {PROSE_FILES} files"
     );
 
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return None;
     }
 
@@ -2137,7 +2137,7 @@ const OVERVIEW_PANE: Rect = Rect {
 /// listed file, and no diff row was built at all.
 #[test]
 fn an_overview_frame_holds_the_frame_budget() {
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -2246,7 +2246,7 @@ const NOTED_PANE: Rect = Rect {
 /// with and without the notes, interleaved so a loaded machine moves both arms.
 #[test]
 fn a_frame_full_of_notes_holds_the_frame_budget() {
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -2396,7 +2396,7 @@ fn a_frame_full_of_notes_holds_the_frame_budget() {
 /// fifty standing still, so a loaded machine moves both arms.
 #[test]
 fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -2751,7 +2751,7 @@ fn what_the_staged_run_costs_the_frame_it_is_drawn_in() {
 /// ends, so no timed frame draws the box still.
 #[test]
 fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -2926,7 +2926,7 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
 /// is what this times.
 #[test]
 fn a_frame_whose_answers_quote_code_holds_the_frame_budget() {
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -3224,7 +3224,7 @@ fn arrival_on(name: &str, pane: Rect, timed: bool) -> Arrival {
 /// is recorded rather than budgeted.
 #[test]
 fn arrival_holds_the_budget() {
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();
@@ -3770,7 +3770,7 @@ fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<
         "a picture was decoded on the thread that paints"
     );
 
-    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+    if !scheduled_budgets("cargo test --release -p vigia --test budgets") {
         return;
     }
     let _timed = exclusively_timed();

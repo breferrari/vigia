@@ -10,9 +10,7 @@ use ratatui::layout::Rect;
 use vigia::{App, Body, Glyphs, Pointing, Row, Theme, body_layout, render};
 use vigia_core::{Highlighter, History, Standing, Worktree};
 
-use support::{
-    Scratch, absolute_gates_apply, budget, exclusively_timed, highlight_delta, scheduled_budgets,
-};
+use support::{Scratch, budget, exclusively_timed, highlight_delta, scheduled_budgets};
 
 /// I7: startup to first paint.
 const I7_STARTUP: Duration = Duration::from_millis(50);
@@ -498,7 +496,7 @@ fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
         .map(|_| picture_cold_start(&scratch, path, pane))
         .min()
         .expect("three runs");
-    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
+    if !scheduled_budgets("cargo test --release -p vigia --test first_paint") {
         return;
     }
     assert!(
