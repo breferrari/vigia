@@ -217,6 +217,8 @@ fn writer_child() {
     };
     match which.to_string_lossy().as_ref() {
         "panic" => vigia::panic_mid_frame(),
+        "upload" => vigia::panic_mid_upload(),
+        "uploaded" => vigia::panic_after_upload(),
         "flags" => {
             let (before, during) = vigia::output_flags();
             println!("flags before={before} during={during}");
@@ -259,6 +261,111 @@ fn panic_restores() {
         "the restore after a panic mid-image did not end the image's escape string first"
     );
     drop(master);
+}
+
+#[test]
+fn restore_cancel() {
+    // A panic while an image is part sent: the restore ends the chunk cut off,
+    // closes the image, deletes it, and only then gives the modes back.
+    let (mut running, master) = pty::start(child("upload"), &pty::Script::default());
+    let seen = reader(
+        master.try_clone().expect("the terminal's other end"),
+        Some(64_000),
+    );
+    assert!(
+        running.exited_unread(Duration::from_secs(10)).is_some(),
+        "the child did not end"
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    let shown = text(&seen);
+    let close = shown
+        .find("\x1b_Gm=0,q=2;\x1b\\")
+        .expect("the part-sent image was not closed");
+    let delete = shown[close..]
+        .find("a=d,d=I,i=4242,q=2")
+        .map(|at| close + at)
+        .expect("the part-sent image was not deleted after its close");
+    let leave = shown.rfind(LEAVE).expect("the modes were not given back");
+    assert!(
+        shown[..close].ends_with("\x1b\\"),
+        "the close did not follow a string terminator"
+    );
+    assert!(
+        delete < leave,
+        "the modes went back before the image was deleted"
+    );
+    assert!(
+        !shown.contains("d=A"),
+        "the restore deleted every image in the terminal"
+    );
+}
+
+#[test]
+fn restore_known_ids() {
+    // A panic skips the drop that deletes the pane's images: the restore
+    // deletes the one it sent, by id, and never every image in the terminal.
+    let (mut running, master) = pty::start(child("uploaded"), &pty::Script::default());
+    let seen = reader(master.try_clone().expect("the terminal's other end"), None);
+    assert!(
+        running.exited_unread(Duration::from_secs(10)).is_some(),
+        "the child did not end"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    let shown = text(&seen);
+    let sent = shown.find("i=4343,a=T").expect("the image was not sent");
+    let delete = shown
+        .rfind("a=d,d=I,i=4343,q=2")
+        .expect("the restore did not delete the image it sent");
+    assert!(sent < delete && delete < shown.rfind(LEAVE).expect("the modes were not given back"));
+    assert!(
+        !shown.contains("_Gm=0,q=2;"),
+        "an image written whole was closed as part sent"
+    );
+    assert!(
+        !shown.contains("d=A"),
+        "the restore deleted every image in the terminal"
+    );
+}
+
+#[test]
+fn deleted_once() {
+    // A normal quit deletes every Kitty image the pane sent, each once: the
+    // drop's deletes, not the panic's catch-all.
+    let scratch = Scratch::new("writer-kitty-quit");
+    scratch.write("a.png", support::png(120, 260, 1));
+    scratch.commit_all("baseline");
+    scratch.write("a.png", support::png(120, 260, 2));
+    let home = TempDir::new("writer-kitty-quit-home");
+    let mut command = pane(&scratch, &home);
+    command.env("VIGIA_PICTURES", "kitty");
+    let (mut child, mut master) = pty::start(command, &script());
+    let seen = reader(master.try_clone().expect("the terminal's other end"), None);
+    let until = Instant::now() + Duration::from_secs(20);
+    while text(&seen).matches(",a=T").count() < 3 && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(500));
+    master.write_all(b"q").expect("press q");
+    assert!(
+        child.exited_unread(Duration::from_secs(5)).is_some(),
+        "the pane did not end"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    let shown = text(&seen);
+    let sent: Vec<&str> = shown
+        .split("i=")
+        .skip(1)
+        .filter_map(|rest| rest.split_once(",a=T").map(|(id, _)| id))
+        .filter(|id| id.bytes().all(|b| b.is_ascii_digit()))
+        .collect();
+    assert_eq!(sent.len(), 3, "three images were not sent: {sent:?}");
+    for id in &sent {
+        assert_eq!(
+            shown.matches(&format!("a=d,d=I,i={id},q=2")).count(),
+            1,
+            "image {id} was not deleted exactly once on quit"
+        );
+    }
 }
 
 #[test]

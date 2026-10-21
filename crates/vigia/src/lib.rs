@@ -88,7 +88,8 @@ pub use state::state_root;
 pub use terminal::output_flags;
 pub use terminal::{
     ANSWERING, BACKGROUND_WAIT, Background, Colours, PICTURES_WAIT, Screen, Session, ask,
-    background_of, colours_of, install_abort_hook, install_panic_hook, panic_mid_frame, picker,
+    background_of, colours_of, install_abort_hook, install_panic_hook, panic_after_upload,
+    panic_mid_frame, panic_mid_upload, picker,
 };
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};

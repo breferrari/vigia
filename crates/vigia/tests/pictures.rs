@@ -869,6 +869,104 @@ fn kitty_placement() {
 }
 
 #[test]
+fn placed_after_upload() {
+    // Built but not yet in the terminal: the picture is held as one building.
+    // Once its uploads are written whole, it draws.
+    let (scratch, mut pane) = protocol_pane("pictures-kitty-upload", ProtocolType::Kitty);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    pane.settled(&mut frame);
+    pane.pictures.refresh();
+    pane.pictures.retired();
+    let body = pane.body(&frame);
+    let mut view = pane
+        .app
+        .view(&mut frame, &mut pane.highlighter, &pane.history, body)
+        .expect("view");
+    pane.pictures.attach(&mut view.rows, &frame);
+    assert!(
+        pane.pictures
+            .settle(support::ceiling(Duration::from_secs(60))),
+        "the pictures were not built"
+    );
+    pane.pictures.attach(&mut view.rows, &frame);
+    assert!(
+        picture_rows(&view).iter().all(|(_, built)| !built),
+        "a Kitty picture drew before the terminal held it"
+    );
+    let (uploads, _) = pane.pictures.uploads();
+    assert_eq!(uploads.len(), 3, "three uploads were not handed out");
+    for upload in uploads {
+        pane.pictures.uploaded(upload.id);
+    }
+    pane.pictures.attach(&mut view.rows, &frame);
+    assert!(
+        picture_rows(&view).iter().all(|(_, built)| *built),
+        "the picture did not draw once its uploads were written"
+    );
+}
+
+#[test]
+fn upload_stopped_away() {
+    // An upload whose picture scrolls off before it is written is stopped,
+    // and handed out again when the picture comes back.
+    let scratch = Scratch::new("pictures-kitty-stopped");
+    scratch.write("a.png", png(120, 260, 1));
+    scratch.write("z.txt", support::numbered_lines(10));
+    scratch.commit_all("baseline");
+    scratch.write("a.png", png(120, 260, 2));
+    scratch.write("z.txt", support::numbered_lines(200));
+    let mut pane = Pane::drawn_by(100, 30, ProtocolType::Kitty);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let attach = |pane: &mut Pane, frame: &mut Frame| {
+        let body = pane.body(frame);
+        let mut view = pane
+            .app
+            .view(frame, &mut pane.highlighter, &pane.history, body)
+            .expect("view");
+        pane.pictures.attach(&mut view.rows, frame);
+    };
+    attach(&mut pane, &mut frame);
+    assert!(
+        pane.pictures
+            .settle(support::ceiling(Duration::from_secs(60))),
+        "the pictures were not built"
+    );
+    attach(&mut pane, &mut frame);
+    let (uploads, _) = pane.pictures.uploads();
+    let ids: Vec<u32> = uploads.iter().map(|upload| upload.id).collect();
+    assert_eq!(ids.len(), 3, "three uploads were not handed out");
+
+    pane.scroll(&mut frame, 150);
+    attach(&mut pane, &mut frame);
+    let (again, mut stopped) = pane.pictures.uploads();
+    stopped.sort_unstable();
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    assert!(
+        again.is_empty(),
+        "an upload went out for a picture off screen"
+    );
+    assert_eq!(
+        stopped, sorted,
+        "the uploads of a picture that left were not stopped"
+    );
+
+    pane.scroll(&mut frame, -150);
+    attach(&mut pane, &mut frame);
+    let (back, stopped) = pane.pictures.uploads();
+    assert!(stopped.is_empty(), "an upload on screen was stopped");
+    assert_eq!(
+        back.len(),
+        3,
+        "the picture that came back was not sent again"
+    );
+}
+
+#[test]
 fn scrolled_kitty_placement() {
     let scratch = Scratch::new("pictures-kitty-scrolled");
     scratch.write("a.png", png(120, 260, 1));
