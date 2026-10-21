@@ -397,3 +397,23 @@ fn staged_count_own_budget() {
         "the count changed the frame's list"
     );
 }
+
+#[test]
+fn record_keeps_current_pairs() {
+    // A full record of scores for files long gone must not stop a fresh
+    // rename from being scored. 4,096 fills it without the restart a 4,097th
+    // learned score would trigger.
+    let old = noise(81, 20_000);
+    let scratch = moved(
+        "rename-stale-record",
+        &[("a.bin", old.clone())],
+        &[("b.bin", tail_changed(&old, 0.1))],
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for n in 0..4096u64 {
+        frame.learn_pair((u64::MAX - n, n), 0);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
+}

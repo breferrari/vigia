@@ -640,6 +640,17 @@ impl Worktree {
             Some(found)
         };
         let added: Vec<_> = added.into_iter().filter_map(sized).collect();
+        // A full record keeps only the scores of this walk's sides, or files
+        // long gone would stop every new pair from being scored.
+        if self.pair_scores.borrow().len() >= PAIRS_KEPT {
+            let removals: std::collections::HashSet<u64> =
+                removed.iter().map(|&(_, _, stamp)| stamp).collect();
+            let additions: std::collections::HashSet<u64> =
+                added.iter().map(|&(_, _, stamp)| stamp).collect();
+            self.pair_scores
+                .borrow_mut()
+                .retain(|key, _| removals.contains(&key.0) && additions.contains(&key.1));
+        }
         let mut weighed: Vec<Weighed> = removed
             .iter()
             .flat_map(|&(from, from_size, from_stamp)| {
