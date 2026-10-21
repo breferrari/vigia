@@ -643,7 +643,7 @@ impl<'repo> Watcher<'repo> {
         }
         // A directory on the way to a store in the git dir: inotify watches it
         // only once it exists, so what landed in it first raised no event.
-        let in_git = within(&self.git_dir, path).or_else(|| within(&self.common_dir, path));
+        let in_git = within(&self.git_dir, path);
         if in_git.is_some_and(|inside| !inside.as_os_str().is_empty())
             && self.store.iter().any(|spelling| spelling.starts_with(path))
         {
