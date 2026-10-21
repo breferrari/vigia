@@ -22,8 +22,6 @@ From source, with a Rust toolchain:
 cargo install vigia
 ```
 
-A source build leaves PDF pictures off: PDFs need a release binary or Homebrew (from 1.2.0, unreleased).
-
 ```sh
 vigia ~/code/some-repo                       # or any path
 vigia --version                              # or -V. It is the only option there is

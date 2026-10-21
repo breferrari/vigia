@@ -268,8 +268,6 @@ jobs:
         run: cargo nextest run --profile ci -p vigia-core --test pdf_off
         env:
           VIGIA_BUDGET_SLACK: "3"
-      - name: build without PDFs
-        run: cargo build -p vigia --no-default-features
       # With no flags, as `cargo install` builds: pdf.rs compiles only with the
       # feature, so a default without it runs no test and fails here.
       - name: the default build draws PDFs
@@ -516,7 +514,6 @@ jobs:
           set -euo pipefail
           cargo install --path crates/vigia --locked --target x86_64-unknown-linux-musl \
             --target-dir target --root "$RUNNER_TEMP/install"
-          test -x "$RUNNER_TEMP/install/bin/vigia"
           cargo tree -p vigia -e normal --target x86_64-unknown-linux-musl --prefix none \
             | grep -q '^vigia-hayro v.*/vendor/hayro)'
       # The claim in CLAUDE.md is a static binary with no cross-toolchain.

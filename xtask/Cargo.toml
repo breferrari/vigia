@@ -40,7 +40,7 @@ image.workspace = true
 # the pane, as a reader's pane would.
 ratatui.workspace = true
 ratatui-image.workspace = true
-vigia = { path = "../crates/vigia", features = ["pdf"] }
+vigia = { path = "../crates/vigia" }
 vigia-core.workspace = true
 
 [lints]

@@ -1,5 +1,5 @@
-//! A build without the `pdf` feature, as `cargo install` makes one: a changed
-//! PDF is `binary`, as it was before PDFs were drawn. `SPEC.md` §6.
+//! A build without the `pdf` feature: a changed PDF is `binary`, as it was
+//! before PDFs were drawn. `SPEC.md` §6.
 #![cfg(not(feature = "pdf"))]
 
 mod support;
