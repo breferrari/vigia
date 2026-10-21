@@ -427,6 +427,16 @@ jobs:
             else
               printf '%s\t%s\t%s\n' "$who" "$labels" "$subject"
             fi
+            # A later pull request's note can retire an earlier one's.
+            replaces=$(git log -1 --format='%B' "$sha" | tr -d '\r' | grep '^Release-note-replaces:' || true)
+            if [ -z "$replaces" ]; then
+              replaces=$(printf '%s\n' "$body" | tr -d '\r' | grep '^Release-note-replaces:' || true)
+            fi
+            if [ -n "$replaces" ]; then
+              printf '%s\n' "$replaces" | while IFS= read -r line; do
+                printf '%s\t%s\t%s\n' "$who" "$labels" "$line"
+              done
+            fi
           done | sh .github/scripts/changelog-entry.sh \
                 "$NEXT" "$(date -u +%F)"
         env:
@@ -474,6 +484,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock CHANGELOG.md
+          # The summary is this release's alone.
+          git rm -q --ignore-unmatch .github/release-summary.md
           git commit -m "release: ${NEXT}"
 
           # **Pushed with `RELEASE_TOKEN`, and this only works because the

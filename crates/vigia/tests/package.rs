@@ -2206,6 +2206,19 @@ fn the_bump_writes_the_changelog_it_publishes() {
          release: {step}"
     );
     assert!(
+        step.contains(
+            "git log -1 --format='%B' \"$sha\" | tr -d '\\r' | grep '^Release-note-replaces:'"
+        ),
+        "bump.yml's changelog step does not pass Release-note-replaces lines, so a \
+         retired note still ships: {step}"
+    );
+    assert!(
+        step_block(&bump, "commit the bump")
+            .contains("git rm -q --ignore-unmatch .github/release-summary.md"),
+        "the release commit leaves the summary behind, so the next release opens \
+         with this one's"
+    );
+    assert!(
         bump.contains("fetch-depth: 0"),
         "bump.yml checks out without `fetch-depth: 0`, so it holds no tags and \
          the range the notes are written from cannot reach the previous release"
@@ -2242,6 +2255,18 @@ fn changelog_entry(
     subjects: &str,
     changelog: &str,
 ) -> (bool, String, String) {
+    changelog_summary(case, version, subjects, changelog, None)
+}
+
+/// [`changelog_entry`], with `summary` as the release summary file when given.
+#[cfg(unix)]
+fn changelog_summary(
+    case: &str,
+    version: &str,
+    subjects: &str,
+    changelog: &str,
+    summary: Option<&str>,
+) -> (bool, String, String) {
     use std::io::Write;
     use std::process::Stdio;
 
@@ -2250,12 +2275,20 @@ fn changelog_entry(
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
     let path = dir.join("CHANGELOG.md");
     std::fs::write(&path, changelog).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+    // A file a trailer could glob to, were the script to expand one.
+    std::fs::write(dir.join("#41=#50"), "").expect("write the glob bait");
+    let summary_path = dir.join("release-summary.md");
+    if let Some(summary) = summary {
+        std::fs::write(&summary_path, summary).expect("write the summary");
+    }
 
     let mut child = Command::new("sh")
+        .current_dir(&dir)
         .arg(&script)
         .arg(version)
         .arg("2026-01-01")
         .arg(&path)
+        .arg(&summary_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -2368,6 +2401,131 @@ fn note_wins() {
     assert!(
         said.contains("Release-note: none: #21"),
         "the log does not name the pull request whose note is none:\n{said}"
+    );
+}
+
+/// `Release-note-replaces:` drops the named pull requests' entries, keeps the
+/// rest, and fails on a number the range does not hold.
+#[cfg(unix)]
+#[test]
+fn note_replaces() {
+    let records = "#40\trelease\tRelease-note: PDFs draw in every build\n\
+                   #40\trelease\tRelease-note-replaces: #41\n\
+                   #40\trelease\tRelease-note-replaces: #42, #44\n\
+                   #44\trelease\tRelease-note: Another old line\n\
+                   #41\trelease\tRelease-note: PDFs draw with a feature\n\
+                   #42\trelease\tA build without PDFs shows them as binary (#42)\n\
+                   #43\trelease\tRelease-note: A key moves\n";
+    let (passed, left, said) = changelog_entry("replaces", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(passed, "the generator refused a replacing range:\n{said}");
+    assert_eq!(
+        bullets(&left, "0.2.0"),
+        ["- PDFs draw in every build", "- A key moves"],
+        "the replaced entries were not dropped, or a kept one was:\n{left}"
+    );
+    assert!(
+        said.contains("replaced by #40: #41")
+            && said.contains("replaced by #40: #42")
+            && said.contains("replaced by #40: #44"),
+        "the log does not name what was replaced:\n{said}"
+    );
+
+    for (case, line, why) in [
+        (
+            "replaces-unknown",
+            "Release-note-replaces: #99",
+            "#99, which has no record",
+        ),
+        (
+            "replaces-bare",
+            "Release-note-replaces: 41",
+            "41, which is not a pull request number",
+        ),
+        (
+            "replaces-prefix",
+            "Release-note-replaces: #4",
+            "#4, which has no record",
+        ),
+        (
+            "replaces-self",
+            "Release-note-replaces: #50",
+            "replaces itself",
+        ),
+        (
+            "replaces-glob",
+            "Release-note-replaces: #*",
+            "#*, which is not a pull request number",
+        ),
+    ] {
+        let records = format!(
+            "#50\trelease\tRelease-note: A key moves\n#50\trelease\t{line}\n#41\trelease\tOld (#41)\n"
+        );
+        let (passed, left, said) = changelog_entry(case, "0.2.0", &records, CHANGELOG_BEFORE);
+        assert!(
+            !passed && left == CHANGELOG_BEFORE,
+            "{case}: a replacement the range cannot honour cut a version:\n{left}"
+        );
+        assert!(
+            said.contains("::error::#50 replaces") && said.contains(why),
+            "{case}: the refusal does not say why:\n{said}"
+        );
+    }
+}
+
+/// A bad replacement and an unlabelled pull request in one range are both
+/// named before the bump stops.
+#[cfg(unix)]
+#[test]
+fn replaces_named_with_rest() {
+    let records = "#80\trelease\tRelease-note: A key moves\n\
+                   #80\trelease\tRelease-note-replaces: #99\n\
+                   #81\t\tUnlabelled (#81)\n";
+    let (passed, left, said) = changelog_entry("replaces-rest", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE,
+        "the range cut a version:\n{left}"
+    );
+    assert!(
+        said.contains("#80 replaces #99") && said.contains("#81 is labelled neither"),
+        "one failure hid the other:\n{said}"
+    );
+}
+
+/// A release summary file opens the section above the bullets; without one
+/// the section is the bullets alone; an empty one fails.
+#[cfg(unix)]
+#[test]
+fn release_summary() {
+    let records = "#60\trelease\tRelease-note: A key moves\n";
+    let (passed, left, said) = changelog_summary(
+        "summary",
+        "0.2.0",
+        records,
+        CHANGELOG_BEFORE,
+        Some("Pictures no longer hold up the pane.\n\n"),
+    );
+    assert!(passed, "the generator refused a summary:\n{said}");
+    assert!(
+        left.contains(
+            "## [0.2.0] - 2026-01-01\n\nPictures no longer hold up the pane.\n\n- A key moves\n"
+        ),
+        "the summary does not open the section above the bullets:\n{left}"
+    );
+    let (passed, left, _) = changelog_entry("no-summary", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        passed && left.contains("## [0.2.0] - 2026-01-01\n\n- A key moves\n"),
+        "without a summary the section is not the bullets alone:\n{left}"
+    );
+    let (passed, left, said) = changelog_summary(
+        "empty-summary",
+        "0.2.0",
+        records,
+        CHANGELOG_BEFORE,
+        Some(" \n\n"),
+    );
+    assert!(
+        !passed && left == CHANGELOG_BEFORE && said.contains("is empty"),
+        "an empty summary did not fail the bump:\n{said}"
     );
 }
 
