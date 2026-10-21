@@ -1411,6 +1411,11 @@ pub struct View {
     pub churn: Option<Churn>,
     /// Rows of the whole diff above this screen's top row.
     pub rows_above: usize,
+    /// Every changed image's picture rows, which the scrollbar counts beside
+    /// [`Self::total_rows`], so its thumb is the screen's share.
+    pub pictured_total: usize,
+    /// The picture rows above the screen, beside [`Self::rows_above`].
+    pub pictured_above: usize,
     /// Changed files in the whole worktree, not just the visible ones.
     pub files: usize,
     /// Changed files the reader's `hide` pattern kept out of the walk. The header
@@ -1595,6 +1600,16 @@ fn picture_rows(kind: &ChangeKind, diff: &FileDiff, room: Option<Room>) -> usize
         }
         _ => 0,
     }
+}
+
+/// Picture rows the file at `index` draws under its line in `room`: none for a
+/// file whose span is not binary, which reads no diff.
+fn pictured(frame: &mut Frame, index: usize, room: Option<Room>) -> Result<usize> {
+    if room.is_none() || frame.rows_of(index, |_, span| usize::from(span.binary))? == 0 {
+        return Ok(0);
+    }
+    let (change, diff) = frame.diff(index)?;
+    Ok(picture_rows(&change.kind, diff, room))
 }
 
 /// Rows the block of the file at `index` occupies: the file's own rows and the
@@ -1904,6 +1919,8 @@ impl View {
             total_rows: 0,
             churn: None,
             rows_above: 0,
+            pictured_total: 0,
+            pictured_above: 0,
             built: 0,
             files,
             hidden: frame.hidden(),
@@ -2240,7 +2257,7 @@ impl View {
             &walked.drawn,
             &pinned,
         )?;
-        view.measure(frame, measured, single, trimmed)?;
+        view.measure(frame, measured, single, trimmed, room)?;
 
         Ok(view)
     }
@@ -2366,13 +2383,23 @@ impl View {
         wanted: bool,
         single: bool,
         trimmed: usize,
+        room: Option<Room>,
     ) -> Result<()> {
         if !wanted || self.files == 0 {
             return Ok(());
         }
+        let current = pictured(frame, self.top.file.min(self.files - 1), room)?;
+        // The rows of the top file's pictures already scrolled past.
+        let passed = if current > 0 {
+            self.top.under.min(current)
+        } else {
+            0
+        };
         if single {
             self.total_rows = self.current_span;
             self.rows_above = (self.top.row.min(self.current_span) + trimmed).min(self.total_rows);
+            self.pictured_total = current;
+            self.pictured_above = passed;
             return Ok(());
         }
         self.total_rows = diff_rows(frame)?;
@@ -2381,12 +2408,20 @@ impl View {
         // `frame.height` has already filled the span cache, so this second walk
         // reads nothing.
         let mut above = 0usize;
+        let mut pictured_above = 0usize;
         for index in 0..self.top.file.min(self.files) {
             above += block_rows(frame, index)?;
+            pictured_above += pictured(frame, index, room)?;
         }
         // Clamped, because a position past the end would invert the bar's travel.
         self.rows_above =
             (above + self.top.row.min(self.current_span) + trimmed).min(self.total_rows);
+        let mut pictured_below = 0usize;
+        for index in self.top.file.min(self.files) + 1..self.files {
+            pictured_below += pictured(frame, index, room)?;
+        }
+        self.pictured_total = pictured_above + current + pictured_below;
+        self.pictured_above = pictured_above + passed;
         Ok(())
     }
 
@@ -2872,6 +2907,26 @@ impl View {
             .collect();
         // A stored top already names the first logical row drawn.
         if stored { 0 } else { from }
+    }
+
+    /// The diff's rows with its pictures', which the scrollbar measures.
+    pub fn bar_total(&self) -> usize {
+        self.total_rows + self.pictured_total
+    }
+
+    /// [`Self::rows_above`] with the picture rows above the screen.
+    pub fn bar_above(&self) -> usize {
+        (self.rows_above + self.pictured_above).min(self.bar_total())
+    }
+
+    /// [`Self::shown`] with the picture rows on screen, the scrollbar's measure.
+    pub fn bar_shown(&self) -> usize {
+        self.shown()
+            + self
+                .rows
+                .iter()
+                .filter(|row| matches!(row, Row::Picture { .. }))
+                .count()
     }
 
     /// Rows of the diff this screen holds: §11.1's *screenful*, the line a trimmed

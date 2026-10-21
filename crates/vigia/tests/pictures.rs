@@ -2055,25 +2055,27 @@ fn picture_rows_display() {
 }
 
 #[test]
-fn thumb_ignores_pictures() {
-    // A screen that is mostly picture shows fewer rows of the diff than one of
-    // text, so its thumb is shorter.
+fn thumb_steady() {
+    // Scrolled over a picture and the text after it, the thumb keeps one
+    // length: it is the screen's share of the diff, pictures counted.
     let (scratch, mut pane) = stacked("pictures-thumb", ProtocolType::Halfblocks, 30);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    let view = pane.settled(&mut frame);
-    let pictured = thumb_length(&pane.draw(&view));
-    pane.scroll(&mut frame, 40);
-    let view = pane.settled(&mut frame);
+    let mut lengths = Vec::new();
+    let mut over_picture = false;
+    for _ in 0..12 {
+        let view = pane.settled(&mut frame);
+        over_picture |= !picture_rows(&view).is_empty();
+        lengths.push(thumb_length(&pane.draw(&view)));
+        pane.scroll(&mut frame, 6);
+    }
+    assert!(over_picture, "no screen held the picture");
+    let (least, most) = (lengths.iter().min(), lengths.iter().max());
     assert!(
-        picture_rows(&view).is_empty(),
-        "the picture is still on screen"
-    );
-    let text = thumb_length(&pane.draw(&view));
-    assert!(
-        pictured < text,
-        "the thumb over a picture is {pictured} rows, as long as over text ({text})"
+        most.zip(least)
+            .is_some_and(|(most, least)| most - least <= 1),
+        "the thumb changed length while scrolling: {lengths:?}"
     );
 }
 

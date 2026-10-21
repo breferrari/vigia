@@ -2049,7 +2049,12 @@ impl Areas {
             scroll(self.list, view.list_top, view.list_span, view.files),
             // In rows of the diff: the screenful stops being the region's height
             // when a line wraps.
-            scroll(self.diff, view.rows_above, view.shown(), view.total_rows),
+            scroll(
+                self.diff,
+                view.bar_above(),
+                view.bar_shown(),
+                view.bar_total(),
+            ),
         )
     }
 }
