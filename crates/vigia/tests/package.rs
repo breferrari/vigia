@@ -2206,7 +2206,9 @@ fn the_bump_writes_the_changelog_it_publishes() {
          release: {step}"
     );
     assert!(
-        step.contains("grep '^Release-note-replaces:'"),
+        step.contains(
+            "git log -1 --format='%B' \"$sha\" | tr -d '\\r' | grep '^Release-note-replaces:'"
+        ),
         "bump.yml's changelog step does not pass Release-note-replaces lines, so a \
          retired note still ships: {step}"
     );
