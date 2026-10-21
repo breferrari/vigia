@@ -29,6 +29,43 @@ fn moved(name: &str, files: &[(&str, Vec<u8>)], written: &[(&str, Vec<u8>)]) -> 
     scratch
 }
 
+/// [`moved`] for a fixture of thousands of files: the removed ones go
+/// straight into the object database, never onto disk or through `git add`.
+fn moved_large(name: &str, files: &[(&str, Vec<u8>)], written: &[(&str, Vec<u8>)]) -> Scratch {
+    use std::io::Write;
+    let scratch = Scratch::new(name);
+    let mut stream =
+        b"commit refs/heads/main\ncommitter vigia <vigia@example.com> 0 +0000\ndata 7\ninitial\n"
+            .to_vec();
+    for (path, bytes) in files {
+        stream.extend(format!("M 100644 inline {path}\ndata {}\n", bytes.len()).as_bytes());
+        stream.extend(bytes);
+        stream.push(b'\n');
+    }
+    let mut import = std::process::Command::new("git")
+        .args(["fast-import", "--quiet"])
+        .current_dir(scratch.path_of(""))
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("git fast-import runs");
+    import
+        .stdin
+        .take()
+        .expect("its stdin")
+        .write_all(&stream)
+        .expect("the stream");
+    assert!(
+        import.wait().expect("it ends").success(),
+        "fast-import failed"
+    );
+    // The index from that commit, the files it names absent from disk.
+    scratch.git(&["reset", "-q"]);
+    for (path, bytes) in written {
+        scratch.write(path, bytes);
+    }
+    scratch
+}
+
 fn kind_of<'a>(changes: &'a [FileChange], path: &str) -> &'a ChangeKind {
     &changes
         .iter()
@@ -436,8 +473,8 @@ fn rename_limit_product() {
 
 #[test]
 fn rename_limit_past() {
-    // Past 1,000 times 1,000 nothing is weighed, as git weighs nothing, once
-    // every side is sized.
+    // Past 1,000 times 1,000 nothing is weighed, as git weighs nothing: not
+    // a side is sized, so the first frame says what every later one would.
     let files: Vec<(String, Vec<u8>)> = (0..1001)
         .map(|n| {
             (
@@ -454,20 +491,28 @@ fn rename_limit_past() {
             )
         })
         .collect();
-    let scratch = moved("rename-limit-past", &refs(&files), &refs(&written));
+    let scratch = moved_large("rename-limit-past", &refs(&files), &refs(&written));
+    let git = git_unstaged(&scratch);
+    assert!(
+        !git.iter().any(|(status, _)| status.starts_with('R')),
+        "the fixture is wrong: git paired {git:?}"
+    );
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    for _ in 0..40 {
-        assert_eq!(
-            scored(&mut frame),
-            0,
-            "a walk past the limit weighed a pair"
-        );
-        assert!(
-            frame.unscored_pairs().is_empty(),
-            "a walk past the limit listed a pair"
-        );
-    }
+    assert_eq!(
+        scored(&mut frame),
+        0,
+        "a walk past the limit weighed a pair"
+    );
+    assert!(
+        frame.unscored_pairs().is_empty(),
+        "a walk past the limit listed a pair"
+    );
+    assert_eq!(
+        frame.stats().side_reads,
+        0,
+        "a walk past the limit sized a side"
+    );
 }
 
 #[test]
@@ -882,7 +927,7 @@ fn basename_past_limit() {
         })
         .chain([("new/shared.bin".to_owned(), tail_changed(&shared, 0.1))])
         .collect();
-    let scratch = moved("rename-basename-limit", &refs(&files), &refs(&written));
+    let scratch = moved_large("rename-basename-limit", &refs(&files), &refs(&written));
     let by_name = ("R old/shared.bin".to_owned(), "new/shared.bin".to_owned());
     assert!(
         git_unstaged(&scratch).contains(&by_name),
@@ -930,10 +975,17 @@ fn symlink_names_count() {
 #[test]
 fn limit_after_basename() {
     // Git counts its limit after the file-name pass, so one shared name
-    // brings 1,001 by 1,000 within it and m.bin pairs with k.bin.
-    let text = |tag: &str, n: usize| format!("{tag} {n}\n").repeat(500).into_bytes();
+    // brings 1,001 by 1,000 within it and m.bin pairs with k.bin. The files
+    // are small so git's own matrix is cheap, and the worker's list is
+    // answered each frame, as the pane's worker answers it.
+    let text = |tag: &str, n: usize| format!("{tag} {n}\n").repeat(60).into_bytes();
     let shared = noise(95, 4_000);
-    let m = noise(96, 1_000);
+    // Lined, so the edit changes one chunk of five, and the cheapest pair.
+    let m: Vec<u8> = noise(96, 100)
+        .into_iter()
+        .enumerate()
+        .map(|(at, byte)| if at % 20 == 19 { b'\n' } else { byte })
+        .collect();
     let files: Vec<(String, Vec<u8>)> = (0..999)
         .map(|n| (format!("old/o{n:04}.txt"), text("old", n)))
         .chain([
@@ -948,18 +1000,25 @@ fn limit_after_basename() {
             ("new/k.bin".to_owned(), tail_changed(&m, 0.1)),
         ])
         .collect();
-    let scratch = moved("rename-limit-after", &refs(&files), &refs(&written));
+    let scratch = moved_large("rename-limit-after", &refs(&files), &refs(&written));
     let found = ("R old/m.bin".to_owned(), "new/k.bin".to_owned());
     assert!(
         git_unstaged(&scratch).contains(&found),
-        "the fixture is wrong"
+        "the fixture is wrong: {:?}",
+        git_unstaged(&scratch)
+            .iter()
+            .filter(|(status, _)| status.starts_with('R'))
+            .collect::<Vec<_>>()
     );
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    for _ in 0..40 {
+    for _ in 0..10 {
         frame.advance().expect("advance");
         if kind_of(frame.files(), "new/k.bin") == &renamed("old/m.bin") {
             return;
+        }
+        for candidate in frame.unscored_pairs() {
+            frame.learn_pair(candidate.key, vigia_core::candidate_score(&candidate));
         }
     }
     panic!(
