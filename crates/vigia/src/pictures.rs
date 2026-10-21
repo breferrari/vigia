@@ -264,9 +264,15 @@ impl Panel {
         !matches!(self, Self::Sliced(SlicedProtocol::Halfblocks(_)))
     }
 
-    /// Whether it is a Kitty image sent deflated.
-    pub fn deflated(&self) -> bool {
-        matches!(self, Self::Kitty(image) if image.deflated())
+    /// What a Kitty image of `pixels` holds: its unpacked pixels in the
+    /// terminal, or, sent uncompressed, the larger base64 kept for it, four
+    /// bytes to three.
+    pub fn held(&self, pixels: u64) -> u64 {
+        match self {
+            Self::Kitty(image) if image.deflated() => pixels * 4,
+            Self::Kitty(_) => pixels * 16 / 3,
+            Self::Sliced(_) => 0,
+        }
     }
 
     /// Draw it into `area`, its first `above` rows scrolled off the top.
@@ -1885,13 +1891,7 @@ fn build(job: &Job, inks: Inks, picker: &Picker, compress: bool) -> Built {
         };
         if let Some(id) = id {
             kitty.push(id);
-            let deflated = protocol.deflated();
-            // An uncompressed transmit is base64 of the pixels, four bytes to three.
-            stored += if deflated {
-                pixels * 4
-            } else {
-                pixels * 16 / 3
-            };
+            stored += protocol.held(pixels);
         }
         panels.push((slot, protocol));
     }
@@ -1971,12 +1971,14 @@ mod tests {
             .expect("a whole image");
         let (panel, _) =
             panel(noise, None, slot, Paint::Plain, inks, &picker, true).expect("a panel");
-        let Panel::Kitty(image) = panel else {
-            panic!("a Kitty picker built another panel");
-        };
         assert!(
-            !image.deflated(),
-            "noise was deflated though deflating it saves nothing"
+            matches!(panel, Panel::Kitty(_)),
+            "a Kitty picker built another panel"
+        );
+        assert_eq!(
+            panel.held(1000 * 1000),
+            1000 * 1000 * 16 / 3,
+            "noise was deflated though deflating it saves nothing, or not counted as its base64"
         );
     }
 

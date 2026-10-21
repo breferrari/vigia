@@ -69,10 +69,10 @@ const SAMPLE: usize = 64 * 1024;
 /// the image shrinks at least twice, which a photograph's does not.
 fn worth_deflating(rgba: &[u8], width: u32) -> bool {
     // Four strips from top to bottom, since a screenshot's first rows are its
-    // flattest, each three rows deep at least, since a row repeats the one
-    // above it far more often than it repeats itself.
+    // flattest, each three rows deep where 64 KB allows, since a row repeats
+    // the one above it far more often than it repeats itself.
     const STRIPS: usize = 4;
-    let strip = (SAMPLE / STRIPS).max(3 * 4 * width as usize);
+    let strip = (3 * 4 * width as usize).clamp(SAMPLE / STRIPS, SAMPLE);
     if rgba.len() <= strip * STRIPS {
         return true;
     }
@@ -349,6 +349,7 @@ mod tests {
                 Rect::new(0, 0, cells.width, cells.height),
                 Rect::new(5, 3, cells.width - 1, cells.height),
                 Rect::new(2, 1, cells.width + 4, cells.height + 2),
+                Rect::new(5, 3, cells.width - 1, cells.height - 1),
             ];
             for ((id, tmux, compress, skip), area) in cases
                 .into_iter()
@@ -505,9 +506,9 @@ mod tests {
         });
         assert!(!worth_deflating(&noise, 1000), "noise was deflated");
         // Every row the same noise: a row alone does not shrink, the image does.
-        let rows: Vec<u8> = noise[..1000 * 4].repeat(400);
+        let rows: Vec<u8> = noise[..5000 * 4].repeat(40);
         assert!(
-            worth_deflating(&rows, 1000),
+            worth_deflating(&rows, 5000),
             "a texture repeated row by row was sent raw"
         );
         assert!(
