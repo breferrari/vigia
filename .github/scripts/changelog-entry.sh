@@ -117,7 +117,6 @@ for pair in $(printf '%s' "$replaced" | tr ',' ' '); do
         *) echo "::error::${by} replaces ${gone}, which has no record in this range"; unknown=1 ;;
     esac
 done
-[ "$unknown" -eq 0 ] || exit 1
 
 # One pass decides every record. Kept lines go to stdout prefixed `keep:`, and
 # everything else is a workflow annotation. The trailing `(#n)` references are
@@ -204,6 +203,10 @@ decided=$(printf '%s\n' "$records" | awk -v noted="$noted," -v replaced="$replac
 
 printf '%s\n' "$decided" | grep -v '^keep:' | grep -v '^$' || true
 
+if [ "$unknown" -ne 0 ]; then
+    echo "::error::fix each Release-note-replaces line named above"
+    exit 1
+fi
 if [ "$failed" -ne 0 ]; then
     echo "::error::label every pull request in the range release or internal, and put Release-note: none only on internal ones"
     exit 1

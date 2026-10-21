@@ -2464,6 +2464,25 @@ fn note_replaces() {
     }
 }
 
+/// A bad replacement and an unlabelled pull request in one range are both
+/// named before the bump stops.
+#[cfg(unix)]
+#[test]
+fn replaces_named_with_rest() {
+    let records = "#80\trelease\tRelease-note: A key moves\n\
+                   #80\trelease\tRelease-note-replaces: #99\n\
+                   #81\t\tUnlabelled (#81)\n";
+    let (passed, left, said) = changelog_entry("replaces-rest", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE,
+        "the range cut a version:\n{left}"
+    );
+    assert!(
+        said.contains("#80 replaces #99") && said.contains("#81 is labelled neither"),
+        "one failure hid the other:\n{said}"
+    );
+}
+
 /// A release summary file opens the section above the bullets; without one
 /// the section is the bullets alone; an empty one fails.
 #[cfg(unix)]
