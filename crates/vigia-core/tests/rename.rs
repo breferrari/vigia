@@ -1597,3 +1597,58 @@ fn lfs_unfetched_quiet() {
         assert!(walks < 10, "still waking after {walks} walks");
     }
 }
+
+/// `n` similar `.rs` files of about 3 KB, moved to another directory and each
+/// lightly edited, unstaged.
+fn refactor(name: &str, n: usize) -> Scratch {
+    let body = |k: usize| -> Vec<u8> {
+        (0..60)
+            .map(|l| format!("fn item_{k}_{l}(x: u32) -> u32 {{ x + {l} }} // module {k}\n"))
+            .collect::<String>()
+            .into_bytes()
+    };
+    let files: Vec<(String, Vec<u8>)> = (0..n)
+        .map(|k| (format!("old/m{k:04}.rs"), body(k)))
+        .collect();
+    let written: Vec<(String, Vec<u8>)> = (0..n)
+        .map(|k| {
+            let mut edited = String::from_utf8(body(k))
+                .expect("text")
+                .replacen("x + 3 ", "x + 33 ", 1);
+            edited.push_str("// moved\n");
+            (format!("new/n{k:04}.rs"), edited.into_bytes())
+        })
+        .collect();
+    moved(name, &refs(&files), &refs(&written))
+}
+
+#[test]
+fn refactor_renames() {
+    // A hundred similar files moved is ten thousand pairs to score, and every
+    // move shows as a rename, as git shows it.
+    let scratch = refactor("rename-refactor", 100);
+    let git = git_unstaged(&scratch);
+    let renames = git
+        .iter()
+        .filter(|(status, _)| status.starts_with('R'))
+        .count();
+    assert_eq!(renames, 100, "the fixture is wrong: {git:?}");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..80 {
+        frame.advance().expect("advance");
+        let listed = frame.unscored_pairs();
+        if listed.is_empty() && frame.settles_in(std::time::SystemTime::now()).is_none() {
+            break;
+        }
+        for candidate in listed {
+            frame.learn_pair(candidate.key, vigia_core::candidate_score(&candidate));
+        }
+    }
+    let shown = frame
+        .files()
+        .iter()
+        .filter(|change| matches!(change.kind, ChangeKind::Renamed { .. }))
+        .count();
+    assert_eq!(shown, 100, "{shown} of 100 moves showed as renames");
+}
