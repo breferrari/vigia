@@ -3,7 +3,7 @@ name: soak
 # I3: flat resources over days. Scheduled rather than per-commit, because the
 # gate it carries needs a window long enough to have something other than
 # warmup in it. The short structural half of the same test runs inside
-# `cargo test --workspace` in ci.yml and needs nothing here.
+# `cargo test --workspace` in CI and needs nothing here.
 on:
   schedule:
     # Weekly, Linux alone, 30 minutes over 20 x 200. That fixture settles in

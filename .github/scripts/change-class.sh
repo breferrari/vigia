@@ -19,23 +19,13 @@
 # take-next rules, which only the skill reads. `docs/research` holds notes and
 # their images, and a script kept beside them is code.
 #
-# `CI_FULL=true` in the environment answers full whatever the paths, for a
-# pull request that carries the `full-ci` label. A partial run that turns out
-# wrong needs a way to be overridden without a code change.
-#
 # The caller lists a renamed file under both names, so moving code into a
 # docs path is still code.
 #
-# Usage: [CI_FULL=true] change-class.sh < paths
+# Usage: change-class.sh < paths
 set -eu
 
 paths=$(grep -v '^$' || true)
-
-if [ "${CI_FULL:-}" = "true" ]; then
-    echo "::notice::the full-ci label is set, so the class is full"
-    echo full
-    exit 0
-fi
 
 if [ -z "$paths" ]; then
     echo "::notice::no changed paths were listed, so the class is full"
