@@ -31,10 +31,9 @@ categories = ["command-line-utilities", "development-tools"]
 # somebody's `cargo install`.
 exclude = ["tests/**"]
 
-# Off by default. `--features pdf` from crates.io builds through the published
-# `vigia-hayro*` forks. The release binaries turn it on, in
-# `[workspace.metadata.dist]`.
+# On by default, through the published `vigia-hayro*` forks.
 [features]
+default = ["pdf"]
 pdf = ["dep:hayro", "vigia-core/pdf"]
 
 [dependencies]

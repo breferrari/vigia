@@ -127,7 +127,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/breferrari/vigia/releas
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/breferrari/vigia/releases/latest/download/vigia-installer.ps1 | iex"
 ```
 
-From source, with a Rust toolchain: `cargo install vigia`. A source build leaves PDF pictures off (from 1.2.0, unreleased).
+From source, with a Rust toolchain: `cargo install vigia`.
 
 [**Installing**](https://github.com/breferrari/vigia/blob/main/docs/INSTALL.md) covers the release archives, checking a download, and upgrading on Windows while an agent session is open.
 

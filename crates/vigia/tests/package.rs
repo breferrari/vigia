@@ -3863,34 +3863,36 @@ fn font_copies_named() {
     );
 }
 
-/// PDFs ship in the release binaries and stay out of a `cargo install`
-/// build, whose `hayro-syntax` lacks the patched decode limit. CI tests both.
+/// PDFs are on in every build of vigia, `cargo install` included, and
+/// vigia-core leaves them to whoever depends on it. CI tests both builds.
 #[test]
 fn pdf_feature_shipped() {
-    let root = without_comments(&repo_file("Cargo.toml"));
-    let dist = root
-        .split_once("[workspace.metadata.dist]")
-        .map(|(_, rest)| rest.split("\n[").next().unwrap_or(rest))
-        .expect("Cargo.toml has a dist section");
+    let vigia = without_comments(&repo_file("crates/vigia/Cargo.toml"));
+    let default = vigia
+        .lines()
+        .find(|line| line.trim_start().starts_with("default = ["))
+        .unwrap_or_default();
     assert!(
-        dist.contains("features = [\"pdf\"]"),
-        "the release binaries are built without PDFs: {dist}"
+        default.contains("\"pdf\""),
+        "vigia's default features leave PDFs out: {default:?}"
     );
-    for manifest in ["crates/vigia/Cargo.toml", "crates/vigia-core/Cargo.toml"] {
-        let manifest = without_comments(&repo_file(manifest));
-        assert!(
-            manifest.contains("\npdf = [") && !manifest.contains("\ndefault = ["),
-            "a default feature set would put the unpatched PDF reader in a crates.io build"
-        );
-    }
+    let core = without_comments(&repo_file("crates/vigia-core/Cargo.toml"));
+    assert!(
+        core.contains("\npdf = [") && !core.contains("\ndefault = ["),
+        "vigia-core turns PDFs on for every crate that depends on it"
+    );
     let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
     assert!(
-        step_block(&ci, "test").contains("--features vigia/pdf"),
+        !step_block(&ci, "test").contains("--no-default-features"),
         "the test step runs without PDFs"
     );
     assert!(
-        step_block(&ci, "without PDFs, as cargo install builds").contains("--test pdf_off"),
+        step_block(&ci, "without PDFs").contains("--test pdf_off"),
         "no step tests a build without PDFs"
+    );
+    assert!(
+        step_block(&ci, "the default build draws PDFs").contains("--no-tests=fail"),
+        "no step shows the default build draws PDFs"
     );
 }
 

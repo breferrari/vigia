@@ -216,10 +216,8 @@ jobs:
       # code is not compiled on Linux, so one run there lints a third of what
       # the deny above covers.
       - run: cargo clippy --all-targets
-      # The workspace turns PDFs on through the scene bed, so the build
-      # without them is linted on its own.
       - name: clippy without PDFs
-        run: cargo clippy -p vigia -p vigia-core --all-targets
+        run: cargo clippy -p vigia -p vigia-core --all-targets --no-default-features
 
       # Correctness first, in debug, where the structural budget gates still
       # apply and the absolute ones report that they are skipped.
@@ -257,23 +255,27 @@ jobs:
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: nextest
-      # PDFs are a feature that `cargo install` builds leave out and the
-      # release turns on, so it is named here rather than left to whichever
-      # member happens to enable it.
       - name: test
-        run: cargo nextest run --workspace --profile ci --features vigia/pdf
+        run: cargo nextest run --workspace --profile ci
         env:
           VIGIA_BUDGET_SLACK: "3"
       - name: doctests, which nextest does not run
         run: cargo test --workspace --doc
         env:
           VIGIA_BUDGET_SLACK: "3"
-      - name: without PDFs, as cargo install builds
+      # vigia-core has no default features, so this build has no PDFs.
+      - name: without PDFs
         run: cargo nextest run --profile ci -p vigia-core --test pdf_off
         env:
           VIGIA_BUDGET_SLACK: "3"
       - name: build without PDFs
-        run: cargo build -p vigia
+        run: cargo build -p vigia --no-default-features
+      # With no flags, as `cargo install` builds: pdf.rs compiles only with the
+      # feature, so a default without it runs no test and fails here.
+      - name: the default build draws PDFs
+        run: cargo nextest run --profile ci -p vigia --test pdf --no-tests=fail
+        env:
+          VIGIA_BUDGET_SLACK: "3"
 
   # The budgets in their own job per platform, beside the test job rather
   # than after it. They are a separate release build either way, and running
@@ -318,7 +320,7 @@ jobs:
       # the exact shape §7 keeps recording, arrived at through the test
       # *selector* rather than through the gate: green, and about nothing.
       - name: budgets
-        run: cargo test --release --test budgets --features vigia/pdf -- --nocapture
+        run: cargo test --release --test budgets -- --nocapture
         env:
           VIGIA_BUDGET_SLACK: "3"
 
@@ -339,7 +341,7 @@ jobs:
       # [#36](https://github.com/breferrari/vigia/issues/36) tracks the
       # underlying flakiness of these gates on hosted runners.
       - name: first paint, which is I7 and is not in budgets.rs
-        run: cargo test --release --test first_paint --features vigia/pdf -- --nocapture
+        run: cargo test --release --test first_paint -- --nocapture
         env:
           VIGIA_BUDGET_SLACK: "3"
 
@@ -506,7 +508,17 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo build --release --target x86_64-unknown-linux-musl --features vigia/pdf
+      - run: cargo build --release --target x86_64-unknown-linux-musl
+      # `cargo install` with no flags, on the build above: the default takes the
+      # `vigia-hayro` forks from the workspace, and so draws PDFs.
+      - name: cargo install with no flags
+        run: |
+          set -euo pipefail
+          cargo install --path crates/vigia --locked --target x86_64-unknown-linux-musl \
+            --target-dir target --root "$RUNNER_TEMP/install"
+          test -x "$RUNNER_TEMP/install/bin/vigia"
+          cargo tree -p vigia -e normal --target x86_64-unknown-linux-musl --prefix none \
+            | grep -q '^vigia-hayro v.*/vendor/hayro)'
       # The claim in CLAUDE.md is a static binary with no cross-toolchain.
       # Building is half of it; being actually static is the other half.
       - name: assert the binary is static
