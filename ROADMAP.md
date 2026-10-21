@@ -33,15 +33,17 @@ Each release ships one or more phases. A phase marked internal changes no binary
 
 | Release | Phases | What it brings |
 |---|---|---|
-| 1.2.0 | 9, 10 | Pictures, on current Rust |
+| 1.2.0 | 9, 10 | Pictures, on current Rust. **Released 2026-10-21** |
+| 1.2.1 | the picture-sizing rows below | Pictures sized for the pane and the screen |
 | 1.3.0 | 11 | Work that grows with input moved off the paint |
 | 1.4.0 | 12, plus whatever of 13 and 14 has merged by then | Correct at the edges |
 
-**Ordered 2026-10-20, reader.**
+**Ordered 2026-10-21, reader.**
 
-- 1.2.0 finishes the work in flight and takes nothing new: #706 and #707, #701, #705, #699, the README rework, and the release rehearsal.
-- Right after 1.2.0 comes the foundation below, before Phase 11. Phase 11 starts once #683 is done, and measures first.
-- Waiting on the reader: the crates.io registration #141 needs, which is an action, not a ruling.
+- 1.2.0 shipped on 2026-10-21.
+- 1.2.1 comes next and takes only the picture-sizing rows in the 1.2.1 section below, found by readers right after 1.2.0.
+- Then the foundation below, before Phase 11. Phase 11 starts once #683 is done, and measures first.
+- Waiting on the reader: trusted publishing for vigia and the four vendored forks (#141), which is an action, not a ruling.
 
 ---
 
@@ -333,7 +335,7 @@ Milestone: [Phase 8](https://github.com/breferrari/vigia/milestone/8)
 
 ## Phase 9 — pictures
 
-Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in 1.2.0.
+Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Shipped in 1.2.0 (2026-10-21).
 
 **Filter: does it show what a changed picture looks like, in any terminal, without the pane stopping being a monitor?** Asked by the reader for app assets and snapshot-test references. SPEC §11.2 B23 is the ruling.
 
@@ -364,7 +366,7 @@ Milestone: [Phase 9](https://github.com/breferrari/vigia/milestone/10). Ships in
 
 ## Phase 10 — current Rust
 
-Milestone: [Phase 10](https://github.com/breferrari/vigia/milestone/11). Ships in 1.2.0.
+Milestone: [Phase 10](https://github.com/breferrari/vigia/milestone/11). Shipped in 1.2.0 (2026-10-21).
 
 **Filter: does it make the code use what the latest stable Rust offers, where that is simpler, faster or more exact?** The workspace tracks the latest stable, ruled by the reader on 2026-10-19 (SPEC §6).
 
@@ -372,9 +374,20 @@ Milestone: [Phase 10](https://github.com/breferrari/vigia/milestone/11). Ships i
 |---|---|---|
 | ✅ | Adopt Rust 1.99 features | [#642](https://github.com/breferrari/vigia/issues/642) |
 
+## 1.2.1 — pictures sized right
+
+Found by readers on 2026-10-21, in a split pane, in Warp, and on an iOS asset catalog. Ruled 2026-10-21, reader: a picture shows at its true size and is only ever scaled down.
+
+| | Task | Issue |
+|---|---|---|
+| ⬜ | Scale a picture down to fit a narrow pane instead of hiding it | [#765](https://github.com/breferrari/vigia/issues/765) |
+| ⬜ | Draw small pictures at their natural size instead of filling the slot **True size, no enlargement: ruled 2026-10-21, reader** | [#766](https://github.com/breferrari/vigia/issues/766) |
+| ⬜ | Encode pictures at Retina density when the terminal reports only its window size | [#767](https://github.com/breferrari/vigia/issues/767) |
+| ⬜ | Set the picture protocol and the update check in the config file, not only by environment variable | [#768](https://github.com/breferrari/vigia/issues/768) |
+
 ## Foundation, right after 1.2.0
 
-Ordered 2026-10-20, reader. These come before Phase 11, and Phase 11 does not start until #683 is done. No pull request that splits a file merges until the reader tags 1.2.0.
+Ordered 2026-10-20, reader. These come before Phase 11, and Phase 11 does not start until #683 is done. 1.2.0 is tagged, so a pull request that splits a file may merge.
 
 vigia's lane:
 
@@ -479,6 +492,7 @@ Milestone: [Phase 14](https://github.com/breferrari/vigia/milestone/15). Interna
 | ✅ | Fail the flake-rate workflow when its filter matches no test. **Found on #673** | [#674](https://github.com/breferrari/vigia/issues/674) |
 | ✅ | Decide whether vigia-core's public API is stable **Ruled C by the reader, 2026-10-20** | [#684](https://github.com/breferrari/vigia/issues/684) |
 | ⬜ | Stop a release before it builds when a vendored fork is not on crates.io | [#757](https://github.com/breferrari/vigia/issues/757) |
+| ⬜ | Bring the Windows test job's time near the other platforms | [#769](https://github.com/breferrari/vigia/issues/769) |
 | ⬜ | Return to the upstream crates when they release the forks' patches | [#758](https://github.com/breferrari/vigia/issues/758) |
 
 ## Shelf (retired 2026-10-19)
