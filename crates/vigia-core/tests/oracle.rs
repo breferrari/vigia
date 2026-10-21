@@ -380,9 +380,9 @@ fn status_paths(raw: &[u8]) -> (BTreeSet<String>, BTreeSet<String>) {
                     staged.insert(path.clone());
                     staged.extend(from.clone());
                 }
+                // The source names the staged rename only.
                 if xy[1] != '.' {
                     unstaged.insert(path);
-                    unstaged.extend(from);
                 }
             }
             other => panic!("status reported {other:?}, which no generated operation makes"),
