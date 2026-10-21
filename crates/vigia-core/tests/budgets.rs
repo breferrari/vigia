@@ -1500,6 +1500,7 @@ fn refactor_repo(name: &str, moved: bool) -> Scratch {
 /// I9 over each frame of a hundred-file move until every pair is scored, by
 /// its slowest frame, against the same files where nothing moved.
 #[test]
+#[ignore = "scheduled budget"]
 fn rename_frame_refactor() {
     let moved = refactor_repo("budget-rename-refactor", true);
     let plain = refactor_repo("budget-rename-refactor-plain", false);
