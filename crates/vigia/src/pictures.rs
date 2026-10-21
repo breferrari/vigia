@@ -1023,8 +1023,7 @@ impl Pictures {
     pub fn written_at_once(&mut self) -> Vec<crate::writer::Upload> {
         let (mut uploads, _) = self.uploads();
         for upload in &mut uploads {
-            let written = std::mem::replace(&mut upload.written, Box::new(|| {}));
-            written();
+            upload.ticket.written();
         }
         uploads
     }
@@ -1063,9 +1062,8 @@ impl Pictures {
                 };
                 if shown.contains(key) {
                     uploads.extend(image.upload());
-                } else if image.in_flight() {
+                } else if image.unsent() {
                     // Sent again if it comes back.
-                    image.unsent();
                     stopped.push(image.id());
                 }
             }

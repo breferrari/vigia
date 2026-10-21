@@ -898,7 +898,7 @@ fn placed_after_upload() {
     let (uploads, _) = pane.pictures.uploads();
     assert_eq!(uploads.len(), 3, "three uploads were not handed out");
     for upload in uploads {
-        (upload.written)();
+        upload.ticket.written();
     }
     pane.pictures.attach(&mut view.rows, &frame);
     assert!(

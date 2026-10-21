@@ -75,8 +75,8 @@ pub struct Upload {
     pub close: Arc<str>,
     /// Whether its escapes pass through tmux.
     pub tmux: bool,
-    /// Called once its last chunk is written.
-    pub written: Box<dyn FnOnce() + Send>,
+    /// Marks the image held once its last chunk is written.
+    pub ticket: crate::kitty::Ticket,
 }
 
 /// The longest one wait for room to write lasts, so a stop is noticed this soon.
@@ -107,8 +107,6 @@ pub struct Wakes {
     pub cells: Box<dyn Fn() + Send>,
     /// A write failed, so nothing the pane draws reaches the terminal any more.
     pub lost: Box<dyn Fn() + Send>,
-    /// An image's last chunk was written, so its cells may be drawn.
-    pub uploaded: Box<dyn Fn() + Send>,
 }
 
 impl Wakes {
@@ -118,7 +116,6 @@ impl Wakes {
         Self {
             cells: Box::new(|| {}),
             lost: Box::new(|| {}),
-            uploaded: Box::new(|| {}),
         }
     }
 }
@@ -271,9 +268,9 @@ impl Lanes {
                 *sent += 1;
                 if *sent == upload.ends.len() && !shared.stopping() {
                     OPEN.store(0, Ordering::SeqCst);
-                    let written = std::mem::replace(&mut upload.written, Box::new(|| {}));
-                    written();
-                    (wakes.uploaded)();
+                    upload.ticket.written();
+                    // A redraw, so its cells are drawn.
+                    (wakes.cells)();
                     self.graphics.pop_front();
                 }
             }
@@ -783,7 +780,6 @@ mod tests {
                     count.fetch_add(1, Ordering::AcqRel);
                 }),
                 lost: Box::new(|| {}),
-                uploaded: Box::new(|| {}),
             },
         );
         let mut sink = writer.sink();
@@ -877,7 +873,7 @@ mod tests {
             ends: ends.into(),
             close: "\x1b_Gm=0,q=2;\x1b\\".into(),
             tmux: false,
-            written: Box::new(|| {}),
+            ticket: crate::kitty::ticket().0,
         }
     }
 
@@ -913,14 +909,18 @@ mod tests {
         let writer = Writer::start(
             out.clone(),
             Wakes {
-                uploaded: Box::new(move || {
+                cells: Box::new(move || {
                     let _ = tx.send(());
                 }),
                 ..Wakes::none()
             },
         );
         let mut sink = writer.sink();
-        let upload = three_chunks(7);
+        let (ticket, held) = crate::kitty::ticket();
+        let upload = Upload {
+            ticket,
+            ..three_chunks(7)
+        };
         let first = upload.ends[0];
         sink.upload(upload).expect("upload");
         sink.delete(8, b"<delete>".to_vec()).expect("delete");
@@ -948,6 +948,10 @@ mod tests {
             Ok(()),
             "the upload was not reported"
         );
+        assert!(
+            held(),
+            "the upload written whole did not mark its image held"
+        );
     }
 
     #[test]
@@ -959,7 +963,7 @@ mod tests {
         let writer = Writer::start(
             out.clone(),
             Wakes {
-                uploaded: Box::new(move || {
+                cells: Box::new(move || {
                     let _ = tx.send(());
                 }),
                 ..Wakes::none()
@@ -1001,7 +1005,7 @@ mod tests {
             ends: vec![len].into(),
             close: "".into(),
             tmux: false,
-            written: Box::new(|| {}),
+            ticket: crate::kitty::ticket().0,
         })
         .expect("upload");
         out.room.store(100, Ordering::Release);
@@ -1027,7 +1031,7 @@ mod tests {
         let writer = Writer::start(
             out.clone(),
             Wakes {
-                uploaded: Box::new(move || {
+                cells: Box::new(move || {
                     let _ = tx.send(());
                 }),
                 ..Wakes::none()
@@ -1146,7 +1150,6 @@ mod tests {
                 lost: Box::new(move || {
                     let _ = tx.send(());
                 }),
-                uploaded: Box::new(|| {}),
             },
         );
         let mut sink = writer.sink();

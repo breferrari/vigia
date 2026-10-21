@@ -103,12 +103,11 @@ impl<W: Rearm> Console for Crossterm<W> {
             // Under tmux the terminator above ends tmux's passthrough; this one
             // goes through it, to the escape tmux had passed on (unverified).
             let ended = if tmux {
-                "\x1bPtmux;\x1b\x1b\\\x1b\\"
+                crate::kitty::string_end(true)
             } else {
-                ""
+                String::new()
             };
-            let closed =
-                String::from(ended) + &crate::kitty::cancel(tmux) + &crate::kitty::delete(id, tmux);
+            let closed = ended + &crate::kitty::cancel(tmux) + &crate::kitty::delete(id, tmux);
             let _ = self.out.write_all(closed.as_bytes());
         }
     }

@@ -65,6 +65,12 @@ fn transmit(
     (out, ends)
 }
 
+/// A string terminator, through tmux if `tmux`.
+pub fn string_end(tmux: bool) -> String {
+    let (start, escape, end) = Parser::tmux_start_escape_end(tmux);
+    format!("{start}{escape}\\{end}")
+}
+
 /// The empty last chunk that closes an image left part sent.
 pub fn cancel(tmux: bool) -> String {
     let (start, escape, end) = Parser::tmux_start_escape_end(tmux);
@@ -157,6 +163,37 @@ const WRITTEN: u64 = 2;
 /// The bits of [`Image::state`] that hold the state.
 const STATE: u64 = 3;
 
+/// One upload's hold on its image's state: written, it marks the image held;
+/// dropped unwritten, it puts the image back to be sent again. A later upload
+/// of the image is a different generation, which neither touches.
+pub struct Ticket {
+    state: Arc<AtomicU64>,
+    queued: u64,
+}
+
+impl Ticket {
+    /// Its last chunk was written.
+    pub fn written(&self) {
+        let _ = self.state.compare_exchange(
+            self.queued,
+            self.queued - QUEUED + WRITTEN,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+}
+
+impl Drop for Ticket {
+    fn drop(&mut self) {
+        let _ = self.state.compare_exchange(
+            self.queued,
+            self.queued - QUEUED + IDLE,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+}
+
 impl Image {
     /// `rgba`, `width` by `height` pixels, as image `id` over `cells`,
     /// deflated if the terminal `inflates` and deflating pays.
@@ -204,25 +241,20 @@ impl Image {
         if now & STATE != IDLE {
             return None;
         }
-        let queued = (now & !STATE) + 4 + QUEUED;
+        let queued = (now & !STATE) + (STATE + 1) + QUEUED;
         self.state
             .compare_exchange(now, queued, Ordering::AcqRel, Ordering::Acquire)
             .ok()?;
-        let state = Arc::clone(&self.state);
         Some(crate::writer::Upload {
             id: self.id,
             data: Arc::clone(&self.transmit),
             ends: Arc::clone(&self.ends),
             close: cancel(self.tmux).into(),
             tmux: self.tmux,
-            written: Box::new(move || {
-                let _ = state.compare_exchange(
-                    queued,
-                    queued - QUEUED + WRITTEN,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                );
-            }),
+            ticket: Ticket {
+                state: Arc::clone(&self.state),
+                queued,
+            },
         })
     }
 
@@ -231,23 +263,14 @@ impl Image {
         self.state.load(Ordering::Acquire) & STATE == WRITTEN
     }
 
-    /// Its upload was cancelled, or never finished: send it again when next
-    /// shown.
-    pub fn unsent(&self) {
-        let now = self.state.load(Ordering::Acquire);
-        if now & STATE == QUEUED {
-            let _ = self.state.compare_exchange(
-                now,
-                now - QUEUED + IDLE,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            );
-        }
-    }
-
-    /// Whether it is with the writer and not yet written whole.
-    pub fn in_flight(&self) -> bool {
-        self.state.load(Ordering::Acquire) & STATE == QUEUED
+    /// Its upload stops: send it again when next shown. Whether it was still
+    /// in flight, so the terminal may hold part of it.
+    pub fn unsent(&self) -> bool {
+        self.state
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |now| {
+                (now & STATE == QUEUED).then_some(now - QUEUED + IDLE)
+            })
+            .is_ok()
     }
 
     /// Whether its transmit is deflated.
@@ -331,6 +354,21 @@ static DIACRITICS: [char; 297] = [
     '\u{1D188}', '\u{1D189}', '\u{1D1AA}', '\u{1D1AB}', '\u{1D1AC}', '\u{1D1AD}', '\u{1D242}', '\u{1D243}',
     '\u{1D244}',
 ];
+
+/// For a writer test: a ticket of an image just queued, and whether that
+/// image is now held.
+#[cfg(test)]
+pub(crate) fn ticket() -> (Ticket, impl Fn() -> bool) {
+    let state = Arc::new(AtomicU64::new((STATE + 1) + QUEUED));
+    let read = Arc::clone(&state);
+    let ticket = Ticket {
+        state,
+        queued: (STATE + 1) + QUEUED,
+    };
+    (ticket, move || {
+        read.load(Ordering::Acquire) & STATE == WRITTEN
+    })
+}
 
 /// Bytes no deflate shrinks, as a photograph's nearly are.
 #[cfg(test)]
@@ -510,7 +548,7 @@ mod tests {
         let again = image
             .upload()
             .expect("a cancelled image was not sent again");
-        (again.written)();
+        again.ticket.written();
         image.unsent();
         assert!(
             image.upload().is_none(),
@@ -542,17 +580,44 @@ mod tests {
         );
         let first = image.upload().expect("an upload");
         image.unsent();
-        (first.written)();
+        first.ticket.written();
         assert!(!image.uploaded(), "a stopped upload was taken as held");
         let second = image.upload().expect("sent again");
         let first_again = image.upload();
         assert!(first_again.is_none(), "handed out twice");
         assert!(!image.uploaded(), "held before its own report");
-        (second.written)();
+        second.ticket.written();
         assert!(
             image.uploaded(),
             "the upload written whole was not taken as held"
         );
+    }
+
+    #[test]
+    fn ticket_kept() {
+        // An upload dropped unwritten puts its image back to be sent; one
+        // written whole is not taken back as stopped.
+        let pixels = image(40, 40);
+        let image = Image::new(
+            pixels.as_raw(),
+            pixels.dimensions(),
+            Size::new(4, 2),
+            3,
+            false,
+            false,
+        );
+        drop(image.upload().expect("an upload"));
+        let upload = image
+            .upload()
+            .expect("a dropped upload's image was not sent again");
+        upload.ticket.written();
+        assert!(
+            !image.unsent(),
+            "an image written whole was taken as stopped"
+        );
+        assert!(image.uploaded(), "a stop undid an image written whole");
+        drop(upload);
+        assert!(image.uploaded(), "dropping a written upload undid it");
     }
 
     #[test]

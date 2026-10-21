@@ -148,8 +148,6 @@ enum Wake {
     Cells,
     /// A write to the terminal failed, so nothing drawn reaches it any more.
     OutputLost,
-    /// A Kitty image's last chunk reached the terminal, so its cells can draw.
-    Uploaded,
 }
 
 /// The backlog below which a frame is always drawn, so a small frame never
@@ -167,16 +165,13 @@ const QUERY_DRAIN: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// What the terminal writer tells this shell, wired to its wake channel.
 fn writer_wakes(tx: &Sender<Wake>) -> writer::Wakes {
-    let (cells, lost, uploaded) = (tx.clone(), tx.clone(), tx.clone());
+    let (cells, lost) = (tx.clone(), tx.clone());
     writer::Wakes {
         cells: Box::new(move || {
             let _ = cells.send(Wake::Cells);
         }),
         lost: Box::new(move || {
             let _ = lost.send(Wake::OutputLost);
-        }),
-        uploaded: Box::new(move || {
-            let _ = uploaded.send(Wake::Uploaded);
         }),
     }
 }
@@ -913,7 +908,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.app.warn(message);
                 }
                 // Deliberately nothing.
-                Wake::Warmed | Wake::Pictured | Wake::Cells | Wake::Uploaded => {}
+                Wake::Warmed | Wake::Pictured | Wake::Cells => {}
                 Wake::OutputLost => {
                     return Err(
                         "the terminal stopped taking output, so nothing could be drawn".into(),
