@@ -332,12 +332,13 @@ impl Worktree {
             let pointer = picture::lfs_pointer_text(oid, raw);
             spans.score(&rename::Spans::of_side(pointer.as_bytes(), false))
         };
+        let missed = || LfsScore::Scored(score(NO_OID));
         let Some((oid, size)) = picture::lfs_pointer(old).filter(|&(_, size)| size == raw) else {
-            return LfsScore::Scored(score(NO_OID));
+            return missed();
         };
-        // Unverified: git would hash the bytes of an object not fetched.
+        // Git would hash the bytes; vigia has no SHA-256.
         let Ok(object) = self.lfs_path(oid) else {
-            return LfsScore::Scored(score(NO_OID));
+            return LfsScore::Unfetched(score(NO_OID));
         };
         if size > self.lfs_budget.get() {
             return LfsScore::Worker(score(NO_OID));
@@ -346,7 +347,7 @@ impl Worktree {
         self.lfs_compares.update(|v| v + 1);
         match same_bytes(&self.workdir.join(&to.path), &object, size) {
             Some(true) => LfsScore::Scored(score(oid)),
-            _ => LfsScore::Scored(score(NO_OID)),
+            _ => missed(),
         }
     }
 
@@ -725,7 +726,6 @@ impl Worktree {
         let mut score_all = |weighed: Vec<Weighed>| -> Vec<(u64, usize, usize)> {
             let mut scored = Vec::new();
             for pair in weighed {
-                // Queues `pair` for the worker.
                 let mut list = |differ: Option<u64>| {
                     if self.unscored.borrow().len() >= rename::LISTED_MAX {
                         self.pairs_unlisted.set(true);
@@ -736,7 +736,7 @@ impl Worktree {
                         self.unscored.borrow_mut().push(rename::Candidate {
                             key: pair.key,
                             sides: self.pair_sources(&changes[pair.from], &changes[pair.to], homes),
-                            differ,
+                            differ_score: differ,
                         });
                     }
                 };
@@ -781,15 +781,20 @@ impl Worktree {
                         }
                         self.pair_budget.update(|v| v - rename::PAIR_COST);
                         self.pairs_scored.update(|v| v + 1);
-                        let score = match (lfs, spans_of(pair.from), spans_of(pair.to)) {
-                            (Some(LfsScore::Scored(score)), _, _) => score,
+                        let score = match (&lfs, spans_of(pair.from), spans_of(pair.to)) {
+                            (Some(LfsScore::Scored(score) | LfsScore::Unfetched(score)), ..) => {
+                                *score
+                            }
                             (None, Some(old), Some(new)) => old.score(&new),
                             _ => 0,
                         };
-                        self.keep_score(pair.key, score);
+                        // Not kept, so the walk after a fetch compares again.
+                        if !matches!(lfs, Some(LfsScore::Unfetched(_))) {
+                            self.keep_score(pair.key, score);
+                        }
                         score
                     }
-                    // Two pointers cost a later frame little, which this wakes.
+                    // An LFS pair costs little; the next frame scores it.
                     None if lfs_size(pair.to).is_some() => {
                         self.sides_left.set(true);
                         continue;
@@ -2553,7 +2558,61 @@ pub fn indexed_extensions(root: &Path, per_extension: usize) -> Vec<Indexed> {
 
 #[cfg(test)]
 mod tests {
-    use super::git_separators;
+    use super::{COMPARE_CHUNK, git_separators, same_readers};
+
+    /// A reader of `len` zero bytes, with a byte flipped at `flip`, that
+    /// counts what it hands out and refuses a read past one chunk.
+    struct Counted {
+        len: u64,
+        flip: Option<u64>,
+        at: u64,
+        read: std::rc::Rc<std::cell::Cell<u64>>,
+    }
+
+    impl std::io::Read for Counted {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            assert!(out.len() <= COMPARE_CHUNK, "a read of {} bytes", out.len());
+            let n = out
+                .len()
+                .min(usize::try_from(self.len - self.at).unwrap_or(usize::MAX));
+            for (i, byte) in out[..n].iter_mut().enumerate() {
+                *byte = u8::from(self.flip == Some(self.at + i as u64));
+            }
+            self.at += n as u64;
+            self.read.set(self.read.get() + n as u64);
+            Ok(n)
+        }
+    }
+
+    /// Two sides of a 2 GiB compare that differ in the first chunk: no read is
+    /// larger than a chunk, and nothing past it is read.
+    #[test]
+    fn compare_bounded() {
+        let len = 2 * 1024 * 1024 * 1024;
+        let read = std::rc::Rc::new(std::cell::Cell::new(0));
+        let side = |flip| Counted {
+            len,
+            flip,
+            at: 0,
+            read: read.clone(),
+        };
+        assert_eq!(same_readers(side(None), side(Some(10)), len), Some(false));
+        assert_eq!(
+            read.get(),
+            2 * COMPARE_CHUNK as u64,
+            "read past the first difference"
+        );
+        read.set(0);
+        let small = 3 * COMPARE_CHUNK as u64 + 5;
+        let side = |flip| Counted {
+            len: small,
+            flip,
+            at: 0,
+            read: read.clone(),
+        };
+        assert_eq!(same_readers(side(None), side(None), small), Some(true));
+        assert_eq!(read.get(), 2 * small);
+    }
 
     /// The separator rule, on every platform rather than on one.
     #[test]
@@ -2731,9 +2790,12 @@ enum LfsScore {
     /// Past the walk's compare budget, for the worker to compare: the score
     /// when the bytes are not the object.
     Worker(u64),
+    /// The object is not fetched, so the bytes could not be compared.
+    Unfetched(u64),
 }
 
-/// An oid no LFS object has, for a pointer whose object is not the one compared.
+/// An oid no LFS object has, being no hex, for a pointer whose object is not
+/// the one compared.
 const NO_OID: &str = "----------------------------------------------------------------";
 
 /// Bytes one status walk may compare between LFS files and their objects.
@@ -2786,8 +2848,7 @@ fn lfs_configured(repo: &gix::Repository) -> bool {
 /// Whether two regular files of `len` bytes each hold the same bytes, read side
 /// by side and stopped at the first chunk that differs, or `None` when a read
 /// failed and nothing is known.
-fn same_bytes(a: &Path, b: &Path, len: u64) -> Option<bool> {
-    use std::io::Read;
+pub(crate) fn same_bytes(a: &Path, b: &Path, len: u64) -> Option<bool> {
     // Checked by path first, so a fifo is never opened.
     let regular = |path: &Path| std::fs::metadata(path).is_ok_and(|meta| meta.is_file());
     if !regular(a) || !regular(b) {
@@ -2798,15 +2859,22 @@ fn same_bytes(a: &Path, b: &Path, len: u64) -> Option<bool> {
         let meta = file.metadata().ok()?;
         Some((meta.is_file() && meta.len() == len).then_some(file))
     };
-    let (Some(mut a), Some(mut b)) = (open(a)?, open(b)?) else {
+    let (Some(a), Some(b)) = (open(a)?, open(b)?) else {
         return Some(false);
     };
-    let (mut left, mut right) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    same_readers(a, b, len)
+}
+
+/// The most either side of a byte compare holds at once.
+const COMPARE_CHUNK: usize = 64 * 1024;
+
+/// Whether `a` and `b` hold the same `len` bytes, read a chunk at a time and
+/// no further than the first that differs.
+fn same_readers(mut a: impl std::io::Read, mut b: impl std::io::Read, len: u64) -> Option<bool> {
+    let (mut left, mut right) = (vec![0u8; COMPARE_CHUNK], vec![0u8; COMPARE_CHUNK]);
     let mut remaining = len;
     while remaining > 0 {
-        let chunk = left
-            .len()
-            .min(usize::try_from(remaining).unwrap_or(usize::MAX));
+        let chunk = COMPARE_CHUNK.min(usize::try_from(remaining).unwrap_or(usize::MAX));
         a.read_exact(&mut left[..chunk]).ok()?;
         b.read_exact(&mut right[..chunk]).ok()?;
         if left[..chunk] != right[..chunk] {

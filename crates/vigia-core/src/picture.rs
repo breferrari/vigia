@@ -375,6 +375,23 @@ pub enum Source {
 }
 
 impl Source {
+    /// The file this side's bytes are in: the LFS object for a stored pointer.
+    pub(crate) fn file(&self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::File(path) => Some(path.clone()),
+            Self::Blob { git_dir, id, store } => {
+                let repo = gix::open(git_dir).ok()?;
+                let bytes = repo
+                    .find_object(*id)
+                    .ok()?
+                    .try_into_blob()
+                    .ok()?
+                    .take_data();
+                lfs_oid(&bytes).map(|oid| lfs_object(store, oid))
+            }
+        }
+    }
+
     /// This side's bytes, read on the calling thread. `None` when they cannot be.
     pub fn read(&self) -> Option<Vec<u8>> {
         match self {

@@ -40,7 +40,7 @@ pub struct Candidate {
     pub sides: Sources,
     /// For an LFS file in the worktree, its score unless its bytes are the
     /// removed side's object, which scores in full.
-    pub differ: Option<u64>,
+    pub differ_score: Option<u64>,
 }
 
 /// Whether git scores a pair of these sizes at all: one whose sizes differ by
@@ -137,19 +137,22 @@ fn hash(first: u32, second: u32) -> u32 {
 /// when either cannot be read.
 pub fn candidate_score(candidate: &Candidate) -> u64 {
     let read = |side: &Option<crate::picture::Source>| side.as_ref().and_then(|s| s.read());
-    match (
-        read(&candidate.sides.before),
-        read(&candidate.sides.after),
-        candidate.differ,
-    ) {
-        (Some(old), Some(new), Some(differ)) => {
-            if old == new {
-                MAX_SCORE
-            } else {
-                differ
-            }
-        }
-        (Some(old), Some(new), None) => pair_score(&old, &new),
+    if let Some(differ) = candidate.differ_score {
+        // Compared a chunk at a time, however large the object.
+        let same = || {
+            let old = candidate.sides.before.as_ref()?.file()?;
+            let new = candidate.sides.after.as_ref()?.file()?;
+            let len = std::fs::metadata(&new).ok()?.len();
+            crate::worktree::same_bytes(&old, &new, len)
+        };
+        return if same() == Some(true) {
+            MAX_SCORE
+        } else {
+            differ
+        };
+    }
+    match (read(&candidate.sides.before), read(&candidate.sides.after)) {
+        (Some(old), Some(new)) => pair_score(&old, &new),
         _ => 0,
     }
 }
