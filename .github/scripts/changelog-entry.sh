@@ -29,6 +29,10 @@
 #                           guess: the old subject list let factory work
 #                           through whenever its wording was ordinary.
 #   both labels             fail.
+#   Release-note-replaces: #<n>
+#                           drops pull request #<n>'s entries from the section,
+#                           for a later change that makes its note wrong. A
+#                           number with no record in the range fails.
 #
 # A range that keeps nothing exits 1, so the bump stops before a version is
 # cut. Every failure in the range is named before the exit, so one run shows
@@ -73,11 +77,38 @@ noted=$(printf '%s\n' "$records" | awk -F '\t' '
     }
 ')
 
+# The pull requests a later one's `Release-note-replaces:` drops, each as
+# `#<n>=<who replaced it>`, and every pull request the range names.
+replaced=$(printf '%s\n' "$records" | awk -F '\t' '
+    NF == 3 && $3 ~ /^Release-note-replaces:/ {
+        list = $3
+        sub(/^Release-note-replaces:[ \t]*/, "", list)
+        n = split(list, numbers, /[ \t,]+/)
+        for (i = 1; i <= n; i++) if (numbers[i] != "") printf ",%s=%s", numbers[i], $1
+    }
+')
+named=$(printf '%s\n' "$records" | awk -F '\t' 'NF == 3 { printf ",%s", $1 }')
+
+unknown=0
+for pair in $(printf '%s' "$replaced" | tr ',' ' '); do
+    gone=${pair%%=*}
+    by=${pair#*=}
+    case "$gone" in
+        \#[0-9]*) ;;
+        *) echo "::error::${by} replaces ${gone}, which is not a pull request number"; unknown=1; continue ;;
+    esac
+    case "${named}," in
+        *",${gone},"*) ;;
+        *) echo "::error::${by} replaces ${gone}, which has no record in this range"; unknown=1 ;;
+    esac
+done
+[ "$unknown" -eq 0 ] || exit 1
+
 # One pass decides every record. Kept lines go to stdout prefixed `keep:`, and
 # everything else is a workflow annotation. The trailing `(#n)` references are
 # peeled here, one at a time, because a merge subject carries the issue's
 # number and the pull request's, and sometimes two issues'.
-decided=$(printf '%s\n' "$records" | awk -v noted="$noted," '
+decided=$(printf '%s\n' "$records" | awk -v noted="$noted," -v replaced="$replaced," '
     BEGIN { FS = "\t"; bad = 0 }
     function strip(s) {
         while (match(s, /[ \t]*\(#[0-9]+(,[ \t]*#[0-9]+)*\)[ \t]*$/)) s = substr(s, 1, RSTART - 1)
@@ -90,8 +121,16 @@ decided=$(printf '%s\n' "$records" | awk -v noted="$noted," '
         bad = 1
         next
     }
+    $3 ~ /^Release-note-replaces:/ { next }
     {
         who = $1; labels = "," $2 ","; text = $3
+        at = index(replaced, "," who "=")
+        if (at) {
+            by = substr(replaced, at + length(who) + 2)
+            sub(/,.*/, "", by)
+            print "::notice::replaced by " by ": " who
+            next
+        }
         release = index(labels, ",release,") > 0
         internal = index(labels, ",internal,") > 0
         if (release && internal) {

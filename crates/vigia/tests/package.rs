@@ -2371,6 +2371,55 @@ fn note_wins() {
     );
 }
 
+/// `Release-note-replaces:` drops the named pull requests' entries, keeps the
+/// rest, and fails on a number the range does not hold.
+#[cfg(unix)]
+#[test]
+fn note_replaces() {
+    let records = "#40\trelease\tRelease-note: PDFs draw in every build\n\
+                   #40\trelease\tRelease-note-replaces: #41, #42\n\
+                   #41\trelease\tRelease-note: PDFs draw with a feature\n\
+                   #42\trelease\tA build without PDFs shows them as binary (#42)\n\
+                   #43\trelease\tRelease-note: A key moves\n";
+    let (passed, left, said) = changelog_entry("replaces", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(passed, "the generator refused a replacing range:\n{said}");
+    assert_eq!(
+        bullets(&left, "0.2.0"),
+        ["- PDFs draw in every build", "- A key moves"],
+        "the replaced entries were not dropped, or a kept one was:\n{left}"
+    );
+    assert!(
+        said.contains("replaced by #40: #41") && said.contains("replaced by #40: #42"),
+        "the log does not name what was replaced:\n{said}"
+    );
+
+    for (case, line, why) in [
+        (
+            "replaces-unknown",
+            "Release-note-replaces: #99",
+            "#99, which has no record",
+        ),
+        (
+            "replaces-bare",
+            "Release-note-replaces: 41",
+            "41, which is not a pull request number",
+        ),
+    ] {
+        let records = format!(
+            "#50\trelease\tRelease-note: A key moves\n#50\trelease\t{line}\n#41\trelease\tOld (#41)\n"
+        );
+        let (passed, left, said) = changelog_entry(case, "0.2.0", &records, CHANGELOG_BEFORE);
+        assert!(
+            !passed && left == CHANGELOG_BEFORE,
+            "{case}: a replacement the range cannot honour cut a version:\n{left}"
+        );
+        assert!(
+            said.contains("::error::#50 replaces") && said.contains(why),
+            "{case}: the refusal does not say why:\n{said}"
+        );
+    }
+}
+
 /// A label and a trailer that disagree fail the bump, and so does a pull
 /// request with no label or both. Every failure in the range is named.
 #[cfg(unix)]

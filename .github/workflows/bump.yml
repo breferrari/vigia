@@ -427,6 +427,13 @@ jobs:
             else
               printf '%s\t%s\t%s\n' "$who" "$labels" "$subject"
             fi
+            # A later pull request's note can retire an earlier one's.
+            replaces=$(git log -1 --format='%B' "$sha" | tr -d '\r' | grep '^Release-note-replaces:' || true)
+            if [ -n "$replaces" ]; then
+              printf '%s\n' "$replaces" | while IFS= read -r line; do
+                printf '%s\t%s\t%s\n' "$who" "$labels" "$line"
+              done
+            fi
           done | sh .github/scripts/changelog-entry.sh \
                 "$NEXT" "$(date -u +%F)"
         env:
