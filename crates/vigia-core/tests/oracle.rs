@@ -41,17 +41,55 @@ const CASE_CEILING: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 enum Op {
-    Write { file: usize, seed: u8, lines: u8 },
-    Edit { file: usize, line: u8, seed: u8 },
-    Insert { file: usize, line: u8, seed: u8 },
-    DeleteLine { file: usize, line: u8 },
-    Remove { file: usize },
-    Rename { from: usize, to: usize },
-    Stage { file: usize },
+    Write {
+        file: usize,
+        seed: u8,
+        lines: u8,
+    },
+    Edit {
+        file: usize,
+        line: u8,
+        seed: u8,
+    },
+    Insert {
+        file: usize,
+        line: u8,
+        seed: u8,
+    },
+    DeleteLine {
+        file: usize,
+        line: u8,
+    },
+    Remove {
+        file: usize,
+    },
+    Rename {
+        from: usize,
+        to: usize,
+    },
+    /// A rename that keeps `keep` of every 12 lines, so pairs land on both
+    /// sides of git's similarity threshold.
+    Move {
+        from: usize,
+        to: usize,
+        keep: u8,
+        seed: u8,
+    },
+    Stage {
+        file: usize,
+    },
     StageAll,
-    Binary { file: usize, seed: u8 },
-    Attributes { rule: usize },
-    Lfs { file: usize, seed: u8 },
+    Binary {
+        file: usize,
+        seed: u8,
+    },
+    Attributes {
+        rule: usize,
+    },
+    Lfs {
+        file: usize,
+        seed: u8,
+    },
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -63,6 +101,7 @@ fn op() -> impl Strategy<Value = Op> {
         2 => (file.clone(), any::<u8>()).prop_map(|(file, line)| Op::DeleteLine { file, line }),
         1 => file.clone().prop_map(|file| Op::Remove { file }),
         2 => (file.clone(), file.clone()).prop_map(|(from, to)| Op::Rename { from, to }),
+        2 => (file.clone(), file.clone(), 0..13u8, any::<u8>()).prop_map(|(from, to, keep, seed)| Op::Move { from, to, keep, seed }),
         2 => file.clone().prop_map(|file| Op::Stage { file }),
         1 => Just(Op::StageAll),
         1 => (file.clone(), any::<u8>()).prop_map(|(file, seed)| Op::Binary { file, seed }),
@@ -91,9 +130,13 @@ fn config(cases: u32, seed: u64) -> ProptestConfig {
         rng_seed: RngSeed::Fixed(seed),
         rng_algorithm: RngAlgorithm::ChaCha,
         max_shrink_time: 30_000,
-        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(
-            "proptest-regressions/oracle.txt",
-        ))),
+        failure_persistence: std::env::var_os("PROPTEST_DISABLE_FAILURE_PERSISTENCE")
+            .is_none()
+            .then(|| {
+                Box::new(FileFailurePersistence::Direct(
+                    "proptest-regressions/oracle.txt",
+                )) as Box<dyn proptest::test_runner::FailurePersistence>
+            }),
         ..ProptestConfig::default()
     }
 }
@@ -171,6 +214,30 @@ fn apply(scratch: &Scratch, op: &Op) {
         }
         // A path gone from the disk and the index stages nothing, and git
         // says so by failing.
+        Op::Move {
+            from,
+            to,
+            keep,
+            seed,
+        } => {
+            if from != to {
+                if let Some(lines) = lines_of(from) {
+                    let moved: Vec<String> = lines
+                        .iter()
+                        .enumerate()
+                        .map(|(at, line)| {
+                            if at % 12 < usize::from(keep) {
+                                line.clone()
+                            } else {
+                                text_line(seed, at + 300)
+                            }
+                        })
+                        .collect();
+                    let _ = std::fs::remove_file(scratch.path_of(NAMES[from]));
+                    write_lines(to, &moved);
+                }
+            }
+        }
         Op::Stage { file } => {
             scratch.git_may_fail(&["add", "-A", "--", NAMES[file]]);
         }
