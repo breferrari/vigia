@@ -3316,6 +3316,7 @@ fn pictures_first_draw_large() {
             support::screen_png(200),
             Rect::new(0, 0, 300, 100),
             Some((20, 40)),
+            false,
         )
     };
     let (mut kitty, mut halfblocks) = (Duration::MAX, Duration::MAX);
@@ -3357,6 +3358,7 @@ fn first_draw_table() {
                 support::screen_png(200),
                 Rect::new(0, 0, width, height),
                 Some(cell),
+                false,
             );
             eprintln!(
                 "table: {protocol:?} {width}x{height} pane, {}x{} cell, {sent} bytes sent, first draw {first:?}",
@@ -3730,12 +3732,20 @@ fn pdf_cold_paint(scratch: &Scratch, pane: Rect) -> (usize, u64, Duration, Durat
 }
 
 fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<u8>) {
-    pictures_frame_at(protocol, path, old, new, Rect::new(0, 0, 120, 40), None);
+    pictures_frame_at(
+        protocol,
+        path,
+        old,
+        new,
+        Rect::new(0, 0, 120, 40),
+        None,
+        true,
+    );
 }
 
 /// [`pictures_frame_of`] on a pane of `pane`, at `cell` pixels a cell, or the
-/// picker's own. The bytes the first frame's uploads carry and that frame's
-/// time, for a table.
+/// picker's own, its settled frames gated only when `settled`. The bytes the
+/// first frame's uploads carry and that frame's thread time, for a table.
 fn pictures_frame_at(
     protocol: ProtocolType,
     path: &str,
@@ -3743,6 +3753,7 @@ fn pictures_frame_at(
     new: Vec<u8>,
     pane: Rect,
     cell: Option<vigia::pictures::Cell>,
+    settled: bool,
 ) -> (usize, Duration) {
     use vigia::pictures::{self, Inks, Pictures};
 
@@ -3826,8 +3837,14 @@ fn pictures_frame_at(
         building.elapsed()
     );
     // The frame that first draws them, once their uploads are written.
-    let (view, first, _) =
-        timed_cpu(|| paint(&mut frame, &mut app, &mut highlighter, &mut pictures));
+    let (view, first) = {
+        // Alone on the machine and on its own thread's clock, so a parallel
+        // test's work is not counted in it.
+        let _timed = exclusively_timed();
+        let (view, _, cpu) =
+            timed_cpu(|| paint(&mut frame, &mut app, &mut highlighter, &mut pictures));
+        (view, cpu)
+    };
     eprintln!(
         "note: the first frame to draw them on a {}x{} pane took {first:?}, its uploads {} bytes",
         pane.width,
@@ -3869,6 +3886,9 @@ fn pictures_frame_at(
     );
 
     if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return (sent.get(), first);
+    }
+    if !settled {
         return (sent.get(), first);
     }
     let _timed = exclusively_timed();

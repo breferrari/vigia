@@ -82,19 +82,6 @@ pub struct Upload {
 /// How long uploads may wait behind frames before the oldest shares their turns.
 const STARVED: Duration = Duration::from_secs(1);
 
-/// How much of the terminal's time the uploads queued ahead of it may take.
-const CREDIT_TIME: Duration = Duration::from_millis(8);
-
-/// The least and most credit, so a wrong estimate of the drain stays bounded.
-const CREDIT_FLOOR: usize = 16 * 1024;
-const CREDIT_CEILING: usize = 1024 * 1024;
-
-/// The fewest bytes one write must carry for its time to count toward the drain.
-const DRAIN_SAMPLE: usize = 1024;
-
-/// How much of the drain rate one new write's measure moves.
-const DRAIN_WEIGHT: f64 = 0.2;
-
 /// The longest one wait for room to write lasts, so a stop is noticed this soon.
 const POLL: Duration = Duration::from_millis(50);
 
@@ -149,10 +136,6 @@ struct Shared {
     abandon: AtomicBool,
     /// The size of the last frame handed over.
     last: AtomicUsize,
-    /// Upload bytes handed over and not yet written.
-    graphics: AtomicUsize,
-    /// What the terminal takes, in bytes a second, averaged over writes.
-    drain: AtomicU64,
 }
 
 impl Shared {
@@ -233,30 +216,33 @@ impl Lanes {
             .any(|graphic| matches!(graphic, Graphic::Upload(..)))
     }
 
-    fn take(&mut self, job: Job, shared: &Shared) {
+    fn take(&mut self, job: Job) {
         match job {
             Job::Frame(bytes) => self.text.push_back(bytes),
             Job::Upload(upload) if !self.stopping && !upload.ends.is_empty() => {
                 self.graphics.push_back(Graphic::Upload(upload, 0));
             }
-            Job::Upload(upload) => {
-                shared
-                    .graphics
-                    .fetch_sub(upload.data.len(), Ordering::AcqRel);
-            }
+            Job::Upload(_) => {}
             Job::Delete { id, bytes } => {
-                self.cancel(|of| of == id, shared);
-                self.graphics.push_back(Graphic::Raw(bytes));
+                self.cancel(|of| of == id);
+                // Ahead of the uploads not yet begun, so a picture that left
+                // the screen waits for the image open at most.
+                let at = self
+                    .graphics
+                    .iter()
+                    .position(|graphic| matches!(graphic, Graphic::Upload(_, 0)))
+                    .unwrap_or(self.graphics.len());
+                self.graphics.insert(at, Graphic::Raw(bytes));
             }
             Job::Stop => {
                 self.stopping = true;
-                self.cancel(|_| true, shared);
+                self.cancel(|_| true);
             }
         }
     }
 
     /// Drop the uploads `which` names; one part sent is closed in its place.
-    fn cancel(&mut self, which: impl Fn(u32) -> bool, shared: &Shared) {
+    fn cancel(&mut self, which: impl Fn(u32) -> bool) {
         self.graphics.retain_mut(|graphic| {
             let Graphic::Upload(upload, sent) = graphic else {
                 return true;
@@ -264,10 +250,6 @@ impl Lanes {
             if !which(upload.id) {
                 return true;
             }
-            let from = upload.written_to(*sent);
-            shared
-                .graphics
-                .fetch_sub(upload.data.len() - from, Ordering::AcqRel);
             if *sent == 0 {
                 return false;
             }
@@ -300,7 +282,7 @@ impl Lanes {
                 self.starved_since = Some(Instant::now());
             }
             self.chunk_owed = starved;
-            timed_out(out, &frame, shared, &mut |written| {
+            write_out(out, &frame, shared, &mut |written| {
                 shared.wrote(written, wakes);
             })?;
             return Ok(true);
@@ -329,12 +311,12 @@ impl Lanes {
                 }
                 let from = upload.written_to(*sent);
                 let to = upload.ends[*sent];
-                timed_out(out, &upload.data.as_bytes()[from..to], shared, &mut |_| {})?;
+                write_out(out, &upload.data.as_bytes()[from..to], shared, &mut |_| {})?;
                 if !chunk_turn {
                     // It moved in a gap between frames, so it was not starved.
                     (self.starved_since, self.chunk_owed) = (None, false);
                 }
-                shared.graphics.fetch_sub(to - from, Ordering::AcqRel);
+
                 *sent += 1;
                 if *sent == upload.ends.len() && !shared.stopping() {
                     (self.starved_since, self.chunk_owed) = (None, false);
@@ -384,7 +366,7 @@ impl Writer {
                         jobs.try_recv().ok()
                     };
                     if let Some(job) = job {
-                        lanes.take(job, &theirs);
+                        lanes.take(job);
                         continue;
                     }
                     if theirs.stopping() {
@@ -411,22 +393,6 @@ impl Writer {
             shared: Arc::clone(&self.shared),
             pending: Vec::new(),
         }
-    }
-
-    /// Upload bytes handed over and not yet written.
-    pub fn graphics_queued(&self) -> usize {
-        self.shared.graphics.load(Ordering::Acquire)
-    }
-
-    /// How many upload bytes may be queued ahead of the terminal: what it
-    /// drains in [`CREDIT_TIME`], within the floor and the ceiling.
-    pub fn credit(&self) -> usize {
-        let rate = f64::from_bits(self.shared.drain.load(Ordering::Acquire));
-        if rate == 0.0 {
-            // It has never made a write wait, so it keeps up.
-            return CREDIT_CEILING;
-        }
-        ((rate * CREDIT_TIME.as_secs_f64()) as usize).clamp(CREDIT_FLOOR, CREDIT_CEILING)
     }
 
     /// The size of the last frame handed over.
@@ -527,11 +493,7 @@ impl Sink {
     ///
     /// The writer has stopped.
     pub fn upload(&mut self, upload: Upload) -> io::Result<()> {
-        let len = upload.data.len();
-        self.shared.graphics.fetch_add(len, Ordering::AcqRel);
-        self.job(Job::Upload(upload)).inspect_err(|_| {
-            self.shared.graphics.fetch_sub(len, Ordering::AcqRel);
-        })
+        self.job(Job::Upload(upload))
     }
 
     /// Delete image `id` with `bytes`, after cancelling its upload: what is
@@ -592,59 +554,33 @@ pub trait Out {
     fn write_some(&mut self, bytes: &[u8], wait: Duration) -> io::Result<usize>;
 }
 
-/// [`write_out`], its time folded into the drain rate when the terminal made
-/// it wait: a write the kernel takes at once says nothing of the terminal.
-fn timed_out(
-    out: &mut impl Out,
-    bytes: &[u8],
-    shared: &Shared,
-    count: &mut dyn FnMut(usize),
-) -> io::Result<()> {
-    let began = Instant::now();
-    let waited = write_out(out, bytes, shared, count)?;
-    let took = began.elapsed().as_secs_f64();
-    if waited && bytes.len() >= DRAIN_SAMPLE && took > 0.0 {
-        let rate = bytes.len() as f64 / took;
-        let before = f64::from_bits(shared.drain.load(Ordering::Acquire));
-        let after = if before == 0.0 {
-            rate
-        } else {
-            before * (1.0 - DRAIN_WEIGHT) + rate * DRAIN_WEIGHT
-        };
-        shared.drain.store(after.to_bits(), Ordering::Release);
-    }
-    Ok(())
-}
-
-/// Write all of `bytes` in pieces, counting each as it goes, unless told to
-/// stop. `true` if the terminal ever had less room than a piece.
+/// Write all of `bytes` in pieces, counting each as it goes, unless told to stop.
 fn write_out(
     out: &mut impl Out,
     bytes: &[u8],
     shared: &Shared,
     count: &mut dyn FnMut(usize),
-) -> io::Result<bool> {
+) -> io::Result<()> {
     let mut rest = bytes;
-    let mut waited = false;
     while !rest.is_empty() {
         // Marked before the check, so `poison` either stops this write or waits for it.
         WRITING.store(true, Ordering::SeqCst);
         if shared.stopping() {
             WRITING.store(false, Ordering::SeqCst);
             count(rest.len());
-            return Ok(waited);
+            return Ok(());
         }
         let piece = &rest[..rest.len().min(PIECE)];
         let written = out.write_some(piece, POLL);
         WRITING.store(false, Ordering::SeqCst);
         let written = written?;
-        waited |= written < piece.len();
+
         if written > 0 {
             count(written);
             rest = &rest[written..];
         }
     }
-    Ok(waited)
+    Ok(())
 }
 
 /// The terminal standard output names, opened again for this process alone.
@@ -1020,8 +956,8 @@ mod tests {
     #[test]
     fn lane_order() {
         // Text first; a chunk written whole; text only between chunks; a
-        // delete queued behind an image after its last chunk; the upload
-        // reported once whole.
+        // delete queued while an image is open after its last chunk; the
+        // upload reported once whole.
         let out = Taken::default();
         let (tx, rx) = mpsc::channel();
         let writer = Writer::start(
@@ -1041,12 +977,13 @@ mod tests {
         };
         let first = upload.ends[0];
         sink.upload(upload).expect("upload");
-        sink.delete(8, b"<delete>".to_vec()).expect("delete");
         sink.write_all(b"<frame1>").expect("write");
         sink.flush().expect("flush");
         // Room for the frame and the first chunk, then none: the second chunk waits.
         out.room.store(8 + first, Ordering::Release);
         taken_len(&out, 8 + first);
+        // Once the image is open: the delete waits for its last chunk.
+        sink.delete(8, b"<delete>".to_vec()).expect("delete");
         sink.write_all(b"<frame2>").expect("write");
         sink.flush().expect("flush");
         std::thread::sleep(Duration::from_millis(20));
@@ -1231,56 +1168,6 @@ mod tests {
         (writer, sink)
     }
 
-    /// A terminal that takes `piece` bytes a write, one write a millisecond.
-    struct Trickle {
-        piece: usize,
-    }
-
-    impl Out for Trickle {
-        fn write_some(&mut self, bytes: &[u8], _: Duration) -> io::Result<usize> {
-            std::thread::sleep(Duration::from_millis(1));
-            Ok(bytes.len().min(self.piece))
-        }
-    }
-
-    #[test]
-    fn credit_measured() {
-        // A terminal that never makes a write wait keeps up, so the credit is
-        // the ceiling; one that takes 512 bytes a millisecond drains about
-        // 512 KB a second, so the credit falls to the floor.
-        let fast = Taken::default();
-        fast.room.store(usize::MAX, Ordering::Release);
-        let writer = Writer::start(fast, Wakes::none());
-        let mut sink = writer.sink();
-        sink.write_all(&[b'f'; 64 * 1024]).expect("write");
-        sink.flush().expect("flush");
-        assert!(
-            writer.drain(Duration::from_secs(5)),
-            "the frame was not written"
-        );
-        assert_eq!(
-            writer.credit(),
-            CREDIT_CEILING,
-            "a terminal that kept up was given less"
-        );
-        let writer = Writer::start(Trickle { piece: 512 }, Wakes::none());
-        let mut sink = writer.sink();
-        for _ in 0..4 {
-            sink.write_all(&[b'f'; 8 * 1024]).expect("write");
-            sink.flush().expect("flush");
-        }
-        assert!(
-            writer.drain(Duration::from_secs(5)),
-            "the frames were not written"
-        );
-        assert_eq!(
-            writer.credit(),
-            CREDIT_FLOOR,
-            "a slow terminal's credit is {}",
-            writer.credit()
-        );
-    }
-
     #[test]
     fn starvation_cap() {
         // Frames that keep a slow terminal busy: past the cap the upload still
@@ -1306,7 +1193,7 @@ mod tests {
     fn promoted_cancelled() {
         // Past the cap, the upload taking turns is deleted: the frames go on,
         // and the upload never finishes.
-        let (writer, mut sink) = slow_writer();
+        let (_writer, mut sink) = slow_writer();
         let (upload, held) = big_upload(41, 40, 4000);
         sink.write_all(&[b'f'; 8000]).expect("write");
         sink.flush().expect("flush");
@@ -1325,10 +1212,60 @@ mod tests {
             Duration::from_millis(300),
         );
         assert!(!held(), "a deleted upload was finished");
-        assert_eq!(
-            writer.graphics_queued(),
-            0,
-            "a deleted upload's bytes are still counted"
+    }
+
+    #[test]
+    fn clock_restarts() {
+        // A frame goes ahead of a waiting upload and arms the clock; a chunk
+        // that then goes in a gap between frames was not starved, and clears it.
+        let out = Taken::default();
+        out.room.store(usize::MAX, Ordering::Release);
+        let mut out = out;
+        let shared = Shared::default();
+        let wakes = Wakes::none();
+        let mut lanes = Lanes::default();
+        let (upload, _) = big_upload(51, 3, 100);
+        // As a sink counts them on the way in.
+        shared.unwritten.store(b"<frame>".len(), Ordering::Release);
+        lanes.take(Job::Upload(upload));
+        lanes.take(Job::Frame(b"<frame>".to_vec()));
+        lanes
+            .write_next(&mut out, &shared, &wakes)
+            .expect("the frame");
+        assert!(
+            lanes.starved_since.is_some(),
+            "a frame ahead of a waiting upload did not arm the clock"
+        );
+        lanes
+            .write_next(&mut out, &shared, &wakes)
+            .expect("a chunk");
+        assert!(
+            lanes.starved_since.is_none(),
+            "an upload that moved was still counted as starved"
+        );
+    }
+
+    #[test]
+    fn delete_jumps() {
+        // A delete goes after the image open, not behind the uploads waiting:
+        // a picture that left the screen waits for one image at most.
+        let out = Taken::default();
+        let writer = Writer::start(out.clone(), Wakes::none());
+        let mut sink = writer.sink();
+        let open = three_chunks(61);
+        let first = open.ends[0];
+        let open_data = open.data.to_string();
+        sink.upload(open).expect("upload");
+        out.room.store(first, Ordering::Release);
+        taken_len(&out, first);
+        sink.upload(three_chunks(62)).expect("upload");
+        sink.delete(63, b"<delete>".to_vec()).expect("delete");
+        std::thread::sleep(Duration::from_millis(20));
+        out.room.store(usize::MAX, Ordering::Release);
+        wait_for(&out, |taken| taken.len() > open_data.len() + 8);
+        assert!(
+            written(&out).starts_with(&format!("{open_data}<delete>")),
+            "the delete waited behind an upload not yet begun"
         );
     }
 

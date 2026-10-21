@@ -895,7 +895,7 @@ fn placed_after_upload() {
         picture_rows(&view).iter().all(|(_, built)| !built),
         "a Kitty picture drew before the terminal held it"
     );
-    let (uploads, _) = pane.pictures.uploads(usize::MAX, 0);
+    let (uploads, _) = pane.pictures.uploads();
     assert_eq!(uploads.len(), 3, "three uploads were not handed out");
     for upload in uploads {
         upload.ticket.written();
@@ -933,13 +933,13 @@ fn upload_stopped_away() {
         "the pictures were not built"
     );
     pane.unsent(&mut frame);
-    let (uploads, _) = pane.pictures.uploads(usize::MAX, 0);
+    let (uploads, _) = pane.pictures.uploads();
     let ids: Vec<u32> = uploads.iter().map(|upload| upload.id).collect();
     assert_eq!(ids.len(), 3, "three uploads were not handed out");
 
     pane.scroll(&mut frame, 150);
     pane.unsent(&mut frame);
-    let (again, mut stopped) = pane.pictures.uploads(usize::MAX, 0);
+    let (again, mut stopped) = pane.pictures.uploads();
     stopped.sort_unstable();
     let mut sorted = ids.clone();
     sorted.sort_unstable();
@@ -954,7 +954,7 @@ fn upload_stopped_away() {
 
     pane.scroll(&mut frame, -150);
     pane.unsent(&mut frame);
-    let (back, stopped) = pane.pictures.uploads(usize::MAX, 0);
+    let (back, stopped) = pane.pictures.uploads();
     assert!(stopped.is_empty(), "an upload on screen was stopped");
     assert_eq!(
         back.len(),
@@ -998,32 +998,6 @@ fn ids_of(pane: &Pane, view: &View, path: &str) -> Vec<u32> {
 }
 
 #[test]
-fn credit_holds() {
-    // With credit for one image and one already with the writer, nothing more
-    // goes; with none held, the first goes alone though it is over the credit.
-    let (scratch, mut pane) = two_pictures("pictures-credit");
-    let worktree = scratch.worktree();
-    let mut frame = worktree.frame();
-    frame.advance().expect("advance");
-    built_unsent(&mut pane, &mut frame);
-    let (first, _) = pane.pictures.uploads(1, 0);
-    assert_eq!(
-        first.len(),
-        1,
-        "with nothing held, one upload did not go alone"
-    );
-    let held = first[0].data.len();
-    let (more, _) = pane.pictures.uploads(held * 2, held);
-    assert!(
-        more.len() <= 1,
-        "{} uploads went beside one held, within credit for two",
-        more.len()
-    );
-    let (none, _) = pane.pictures.uploads(held, held);
-    assert!(none.is_empty(), "an upload went past the credit");
-}
-
-#[test]
 fn screen_order() {
     // Of two pictures waiting, the one higher on the screen goes first.
     let (scratch, mut pane) = two_pictures("pictures-order");
@@ -1036,7 +1010,7 @@ fn screen_order() {
         !top.is_empty() && !below.is_empty(),
         "both pictures were not on screen"
     );
-    let (first, _) = pane.pictures.uploads(1, 0);
+    let (first, _) = pane.pictures.uploads();
     assert!(
         top.contains(&first[0].id),
         "the lower picture went first: {} not among {top:?}",
@@ -1180,7 +1154,7 @@ fn kitty_kept_off_screen() {
         "an image off screen was deleted"
     );
     assert!(
-        pane.pictures.uploads(usize::MAX, 0).1.is_empty(),
+        pane.pictures.uploads().1.is_empty(),
         "an image written whole was stopped when it scrolled off"
     );
     assert_eq!(

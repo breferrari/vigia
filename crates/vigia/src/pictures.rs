@@ -1024,7 +1024,7 @@ impl Pictures {
     /// written whole at once.
     #[doc(hidden)]
     pub fn written_at_once(&mut self) -> Vec<crate::writer::Upload> {
-        let (mut uploads, _) = self.uploads(usize::MAX, 0);
+        let (mut uploads, _) = self.uploads();
         for upload in &mut uploads {
             upload.ticket.written();
         }
@@ -1052,14 +1052,8 @@ impl Pictures {
     }
 
     /// The uploads of on-screen Kitty images to hand the writer, top first,
-    /// while they fit `credit` beside the `queued` bytes it already holds, or
-    /// the first alone when it holds none; and the images off screen whose
-    /// upload has to stop.
-    pub fn uploads(
-        &mut self,
-        credit: usize,
-        queued: usize,
-    ) -> (Vec<crate::writer::Upload>, Vec<u32>) {
+    /// and the images off screen whose upload has to stop.
+    pub fn uploads(&mut self) -> (Vec<crate::writer::Upload>, Vec<u32>) {
         let Ok(shown) = self.shown.lock() else {
             return (Vec::new(), Vec::new());
         };
@@ -1078,25 +1072,13 @@ impl Pictures {
             }
         }
         let mut uploads = Vec::new();
-        let mut held = queued;
-        'screen: for key in &self.order {
+        for key in &self.order {
             let Some(ready) = self.built.get(key) else {
                 continue;
             };
             for (_, panel) in &ready.0.panels {
-                let Panel::Kitty(image) = panel else {
-                    continue;
-                };
-                if !image.waits() {
-                    continue;
-                }
-                let size = image.wire_len();
-                if held > 0 && held + size > credit {
-                    break 'screen;
-                }
-                if let Some(upload) = image.upload() {
-                    held += size;
-                    uploads.push(upload);
+                if let Panel::Kitty(image) = panel {
+                    uploads.extend(image.upload());
                 }
             }
         }

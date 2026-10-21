@@ -1260,9 +1260,7 @@ impl Shell {
     /// those that left it. A stopped one is deleted, since the terminal may
     /// hold part of it.
     fn write_uploads(&mut self) {
-        let writer = self.session.writer();
-        let (credit, queued) = (writer.credit(), writer.graphics_queued());
-        let (uploads, stopped) = self.pictures.uploads(credit, queued);
+        let (uploads, stopped) = self.pictures.uploads();
         self.delete_images(stopped);
         for upload in uploads {
             let _ = self.session.upload(upload);
