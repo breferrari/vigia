@@ -19,7 +19,7 @@ use vigia_core::{ChangeKind, ChangeOptions, FileChange, LineKind, Origin, Worktr
 
 /// The paths a case can touch: ASCII, two directories, none equal to another
 /// but for case.
-const NAMES: [&str; 12] = [
+const NAMES: [&str; 15] = [
     "d0/a.txt",
     "d0/b.txt",
     "d0/c.rs",
@@ -28,15 +28,18 @@ const NAMES: [&str; 12] = [
     "d1/f.bin",
     "d1/g.txt",
     "d1/h.txt",
+    "d0/same.txt",
     "d0/new.txt",
     "d0/moved.bin",
     "d1/other.txt",
     "d1/later.rs",
+    "d1/same.txt",
+    "d2/same.txt",
 ];
 
 /// The first `BASE` names are committed in the base; the rest exist only
 /// once an operation writes them, so a move onto one is a rename.
-const BASE: usize = 8;
+const BASE: usize = 9;
 
 /// The attribute rules a case can write, the last removing the file.
 /// The one binary file in the base.
@@ -243,8 +246,9 @@ fn apply(scratch: &Scratch, op: &Op) {
         }
         Op::Rename { from, to } => {
             if from != to && scratch.path_of(NAMES[from]).exists() {
-                std::fs::rename(scratch.path_of(NAMES[from]), scratch.path_of(NAMES[to]))
-                    .expect("rename");
+                let target = scratch.path_of(NAMES[to]);
+                std::fs::create_dir_all(target.parent().expect("a parent")).expect("mkdir");
+                std::fs::rename(scratch.path_of(NAMES[from]), target).expect("rename");
             }
         }
         // A path gone from the disk and the index stages nothing, and git
