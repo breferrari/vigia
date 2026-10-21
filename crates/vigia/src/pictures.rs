@@ -672,8 +672,6 @@ static OFF_WORKER: AtomicU64 = AtomicU64::new(0);
 const WORKER: &str = "vigia-pictures";
 /// The thread that scores renames.
 const PAIRS: &str = "vigia-pairs";
-/// The most pairs remembered as sent: one for each score the record holds.
-const ASKED_KEPT: usize = vigia_core::PAIRS_KEPT;
 
 pub use vigia_core::{Stage, panic_next};
 
@@ -814,7 +812,7 @@ impl Pictures {
     pub fn score_pairs(&mut self, frame: &vigia_core::Frame<'_>) {
         // Begun again with the frame's scores, or a score it dropped is
         // never asked for again.
-        if self.epoch != frame.pair_epoch() || self.asked.len() >= ASKED_KEPT {
+        if self.epoch != frame.pair_epoch() || self.asked.len() >= frame.pairs_kept() {
             self.epoch = frame.pair_epoch();
             self.asked.clear();
         }

@@ -1086,6 +1086,11 @@ impl Worktree {
         self.pairs_kept.set(kept);
     }
 
+    /// The most scores the record holds.
+    pub(crate) fn pairs_kept(&self) -> usize {
+        self.pairs_kept.get()
+    }
+
     /// How many times the record dropped scores.
     pub(crate) fn pair_epoch(&self) -> u64 {
         self.pair_epoch.get()
@@ -2926,7 +2931,7 @@ const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 
 /// The most rename scores kept: git's whole matrix to about 360 by 360. Past
 /// it a pair shows as removed and added.
-pub const PAIRS_KEPT: usize = 131_072;
+const PAIRS_KEPT: usize = 131_072;
 
 /// The most blob sizes kept, one per side rather than per pair.
 const SIDES_KEPT: usize = 4096;

@@ -677,6 +677,12 @@ impl<'w> Frame<'w> {
         self.worktree.pair_epoch()
     }
 
+    /// The most rename scores the record holds, and so the most pairs the
+    /// worker need remember as sent.
+    pub fn pairs_kept(&self) -> usize {
+        self.worktree.pairs_kept()
+    }
+
     /// File a rename score the worker found, by its pair. The next advance
     /// pairs by it.
     pub fn learn_pair(&mut self, key: crate::PairKey, score: u64) {
