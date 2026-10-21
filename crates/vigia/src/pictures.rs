@@ -674,8 +674,6 @@ static OFF_WORKER: AtomicU64 = AtomicU64::new(0);
 const WORKER: &str = "vigia-pictures";
 /// The thread that scores renames.
 const PAIRS: &str = "vigia-pairs";
-/// The most pairs remembered as sent before the record starts again.
-const ASKED_KEPT: usize = 4096;
 
 pub use vigia_core::{Stage, panic_next};
 
@@ -817,12 +815,18 @@ impl Pictures {
     pub fn score_pairs(&mut self, frame: &vigia_core::Frame<'_>) {
         // Begun again with the frame's scores, or a score it dropped is
         // never asked for again.
-        if self.epoch != frame.pair_epoch() || self.asked.len() >= ASKED_KEPT {
+        if self.epoch != frame.pair_epoch() || self.asked.len() >= frame.pairs_kept() {
             self.epoch = frame.pair_epoch();
             self.asked.clear();
         }
         for candidate in frame.unscored_pairs() {
             if self.asked.insert(candidate.key) {
+                // The record lists no pair past its size, and every score it
+                // drops moves the epoch, so the clear above is only a bound.
+                debug_assert!(
+                    self.asked.len() <= frame.pairs_kept(),
+                    "the worker holds more pairs sent than the record can score"
+                );
                 if self.pairs.send(candidate).is_err() {
                     return;
                 }

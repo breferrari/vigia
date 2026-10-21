@@ -25,7 +25,7 @@ on:
         type: string
         default: the_frame_budget_holds_through_a_bulk_rewrite
       target:
-        description: Integration test target (--test)
+        description: Integration test target (--test), or lib for the unit tests (--lib)
         type: string
         default: budgets
       jobs:
@@ -114,11 +114,13 @@ jobs:
           case "$iterations" in ''|*[!0-9]*) echo "iterations must be a positive integer" >&2; exit 1;; esac
           [ "$iterations" -ge 1 ] || { echo "iterations must be >= 1" >&2; exit 1; }
 
+          if [ "$IN_TARGET" = lib ]; then set -- --lib; else set -- --test "$IN_TARGET"; fi
+
           fail=0
           mkdir -p failures
           for i in $(seq 1 "$iterations"); do
             passed=true
-            cargo test --release --test "$IN_TARGET" \
+            cargo test --release "$@" \
               "$IN_TEST" -- --exact --nocapture > "failures/run-$i.log" 2>&1 || passed=false
             sh .github/scripts/tests-ran.sh "failures/run-$i.log" "$IN_TARGET" "$IN_TEST" || exit 1
             if "$passed"; then

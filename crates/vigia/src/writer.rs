@@ -972,6 +972,23 @@ mod tests {
     }
 
     #[test]
+    fn text_first() {
+        // An upload queued before a frame: the frame goes first.
+        let mut out = Taken::default();
+        out.room.store(usize::MAX, Ordering::Release);
+        let shared = Shared::default();
+        let mut lanes = Lanes::default();
+        lanes.take(Job::Upload(three_chunks(9)));
+        // As a sink counts it on the way in.
+        shared.unwritten.store(b"<frame>".len(), Ordering::Release);
+        lanes.take(Job::Frame(b"<frame>".to_vec()));
+        lanes
+            .write_next(&mut out, &shared, &Wakes::none())
+            .expect("a turn");
+        assert_eq!(written(&out), "<frame>", "a chunk went ahead of a frame");
+    }
+
+    #[test]
     fn lane_order() {
         // Text first; a chunk written whole; text only between chunks; a
         // delete queued while an image is open after its last chunk; the
@@ -994,9 +1011,11 @@ mod tests {
             ..three_chunks(7)
         };
         let first = upload.ends[0];
-        sink.upload(upload).expect("upload");
+        // The frame queued first: a chunk the writer has begun is written
+        // whole, so a frame queued after it waits for it.
         sink.write_all(b"<frame1>").expect("write");
         sink.flush().expect("flush");
+        sink.upload(upload).expect("upload");
         // Room for the frame and the first chunk, then none: the second chunk waits.
         out.room.store(8 + first, Ordering::Release);
         taken_len(&out, 8 + first);

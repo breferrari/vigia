@@ -1478,6 +1478,78 @@ fn rename_frame_many_small() {
     );
 }
 
+/// A hundred-file refactor, the old files removed only when `moved`.
+fn refactor_repo(name: &str, moved: bool) -> Scratch {
+    let (files, written) = support::refactor_files(100);
+    let scratch = Scratch::new(name);
+    for (path, bytes) in &files {
+        scratch.write(path, bytes);
+    }
+    scratch.commit_all("initial");
+    for (path, _) in &files {
+        if moved {
+            std::fs::remove_file(scratch.path_of(path)).expect("remove");
+        }
+    }
+    for (path, bytes) in &written {
+        scratch.write(path, bytes);
+    }
+    scratch
+}
+
+/// I9 over each frame of a hundred-file move until every pair is scored, by
+/// its slowest frame, against the same files where nothing moved.
+#[test]
+fn rename_frame_refactor() {
+    let moved = refactor_repo("budget-rename-refactor", true);
+    let plain = refactor_repo("budget-rename-refactor-plain", false);
+    let cold = |scratch: &Scratch| {
+        let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
+        let mut frame = worktree.frame();
+        let mut slowest = (Duration::ZERO, Duration::ZERO);
+        for frames in 1.. {
+            let took = time_cpu(|| frame.advance().expect("advance"));
+            if took.0 > slowest.0 {
+                slowest = took;
+            }
+            let listed = frame.unscored_pairs();
+            if listed.is_empty() && frame.settles_in(std::time::SystemTime::now()).is_none() {
+                break;
+            }
+            for candidate in listed {
+                frame.learn_pair(candidate.key, vigia_core::candidate_score(&candidate));
+            }
+            assert!(frames < 80, "the move still wakes after {frames} frames");
+        }
+        slowest
+    };
+    cold(&moved);
+    cold(&plain);
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
+    for _ in 0..LFS_FRAMES {
+        with.push(cold(&moved).0);
+        without.push(cold(&plain).0);
+    }
+    let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
+    eprintln!(
+        "rename refactor: slowest frame p50 {:?} p99 {:?}, without p50 {:?} p99 {:?}",
+        at(&with, 0.5),
+        at(&with, 0.99),
+        at(&without, 0.5),
+        at(&without, 0.99)
+    );
+    holds_p99(
+        "I9: each frame of a hundred similar files moved",
+        budget(I9_FRAME),
+        &with,
+        String::new,
+        || cold(&moved),
+    );
+}
+
 /// Code lines in the fenced block.
 const FENCE_LINES: usize = 24;
 /// Frames sampled for the fence gate.
@@ -1554,5 +1626,85 @@ fn fenced_markdown_budget() {
         &fence,
         String::new,
         || redraw(&mut frame, &mut highlighter, "notes.md"),
+    );
+}
+
+/// Removals and additions with nothing in common, as many as git's rename
+/// limit allows on each side.
+const UNPAIRED: usize = 1_000;
+/// Frames timed on each side of the ratchet.
+const UNPAIRED_FRAMES: usize = 15;
+
+/// A frame after `UNPAIRED` removals and additions of nothing in common, as
+/// text or as binary.
+fn unpaired_frame(scratch: &Scratch, binary: bool) {
+    let body = |seed: usize| -> Vec<u8> {
+        let text: String = (0..40)
+            .map(|line| format!("{seed:05} {line:02} {}\n", "x".repeat(seed % 7 + line % 5)))
+            .collect();
+        let mut bytes = text.into_bytes();
+        if binary {
+            bytes.push(0);
+        }
+        bytes
+    };
+    for i in 0..UNPAIRED {
+        scratch.write(&format!("old/{i:04}.dat"), body(i));
+    }
+    scratch.commit_all("initial");
+    for i in 0..UNPAIRED {
+        scratch.remove(&format!("old/{i:04}.dat"));
+        scratch.write(&format!("new/{i:04}.dat"), body(UNPAIRED + i * 13));
+    }
+}
+
+/// A ratchet, not I9: weighing unpaired text costs no more than weighing the
+/// same number of binary files, which every release has weighed. At this size
+/// neither holds I9; that absolute gate is the open issue on weighing rename
+/// candidates without the full matrix every walk.
+#[test]
+fn unpaired_text_ratchet() {
+    let (text, binary) = (
+        Scratch::new("budget-unpaired-text"),
+        Scratch::new("budget-unpaired-binary"),
+    );
+    unpaired_frame(&text, false);
+    unpaired_frame(&binary, true);
+    let (text_tree, binary_tree) = (text.worktree(), binary.worktree());
+    let (mut text_frame, mut binary_frame) = (text_tree.frame(), binary_tree.frame());
+    text_frame.advance().expect("advance");
+    binary_frame.advance().expect("advance");
+    assert_eq!(
+        text_frame.files().len(),
+        2 * UNPAIRED,
+        "the text fixture paired something"
+    );
+    assert_eq!(
+        binary_frame.files().len(),
+        2 * UNPAIRED,
+        "the binary fixture paired something"
+    );
+
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    // Interleaved, so a machine that slows down slows both.
+    let (mut on_text, mut on_binary) =
+        (Samples::new(UNPAIRED_FRAMES), Samples::new(UNPAIRED_FRAMES));
+    for _ in 0..UNPAIRED_FRAMES {
+        on_text.push(time(|| text_frame.advance().expect("advance")));
+        on_binary.push(time(|| binary_frame.advance().expect("advance")));
+    }
+    let median = |samples: &Samples| samples.percentile(0.5).expect("samples");
+    eprintln!(
+        "unpaired at {UNPAIRED} x {UNPAIRED}: text p50 {:?}, binary p50 {:?}",
+        median(&on_text),
+        median(&on_binary)
+    );
+    assert!(
+        median(&on_text).as_secs_f64() <= median(&on_binary).as_secs_f64() * 1.25,
+        "a frame over unpaired text took {:?} at p50 where binary took {:?}",
+        median(&on_text),
+        median(&on_binary)
     );
 }

@@ -643,7 +643,13 @@ impl<'repo> Watcher<'repo> {
         }
         // A git-dir event comes back as `.git`, which `followable` never follows.
         if let Some(inside) = within(&self.git_dir, path) {
-            let watched = if inside == Path::new("index") {
+            // A directory on the way to the store: inotify watches a new one only
+            // once it exists, so files made in it first send no event.
+            let toward_store = !inside.as_os_str().is_empty()
+                && self.store.iter().any(|spelling| spelling.starts_with(path));
+            let watched = if toward_store {
+                true
+            } else if inside == Path::new("index") {
                 self.index.moved()
             } else {
                 self.reload_due |= inside == Path::new("config");
@@ -1100,15 +1106,9 @@ mod tests {
     /// A repository using LFS whose store, with its `objects`, sits outside it:
     /// the directory holding both, the worktree and the store.
     fn outside_store(name: &str) -> (Removed, PathBuf, PathBuf) {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos());
-        let base = Removed(
-            std::env::temp_dir().join(format!("vigia-{name}-{}-{stamp}", std::process::id())),
-        );
-        let (tree, store) = (base.0.join("tree"), base.0.join("store"));
+        let (base, tree) = fresh_repo(name);
+        let store = base.0.join("store");
         std::fs::create_dir_all(store.join("objects")).expect("store");
-        std::fs::create_dir_all(&tree).expect("tree");
         let git = |args: &[&str]| {
             let out = std::process::Command::new("git")
                 .arg("-C")
@@ -1118,7 +1118,6 @@ mod tests {
                 .expect("run git");
             assert!(out.status.success(), "git {args:?}");
         };
-        git(&["init", "-q"]);
         git(&["config", "lfs.storage", &store.to_string_lossy()]);
         std::fs::create_dir_all(tree.join(".git").join("info")).expect("info");
         std::fs::write(tree.join(".git/info/attributes"), "*.png filter=lfs\n")
@@ -1154,6 +1153,89 @@ mod tests {
             .ok()
             .and_then(|secs| secs.parse().ok())
             .map_or(guard, |secs| guard.min(Duration::from_secs(secs)))
+    }
+
+    /// An empty repository, removed when the test ends: the directory holding
+    /// it, and its worktree.
+    fn fresh_repo(name: &str) -> (Removed, PathBuf) {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let base = Removed(
+            std::env::temp_dir().join(format!("vigia-{name}-{}-{stamp}", std::process::id())),
+        );
+        let tree = base.0.join("tree");
+        std::fs::create_dir_all(&tree).expect("tree");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&tree)
+            .args(["init", "-q"])
+            .output()
+            .expect("run git");
+        assert!(out.status.success(), "git init");
+        (base, tree)
+    }
+
+    /// A store inside the git dir, appearing whole in one burst: inotify
+    /// watches each new directory only after it exists, so the burst can leave
+    /// only the first directory's own event. That event ticks.
+    #[test]
+    fn store_ancestor_ticks() {
+        let (_base, tree) = fresh_repo("store-ancestor");
+        let repo = gix::open(&tree).expect("open");
+        let mut watcher = watch_with(&tree, &repo, |backend, path, mode| {
+            backend.watch(path, mode)
+        });
+        let created = |path: PathBuf| {
+            Message::Event(Box::new(
+                notify::Event::new(EventKind::Create(notify::event::CreateKind::Folder))
+                    .add_path(path),
+            ))
+        };
+        let git = tree.join(".git");
+        let lfs = watcher
+            .accept(created(git.join("lfs")))
+            .expect("not a stop");
+        assert!(lfs.relevant, "the store's first directory did not tick");
+        let elsewhere = watcher
+            .accept(created(git.join("hooks").join("x")))
+            .expect("not a stop");
+        assert!(
+            !elsewhere.relevant,
+            "a directory off the store's path ticked"
+        );
+        let tmp = watcher
+            .accept(created(git.join("lfs").join("tmp")))
+            .expect("not a stop");
+        assert!(!tmp.relevant, "the store's download directory ticked");
+        let itself = watcher.accept(created(git)).expect("not a stop");
+        assert!(!itself.relevant, "the git dir's own event ticked");
+    }
+
+    /// The same burst in the worktree, which already holds: `a`'s event alone
+    /// ticks, and a status walk finds `a/b/c/f` with no event of its own.
+    #[test]
+    fn worktree_burst_found() {
+        let (_base, tree) = fresh_repo("tree-burst");
+        let repo = gix::open(&tree).expect("open");
+        let mut watcher = watch_with(&tree, &repo, |backend, path, mode| {
+            backend.watch(path, mode)
+        });
+        std::fs::create_dir_all(tree.join("a/b/c")).expect("dirs");
+        std::fs::write(tree.join("a/b/c/f"), "x\n").expect("file");
+        let event = Message::Event(Box::new(
+            notify::Event::new(EventKind::Create(notify::event::CreateKind::Folder))
+                .add_path(tree.join("a")),
+        ));
+        let accepted = watcher.accept(event).expect("not a stop");
+        assert!(accepted.relevant, "a new directory did not tick");
+        let worktree = crate::Worktree::discover(&tree).expect("discover");
+        let found: Vec<String> = worktree
+            .changes_of(crate::Origin::Unstaged, crate::ChangeOptions::default())
+            .expect("walk")
+            .map(|change| change.expect("change").path)
+            .collect();
+        assert_eq!(found, ["a/b/c/f"], "the walk missed the file");
     }
 
     /// A store arm that fails as a full inotify table does.

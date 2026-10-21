@@ -1,5 +1,6 @@
-//! A changed binary paired as a rename, by git's rule. `gix` never scores a
-//! pair with a binary side, so these pairs are scored here.
+//! A removal and an addition `gix` left unpaired, paired as a rename by git's
+//! rule: `gix` scores text by a line diff, where git counts shared chunks in
+//! any order, and never scores a binary side.
 
 use crate::picture::Sources;
 
@@ -7,6 +8,11 @@ use crate::picture::Sources;
 const MAX_SCORE: u64 = 60_000;
 /// Git's default threshold, 50%.
 const MINIMUM_SCORE: u64 = MAX_SCORE / 2;
+/// The most removals git weighs for one addition, its best by score.
+pub(crate) const CANDIDATES: usize = 4;
+/// Git's bar for a pair with the same file name on both sides, taken before
+/// any other: the threshold plus half of what is left above it.
+const BASENAME_SCORE: u64 = MINIMUM_SCORE + (MAX_SCORE - MINIMUM_SCORE) / 2;
 /// The most unpaired removals, and additions, scored against each other:
 /// git's default `diff.renameLimit`.
 pub(crate) const RENAME_LIMIT: usize = 1000;
@@ -16,8 +22,8 @@ pub(crate) const FRAME_BUDGET: u64 = 256 * 1024;
 /// What scoring one pair costs that budget beyond its sides' bytes, so a
 /// frame scores at most 256 pairs however small.
 pub(crate) const PAIR_COST: u64 = 1024;
-/// The least any read of a side costs that budget, a sniff's length, since
-/// what a small read costs is opening the file.
+/// The least any read of a side costs that budget, since what a small read
+/// costs is opening the file.
 pub(crate) const READ_COST: u64 = crate::hunk::BINARY_SNIFF_LEN as u64;
 /// The most pairs one frame lists for the worker.
 pub(crate) const LISTED_MAX: usize = (FRAME_BUDGET / PAIR_COST) as usize;
@@ -32,6 +38,9 @@ pub struct Candidate {
     pub key: PairKey,
     /// The removed side, then the added side.
     pub sides: Sources,
+    /// For an LFS file in the worktree, its score unless its bytes are the
+    /// removed side's object, which scores in full.
+    pub differ_score: Option<u64>,
 }
 
 /// Whether git scores a pair of these sizes at all: one whose sizes differ by
@@ -43,8 +52,7 @@ pub(crate) fn sizes_fit(a: u64, b: u64) -> bool {
 
 /// Git's similarity of `old` to `new`, on its scale of 60,000: the bytes of
 /// `old`'s chunks that `new` keeps, over the larger size. A chunk ends at a
-/// line feed or after 64 bytes. Zero when neither side is binary, a pair
-/// `gix` scored itself.
+/// line feed or after 64 bytes.
 pub fn pair_score(old: &[u8], new: &[u8]) -> u64 {
     Spans::of(old).score(&Spans::of(new))
 }
@@ -52,7 +60,6 @@ pub fn pair_score(old: &[u8], new: &[u8]) -> u64 {
 /// One side cut into git's chunks: how many bytes each chunk hash covers,
 /// sorted by hash, as git's `hash_chars` leaves them.
 pub(crate) struct Spans {
-    binary: bool,
     len: u64,
     counts: Vec<(u32, u64)>,
 }
@@ -60,7 +67,13 @@ pub(crate) struct Spans {
 impl Spans {
     /// `data`'s chunks. A text side drops the CR of a CRLF.
     pub(crate) fn of(data: &[u8]) -> Self {
-        let binary = crate::hunk::is_binary(data);
+        Self::of_side(data, false)
+    }
+
+    /// [`Spans::of`] for a side its attributes may make binary, as git's
+    /// `diff` attribute does, though its bytes read as text.
+    pub(crate) fn of_side(data: &[u8], unset: bool) -> Self {
+        let binary = unset || crate::hunk::is_binary(data);
         let mut hashes = Vec::new();
         let (mut first, mut second, mut length) = (0u32, 0u32, 0u64);
         for (at, &byte) in data.iter().enumerate() {
@@ -90,7 +103,6 @@ impl Spans {
             }
         }
         Self {
-            binary,
             len: data.len() as u64,
             counts,
         }
@@ -98,9 +110,6 @@ impl Spans {
 
     /// Git's score of this side, the old one, against `new`.
     pub(crate) fn score(&self, new: &Self) -> u64 {
-        if !self.binary && !new.binary {
-            return 0;
-        }
         let max = self.len.max(new.len);
         if !sizes_fit(self.len, new.len) {
             return 0;
@@ -128,6 +137,20 @@ fn hash(first: u32, second: u32) -> u32 {
 /// when either cannot be read.
 pub fn candidate_score(candidate: &Candidate) -> u64 {
     let read = |side: &Option<crate::picture::Source>| side.as_ref().and_then(|s| s.read());
+    if let Some(differ) = candidate.differ_score {
+        // Compared a chunk at a time, however large the object.
+        let same = || {
+            let old = candidate.sides.before.as_ref()?.file()?;
+            let new = candidate.sides.after.as_ref()?.file()?;
+            let len = std::fs::metadata(&new).ok()?.len();
+            crate::worktree::same_bytes(&old, &new, len)
+        };
+        return if same() == Some(true) {
+            MAX_SCORE
+        } else {
+            differ
+        };
+    }
     match (read(&candidate.sides.before), read(&candidate.sides.after)) {
         (Some(old), Some(new)) => pair_score(&old, &new),
         _ => 0,
@@ -137,4 +160,9 @@ pub fn candidate_score(candidate: &Candidate) -> u64 {
 /// Whether a score pairs.
 pub fn pairs(score: u64) -> bool {
     score >= MINIMUM_SCORE
+}
+
+/// Whether `score` pairs two sides by their shared file name, before the rest.
+pub(crate) fn pairs_by_name(score: u64) -> bool {
+    score >= BASENAME_SCORE
 }

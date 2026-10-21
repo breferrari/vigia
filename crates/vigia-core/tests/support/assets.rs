@@ -61,6 +61,29 @@ pub fn encoded(format: image::ImageFormat, width: u32, height: u32, seed: u8) ->
     encode_image(&gradient(width, height, seed), format)
 }
 
+/// Paths and their bytes.
+pub type Files = Vec<(String, Vec<u8>)>;
+
+/// A refactor of `n` similar `.rs` files of about 3 KB: each one's path and
+/// bytes before, then after it moved to another directory with a light edit.
+pub fn refactor_files(n: usize) -> (Files, Files) {
+    let body = |k: usize| -> String {
+        (0..60)
+            .map(|l| format!("fn item_{k}_{l}(x: u32) -> u32 {{ x + {l} }} // module {k}\n"))
+            .collect()
+    };
+    let before = (0..n)
+        .map(|k| (format!("old/m{k:04}.rs"), body(k).into_bytes()))
+        .collect();
+    let after = (0..n)
+        .map(|k| {
+            let edited = body(k).replacen("x + 3 ", "x + 33 ", 1) + "// moved\n";
+            (format!("new/n{k:04}.rs"), edited.into_bytes())
+        })
+        .collect();
+    (before, after)
+}
+
 /// `length` bytes of noise from `seed`, a NUL first, so each reads as
 /// binary and two seeds share no chunk.
 pub fn noise(seed: u64, length: usize) -> Vec<u8> {

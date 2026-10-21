@@ -677,6 +677,12 @@ impl<'w> Frame<'w> {
         self.worktree.pair_epoch()
     }
 
+    /// The most rename scores the record holds, and so the most pairs the
+    /// worker need remember as sent.
+    pub fn pairs_kept(&self) -> usize {
+        self.worktree.pairs_kept()
+    }
+
     /// File a rename score the worker found, by its pair. The next advance
     /// pairs by it.
     pub fn learn_pair(&mut self, key: crate::PairKey, score: u64) {
@@ -1134,6 +1140,7 @@ mod tests {
             // These unit tests are over [`reusable`], which does not consult it:
             // the field decides how a file is *read*, and nothing here reads one.
             maybe_symlink: false,
+            regular: true,
             mode_changed: false,
         }
     }
@@ -1147,6 +1154,7 @@ mod tests {
             before,
             after: after.map(Side::Blob),
             maybe_symlink: true,
+            regular: true,
             mode_changed: false,
         }
     }

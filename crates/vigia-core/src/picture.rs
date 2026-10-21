@@ -375,6 +375,23 @@ pub enum Source {
 }
 
 impl Source {
+    /// The file this side's bytes are in: the LFS object for a stored pointer.
+    pub(crate) fn file(&self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::File(path) => Some(path.clone()),
+            Self::Blob { git_dir, id, store } => {
+                let repo = gix::open(git_dir).ok()?;
+                let bytes = repo
+                    .find_object(*id)
+                    .ok()?
+                    .try_into_blob()
+                    .ok()?
+                    .take_data();
+                lfs_oid(&bytes).map(|oid| lfs_object(store, oid))
+            }
+        }
+    }
+
     /// This side's bytes, read on the calling thread. `None` when they cannot be.
     pub fn read(&self) -> Option<Vec<u8>> {
         match self {
@@ -516,6 +533,11 @@ pub(crate) fn lfs_oid(bytes: &[u8]) -> Option<&str> {
     }
     let oid = lines.find_map(|line| line.strip_prefix("oid sha256:"))?;
     (oid.len() == 64 && oid.bytes().all(|b| b.is_ascii_hexdigit())).then_some(oid)
+}
+
+/// The pointer git-lfs stores for the object `oid` of `size` bytes.
+pub(crate) fn lfs_pointer_text(oid: &str, size: u64) -> String {
+    format!("version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize {size}\n")
 }
 
 /// The object an LFS pointer names, and the size it records.

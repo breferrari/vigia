@@ -89,6 +89,14 @@ pub struct Worktree {
     lfs_wait: Cell<Option<std::time::SystemTime>>,
     /// Git's score for each pair of versions a walk weighed as a rename.
     pair_scores: RefCell<HashMap<rename::PairKey, DatedScore>>,
+    /// Whether each small worktree side under LFS is a pointer, by its stamp.
+    worktree_pointers: RefCell<HashMap<u64, bool>>,
+    /// The scores an LFS pair took without its object, by the object's path.
+    lfs_unfetched: RefCell<HashMap<rename::PairKey, PathBuf>>,
+    /// [`PAIRS_KEPT`], lower in a test that fills the record.
+    pairs_kept: Cell<usize>,
+    /// The scores a full record may drop this frame, found when first needed.
+    stale_keys: RefCell<Option<Vec<rename::PairKey>>>,
     /// Frames walked, which dates each score.
     pair_frame: Cell<u64>,
     /// Candidate bytes the current frame may still score.
@@ -101,8 +109,6 @@ pub struct Worktree {
     pairs_scored: Cell<u64>,
     /// Sides read to weigh or score them, for the same.
     side_reads: Cell<u64>,
-    /// Whether each side version a walk weighed is binary, by its stamp.
-    binaries: RefCell<HashMap<u64, bool>>,
     /// How many times `pair_scores` dropped scores.
     pair_epoch: Cell<u64>,
     /// Each blob's size, as the rename pass found it.
@@ -150,13 +156,16 @@ impl Worktree {
             lfs_wait: Cell::new(None),
             lfs: Cell::new(lfs),
             pair_scores: RefCell::new(HashMap::new()),
+            lfs_unfetched: RefCell::new(HashMap::new()),
+            worktree_pointers: RefCell::new(HashMap::new()),
+            pairs_kept: Cell::new(PAIRS_KEPT),
+            stale_keys: RefCell::new(None),
             pair_frame: Cell::new(0),
             pair_budget: Cell::new(rename::FRAME_BUDGET),
             unscored: RefCell::new(Vec::new()),
             pair_bytes: Cell::new(0),
             pairs_scored: Cell::new(0),
             side_reads: Cell::new(0),
-            binaries: RefCell::new(HashMap::new()),
             pair_epoch: Cell::new(0),
             blob_sizes: RefCell::new(HashMap::new()),
             sides_left: Cell::new(false),
@@ -226,7 +235,7 @@ impl Worktree {
         Ok(Inner::Collected(self.paired(walked).into_iter()))
     }
 
-    /// [`Worktree::unstaged`] before binaries are paired.
+    /// [`Worktree::unstaged`] before what `gix` left unpaired is paired.
     fn unstaged_lfs(&self, track_renames: bool) -> Result<Inner> {
         let walked = self.unstaged_walk(track_renames)?;
         if !self.lfs.get() {
@@ -277,10 +286,7 @@ impl Worktree {
         };
         // The attribute is asked fresh, and before a compare, so a file it no
         // longer names spends nothing; the cache holds only what the bytes say.
-        if !self
-            .with_filter(|filter| filter.diff_attribute(&change.path))
-            .is_ok_and(|(_, lfs)| lfs)
-        {
+        if !self.lfs_cleaned(&change.path) {
             return false;
         }
         let key = (print, id);
@@ -327,6 +333,41 @@ impl Worktree {
         self.lfs_budget.update(|v| v - size);
         self.lfs_compares.update(|v| v + 1);
         same_bytes(path, &object, size)
+    }
+
+    /// Git's score for an LFS file in the worktree, of `raw` bytes, against the
+    /// removed blob `old`: that of the pointer git would store, which names
+    /// `old`'s object only when the bytes are that object.
+    fn lfs_score(&self, old: &[u8], to: &FileChange, raw: u64) -> LfsScore {
+        let spans = rename::Spans::of_side(old, false);
+        let score = |oid: &str| {
+            let pointer = picture::lfs_pointer_text(oid, raw);
+            spans.score(&rename::Spans::of_side(pointer.as_bytes(), false))
+        };
+        let missed = || LfsScore::Scored(score(NO_OID));
+        let Some((oid, size)) = picture::lfs_pointer(old).filter(|&(_, size)| size == raw) else {
+            return missed();
+        };
+        // Git would hash the bytes; vigia has no SHA-256.
+        let object = match self.lfs_path(oid) {
+            Ok(object) => object,
+            Err(missing) => return LfsScore::Unfetched(score(NO_OID), missing),
+        };
+        if size > self.lfs_budget.get() {
+            return LfsScore::Worker(score(NO_OID));
+        }
+        self.lfs_budget.update(|v| v - size);
+        self.lfs_compares.update(|v| v + 1);
+        match same_bytes(&self.workdir.join(&to.path), &object, size) {
+            Some(true) => LfsScore::Scored(score(oid)),
+            _ => missed(),
+        }
+    }
+
+    /// Whether git cleans `path` through LFS.
+    fn lfs_cleaned(&self, path: &str) -> bool {
+        self.with_filter(|filter| filter.diff_attribute(path))
+            .is_ok_and(|(_, lfs)| lfs)
     }
 
     /// The object and size the blob `id` names when it is an LFS pointer, read
@@ -497,8 +538,8 @@ impl Worktree {
         })
     }
 
-    /// `changes` with each removal and addition `gix` left unpaired, where a
-    /// side is binary, paired by git's rule. A pair this frame cannot afford
+    /// `changes` with each removal and addition `gix` left unpaired paired by
+    /// git's rule. A pair this frame cannot afford
     /// to score is left unpaired and listed for the picture worker.
     fn paired(&self, mut changes: Vec<FileChange>) -> Vec<FileChange> {
         /// A removal and an addition weighed as one rename.
@@ -509,19 +550,44 @@ impl Worktree {
             sizes: (u64, u64),
             bytes: u64,
         }
-        let of_kind = |kind: ChangeKind| -> Vec<usize> {
+        let of_kind = |kinds: &[ChangeKind]| -> Vec<usize> {
             (0..changes.len())
-                .filter(|&at| changes[at].kind == kind)
+                .filter(|&at| kinds.contains(&changes[at].kind))
                 .collect()
         };
-        let (removed, added) = (of_kind(ChangeKind::Removed), of_kind(ChangeKind::Added));
-        // Within git's limit of removals times additions, and neither side
-        // past it alone, so a frame never sizes more than 1,000 of either.
-        if removed.is_empty()
-            || added.is_empty()
-            || removed.len() > rename::RENAME_LIMIT
-            || added.len() > rename::RENAME_LIMIT
-        {
+        // An intent-to-add file is an addition to `git diff`.
+        let (removed, added) = (
+            of_kind(&[ChangeKind::Removed]),
+            of_kind(&[ChangeKind::Added, ChangeKind::IntentToAdd]),
+        );
+        // Each side's file names, counted over every entry before the budget
+        // sizes any, as git counts them.
+        let name = |at: usize| changes[at].path.rsplit('/').next().unwrap_or_default();
+        let counted = |side: &[usize]| {
+            let mut counts: HashMap<&str, usize> = HashMap::new();
+            for &at in side {
+                *counts.entry(name(at)).or_default() += 1;
+            }
+            counts
+        };
+        let (removed_names, added_names) = (counted(&removed), counted(&added));
+        // A file name held by one removal and one addition, which git pairs first.
+        let shared = |at: usize| {
+            removed_names.get(name(at)) == Some(&1) && added_names.get(name(at)) == Some(&1)
+        };
+        // Git's limit on removals times additions, over what is left unpaired.
+        let sides = (removed.len(), added.len());
+        let within_limit = |paired: usize| {
+            (sides.0 - paired) * (sides.1 - paired) <= rename::RENAME_LIMIT * rename::RENAME_LIMIT
+        };
+        // Git scores regular files only.
+        let regular = |side: Vec<usize>| -> Vec<usize> {
+            side.into_iter().filter(|&at| changes[at].regular).collect()
+        };
+        // Every removal, as git lists them, for the candidate slots below.
+        let every_removed = removed.clone();
+        let (removed, added) = (regular(removed), regular(added));
+        if removed.is_empty() || added.is_empty() {
             return changes;
         }
         // Takes `cost` from the frame's budget, or notes a side left unweighed.
@@ -533,6 +599,10 @@ impl Worktree {
             self.pair_budget.update(|v| v - cost);
             true
         };
+        // Each worktree side git cleans through LFS, by its raw size, as sizing
+        // found it: git scores the pointer it would store, not these bytes.
+        let lfs_sizes: RefCell<HashMap<usize, u64>> = RefCell::default();
+        let lfs_size = |at: usize| lfs_sizes.borrow().get(&at).copied();
         // Each side's size and stamp, from a header or a `stat`, before a byte.
         let sized = |at: usize| -> Option<(usize, u64, u64)> {
             let change = &changes[at];
@@ -553,7 +623,7 @@ impl Worktree {
                             self.side_reads.update(|v| v + 1);
                             let size = self.repo().find_header(id).ok()?.size();
                             let mut sizes = self.blob_sizes.borrow_mut();
-                            if sizes.len() >= PAIRS_KEPT {
+                            if sizes.len() >= SIDES_KEPT {
                                 sizes.clear();
                             }
                             sizes.insert(id, size);
@@ -564,12 +634,48 @@ impl Worktree {
                 }
                 Side::Worktree => {
                     let meta = std::fs::symlink_metadata(self.workdir.join(&change.path)).ok()?;
-                    meta.is_file()
-                        .then(|| (at, meta.len(), picture::path_stamp(&change.path, &meta)))
+                    if !meta.is_file() {
+                        return None;
+                    }
+                    let lfs = self.lfs_cleaned(&change.path);
+                    let stamp = picture::path_stamp(&change.path, &meta);
+                    // A pointer in the worktree is stored as it is. Read once
+                    // per version.
+                    let pointer = lfs && meta.len() < picture::POINTER_MAX as u64 && {
+                        let known = self.worktree_pointers.borrow().get(&stamp).copied();
+                        match known {
+                            Some(pointer) => pointer,
+                            None => {
+                                if !spend(rename::READ_COST) {
+                                    return None;
+                                }
+                                self.side_reads.update(|v| v + 1);
+                                // A read that failed is asked again next frame.
+                                let Ok(read) = std::fs::read(self.workdir.join(&change.path))
+                                else {
+                                    self.sides_left.set(true);
+                                    return None;
+                                };
+                                let pointer = picture::lfs_oid(&read).is_some();
+                                let mut seen = self.worktree_pointers.borrow_mut();
+                                if seen.len() >= SIDES_KEPT {
+                                    seen.clear();
+                                }
+                                seen.insert(stamp, pointer);
+                                pointer
+                            }
+                        }
+                    };
+                    let size = if lfs && !pointer {
+                        lfs_sizes.borrow_mut().insert(at, meta.len());
+                        picture::lfs_pointer_text(NO_OID, meta.len()).len() as u64
+                    } else {
+                        meta.len()
+                    };
+                    Some((at, size, stamp))
                 }
             }
         };
-        let removed: Vec<_> = removed.into_iter().filter_map(sized).collect();
         // Each side's bytes as git stores them, read once in this walk however
         // many pairs it is in, through the open repository.
         let read: RefCell<HashMap<usize, Option<std::rc::Rc<Vec<u8>>>>> = RefCell::default();
@@ -585,7 +691,8 @@ impl Worktree {
                     };
                     match side {
                         Side::Blob(id) => self.blob(id, &change.path).ok(),
-                        Side::Worktree => std::fs::read(self.workdir.join(&change.path)).ok(),
+                        // As git stores it, so the score is git's.
+                        Side::Worktree => self.read_worktree(change, &mut 0).ok(),
                     }
                     .map(std::rc::Rc::new)
                 })
@@ -597,7 +704,9 @@ impl Worktree {
             if let Some(spans) = cut.borrow().get(&at) {
                 return spans.clone();
             }
-            let spans = bytes_of(at).map(|bytes| std::rc::Rc::new(rename::Spans::of(&bytes)));
+            let unset = matches!(self.diff_attribute(&changes[at]), Ok(Some(false)));
+            let spans =
+                bytes_of(at).map(|bytes| std::rc::Rc::new(rename::Spans::of_side(&bytes, unset)));
             cut.borrow_mut().insert(at, spans.clone());
             spans
         };
@@ -615,132 +724,51 @@ impl Worktree {
             charged.borrow_mut().insert(at);
             true
         };
-        // Whether a side is binary, from its first bytes, once per version, or
-        // `None` when the budget cannot pay to learn it this frame. A blob is
-        // read whole to learn it; one past a whole budget counts as binary, and
-        // its pair goes to the worker.
-        let binary = |at: usize, stamp: u64, size: u64| -> Option<bool> {
-            if let Some(&known) = self.binaries.borrow().get(&stamp) {
-                return Some(known);
-            }
-            let change = &changes[at];
-            let whole =
-                change.kind == ChangeKind::Removed || matches!(change.after, Some(Side::Blob(_)));
-            let found = if whole {
-                if size > rename::FRAME_BUDGET {
-                    return Some(true);
-                }
-                if !charge(at, size.max(rename::READ_COST)) {
-                    self.sides_left.set(true);
-                    return None;
-                }
-                bytes_of(at).is_some_and(|bytes| hunk::is_binary(&bytes))
-            } else {
-                if !spend(rename::READ_COST) {
-                    return None;
-                }
-                use std::io::Read;
-                self.side_reads.update(|v| v + 1);
-                let mut head = Vec::new();
-                std::fs::File::open(self.workdir.join(&change.path))
-                    .and_then(|file| {
-                        file.take(hunk::BINARY_SNIFF_LEN as u64)
-                            .read_to_end(&mut head)
-                    })
-                    .is_ok_and(|_| hunk::is_binary(&head))
+        // Each pair of `removed` and `added` whose sizes git would score, or
+        // only those sharing a file name.
+        let weigh = |removed: &[usize], added: &[usize], named: bool| -> Vec<Weighed> {
+            let sized_side = |side: &[usize]| -> Vec<(usize, u64, u64)> {
+                side.iter()
+                    .copied()
+                    .filter(|&at| !named || shared(at))
+                    .filter_map(sized)
+                    .collect()
             };
-            let mut binaries = self.binaries.borrow_mut();
-            if binaries.len() >= PAIRS_KEPT {
-                binaries.clear();
-            }
-            binaries.insert(stamp, found);
-            Some(found)
-        };
-        let added: Vec<_> = added.into_iter().filter_map(sized).collect();
-        let mut weighed: Vec<Weighed> = removed
-            .iter()
-            .flat_map(|&(from, from_size, from_stamp)| {
-                added.iter().filter_map(move |&(to, to_size, to_stamp)| {
-                    rename::sizes_fit(from_size, to_size).then_some(Weighed {
-                        from,
-                        to,
-                        key: (from_stamp, to_stamp),
-                        sizes: (from_size, to_size),
-                        bytes: from_size + to_size,
+            let (removed, added) = (sized_side(removed), sized_side(added));
+            let mut weighed: Vec<Weighed> = removed
+                .iter()
+                .flat_map(|&(from, from_size, from_stamp)| {
+                    added.iter().filter_map(move |&(to, to_size, to_stamp)| {
+                        ((!named || name(from) == name(to))
+                            && rename::sizes_fit(from_size, to_size))
+                        .then_some(Weighed {
+                            from,
+                            to,
+                            key: (from_stamp, to_stamp),
+                            sizes: (from_size, to_size),
+                            bytes: from_size + to_size,
+                        })
                     })
                 })
-            })
-            .collect();
-        // The cheapest first, so the budget goes furthest.
-        weighed.sort_by_key(|pair| pair.bytes);
+                .collect();
+            // The cheapest first, so the budget goes furthest.
+            weighed.sort_by_key(|pair| pair.bytes);
+            weighed
+        };
         let mut listed: std::collections::HashSet<rename::PairKey> = self
             .unscored
             .borrow()
             .iter()
             .map(|candidate| candidate.key)
             .collect();
-        let mut scored = Vec::new();
         // Where a candidate's blobs are read, asked once a walk.
         let mut homes: Option<(PathBuf, PathBuf)> = None;
-        // Every side is weighed before a pair is scored, so a burst's sides are
-        // weighed within a few frames, and what they cannot score goes to the
-        // worker.
-        let weighed: Vec<(Weighed, Option<u64>)> = weighed
-            .into_iter()
-            .filter_map(|pair| {
-                let known = self
-                    .pair_scores
-                    .borrow_mut()
-                    .get_mut(&pair.key)
-                    .map(|kept| {
-                        kept.frame = self.pair_frame.get();
-                        kept.score
-                    });
-                if known.is_none() {
-                    let to = binary(pair.to, pair.key.1, pair.sizes.1)?;
-                    let from = binary(pair.from, pair.key.0, pair.sizes.0)?;
-                    // `gix` scored every pair with no binary side.
-                    if !to && !from {
-                        return None;
-                    }
-                }
-                Some((pair, known))
-            })
-            .collect();
-        for (pair, known) in weighed {
-            // What is left to read of the two sides.
-            let unread = |at: usize, size: u64| {
-                if charged.borrow().contains(&at) {
-                    0
-                } else {
-                    size.max(rename::READ_COST)
-                }
-            };
-            let cost = unread(pair.from, pair.sizes.0) + unread(pair.to, pair.sizes.1);
-            let score = match known {
-                Some(score) => score,
-                // Past what the scores hold with those listed, a new score
-                // would evict another.
-                None if self.pair_scores.borrow().len() + self.unscored.borrow().len()
-                    >= PAIRS_KEPT =>
-                {
-                    self.room_wanted.set(true);
-                    self.pairs_unlisted.set(true);
-                    continue;
-                }
-                None if cost + rename::PAIR_COST <= self.pair_budget.get() => {
-                    charge(pair.from, pair.sizes.0.max(rename::READ_COST));
-                    charge(pair.to, pair.sizes.1.max(rename::READ_COST));
-                    self.pair_budget.update(|v| v - rename::PAIR_COST);
-                    self.pairs_scored.update(|v| v + 1);
-                    let score = match (spans_of(pair.from), spans_of(pair.to)) {
-                        (Some(old), Some(new)) => old.score(&new),
-                        _ => 0,
-                    };
-                    self.keep_score(pair.key, score);
-                    score
-                }
-                None => {
+        // Each pair's score, where it is known or affordable; the rest go to
+        // the worker.
+        let mut score_all = |weighed: Vec<Weighed>| -> Vec<(u64, usize, usize)> {
+            let mut scored = Vec::new();
+            for pair in weighed {
+                let mut list = |differ: Option<u64>| {
                     if self.unscored.borrow().len() >= rename::LISTED_MAX {
                         self.pairs_unlisted.set(true);
                     } else if listed.insert(pair.key) {
@@ -750,27 +778,169 @@ impl Worktree {
                         self.unscored.borrow_mut().push(rename::Candidate {
                             key: pair.key,
                             sides: self.pair_sources(&changes[pair.from], &changes[pair.to], homes),
+                            differ_score: differ,
                         });
                     }
-                    continue;
-                }
-            };
-            if rename::pairs(score) {
+                };
+                let known = self
+                    .pair_scores
+                    .borrow_mut()
+                    .get_mut(&pair.key)
+                    .map(|kept| {
+                        kept.frame = self.pair_frame.get();
+                        kept.score
+                    });
+                // What is left to read of the two sides.
+                let unread = |at: usize, size: u64| {
+                    if charged.borrow().contains(&at) {
+                        0
+                    } else {
+                        size.max(rename::READ_COST)
+                    }
+                };
+                let cost = unread(pair.from, pair.sizes.0) + unread(pair.to, pair.sizes.1);
+                let score = match known {
+                    Some(score) => score,
+                    // Past what the scores hold with those listed, a new score
+                    // would evict another.
+                    None if self.pair_scores.borrow().len() + self.unscored.borrow().len()
+                        >= self.pairs_kept.get() =>
+                    {
+                        self.room_wanted.set(true);
+                        self.pairs_unlisted.set(true);
+                        continue;
+                    }
+                    None if cost + rename::PAIR_COST <= self.pair_budget.get() => {
+                        charge(pair.from, pair.sizes.0.max(rename::READ_COST));
+                        charge(pair.to, pair.sizes.1.max(rename::READ_COST));
+                        let lfs = lfs_size(pair.to).map(|raw| {
+                            let old = bytes_of(pair.from).unwrap_or_default();
+                            self.lfs_score(&old, &changes[pair.to], raw)
+                        });
+                        if let Some(LfsScore::Worker(differ)) = lfs {
+                            list(Some(differ));
+                            continue;
+                        }
+                        self.pair_budget.update(|v| v - rename::PAIR_COST);
+                        self.pairs_scored.update(|v| v + 1);
+                        let score = match (&lfs, spans_of(pair.from), spans_of(pair.to)) {
+                            (Some(LfsScore::Scored(score) | LfsScore::Unfetched(score, _)), ..) => {
+                                *score
+                            }
+                            (None, Some(old), Some(new)) => old.score(&new),
+                            _ => 0,
+                        };
+                        self.keep_score(pair.key, score);
+                        // Dropped once the object lands, so the walk after compares.
+                        if let Some(LfsScore::Unfetched(_, missing)) = lfs {
+                            self.lfs_unfetched.borrow_mut().insert(pair.key, missing);
+                        }
+                        score
+                    }
+                    // An LFS pair costs little; the next frame scores it.
+                    None if lfs_size(pair.to).is_some() => {
+                        self.sides_left.set(true);
+                        continue;
+                    }
+                    None => {
+                        list(None);
+                        continue;
+                    }
+                };
                 scored.push((score, pair.from, pair.to));
             }
-        }
-        // Best first; a tie goes to the same file name, as `gix` breaks one.
-        let name = |at: usize| changes[at].path.rsplit('/').next().unwrap_or_default();
-        scored.sort_by(|a, b| {
-            let same = |&(_, from, to): &(u64, usize, usize)| name(from) == name(to);
-            b.0.cmp(&a.0).then_with(|| same(b).cmp(&same(a)))
-        });
+            scored
+        };
         let mut used = std::collections::HashSet::new();
-        for (_, from, to) in scored {
-            if used.contains(&from) || used.contains(&to) {
-                continue;
+        let mut renames = Vec::new();
+        // Git pairs a shared file name first, when it clears the higher bar.
+        for (score, from, to) in score_all(weigh(&removed, &added, true)) {
+            if rename::pairs_by_name(score) {
+                used.extend([from, to]);
+                renames.push((from, to));
             }
-            used.extend([from, to]);
+        }
+        if within_limit(renames.len()) {
+            let left = |side: &[usize]| -> Vec<usize> {
+                side.iter()
+                    .copied()
+                    .filter(|at| !used.contains(at))
+                    .collect()
+            };
+            let known: HashMap<(usize, usize), u64> =
+                score_all(weigh(&left(&removed), &left(&added), false))
+                    .into_iter()
+                    .map(|(score, from, to)| ((from, to), score))
+                    .collect();
+            // Git's four candidate slots for each addition, offered every
+            // removal in order: a slot is taken by the first worst entry, and
+            // only by one strictly better, ranked by score, then same name. A
+            // pair it could not score holds a slot at 0, as git's does, which an
+            // empty slot already stands for unless the pair shares the name, so
+            // only the scored and the same-named are offered.
+            let sources = left(&every_removed);
+            let mut scored_for: HashMap<usize, Vec<usize>> = HashMap::new();
+            for &(from, to) in known.keys() {
+                scored_for.entry(to).or_default().push(from);
+            }
+            let mut named_as: HashMap<&str, Vec<usize>> = HashMap::new();
+            for &from in &sources {
+                named_as.entry(name(from)).or_default().push(from);
+            }
+            let rank =
+                |slot: &Option<(u64, bool, usize)>| slot.map(|(score, same, _)| (score, same));
+            let mut scored = Vec::new();
+            for to in left(&added) {
+                let mut slots: [Option<(u64, bool, usize)>; rename::CANDIDATES] =
+                    [None; rename::CANDIDATES];
+                let mut offered: Vec<usize> = scored_for
+                    .get(&to)
+                    .into_iter()
+                    .flatten()
+                    .chain(named_as.get(name(to)).into_iter().flatten())
+                    .copied()
+                    .collect();
+                offered.sort_unstable();
+                offered.dedup();
+                for from in offered {
+                    let offered = Some((
+                        known.get(&(from, to)).copied().unwrap_or(0),
+                        name(from) == name(to),
+                        from,
+                    ));
+                    let worst = (1..slots.len()).fold(0, |worst, at| {
+                        if rank(&slots[at]) < rank(&slots[worst]) {
+                            at
+                        } else {
+                            worst
+                        }
+                    });
+                    if rank(&slots[worst]) < rank(&offered) {
+                        slots[worst] = offered;
+                    }
+                }
+                scored.extend(
+                    slots
+                        .into_iter()
+                        .flatten()
+                        .map(|(score, same, from)| (score, same, from, to)),
+                );
+            }
+            // Best first and a tie to the same name, stable over git's layout.
+            scored.sort_by_key(|&(score, same, _, _)| std::cmp::Reverse((score, same)));
+            let scored = scored
+                .into_iter()
+                .take_while(|&(score, ..)| rename::pairs(score))
+                .map(|(score, _, from, to)| (score, from, to));
+            for (_, from, to) in scored {
+                if used.contains(&from) || used.contains(&to) {
+                    continue;
+                }
+                used.extend([from, to]);
+                renames.push((from, to));
+            }
+        }
+        for (from, to) in renames {
             let source = changes[from].path.clone();
             let before = changes[from].before;
             let target = &mut changes[to];
@@ -818,14 +988,29 @@ impl Worktree {
         // new pair.
         let last = self.pair_frame.get();
         self.pair_frame.set(last + 1);
+        self.stale_keys.borrow_mut().take();
         let mut scores = self.pair_scores.borrow_mut();
-        if scores.len() >= PAIRS_KEPT {
+        if scores.len() >= self.pairs_kept.get() {
             let before = scores.len();
             scores.retain(|_, kept| kept.frame == last);
             if scores.len() < before {
                 self.pair_epoch.update(|v| v + 1);
             }
         }
+        // A score made without its object goes once the object lands, or once
+        // no walk asks for it. Each object is looked for once.
+        let mut landed: HashMap<PathBuf, bool> = HashMap::new();
+        self.lfs_unfetched.borrow_mut().retain(|key, missing| {
+            let asked = scores.get(key).is_some_and(|kept| kept.frame == last);
+            let landed = *landed
+                .entry(missing.clone())
+                .or_insert_with(|| missing.is_file());
+            if landed || !asked {
+                scores.remove(key);
+                return false;
+            }
+            true
+        });
         drop(scores);
         self.pair_budget.set(rename::FRAME_BUDGET);
         self.unscored.borrow_mut().clear();
@@ -846,7 +1031,7 @@ impl Worktree {
         let frame = self.pair_frame.get();
         let scores = self.pair_scores.borrow();
         self.room_wanted.get()
-            && scores.len() >= PAIRS_KEPT
+            && scores.len() >= self.pairs_kept.get()
             && scores.values().any(|dated| dated.frame < frame)
     }
 
@@ -865,18 +1050,26 @@ impl Worktree {
         self.keep_score(key, score);
     }
 
-    /// Keep a pair's score, bounded by [`PAIRS_KEPT`]: a full record makes
+    /// Keep a pair's score, bounded by the record's size: a full record makes
     /// room by dropping a score this frame has not asked for, and drops the new
     /// one when there is none.
     fn keep_score(&self, key: rename::PairKey, score: u64) {
         let mut scores = self.pair_scores.borrow_mut();
         let frame = self.pair_frame.get();
-        if scores.len() >= PAIRS_KEPT && !scores.contains_key(&key) {
-            let Some(stale) = scores
-                .iter()
-                .find(|(_, dated)| dated.frame < frame)
-                .map(|(&stale, _)| stale)
-            else {
+        if scores.len() >= self.pairs_kept.get() && !scores.contains_key(&key) {
+            // Found once a frame, since a score only goes stale at a renew.
+            let mut stale_keys = self.stale_keys.borrow_mut();
+            let stale_keys = stale_keys.get_or_insert_with(|| {
+                scores
+                    .iter()
+                    .filter(|(_, dated)| dated.frame < frame)
+                    .map(|(&stale, _)| stale)
+                    .collect()
+            });
+            let still = |stale: &rename::PairKey| {
+                scores.get(stale).is_some_and(|dated| dated.frame < frame)
+            };
+            let Some(stale) = std::iter::from_fn(|| stale_keys.pop()).find(still) else {
                 return;
             };
             scores.remove(&stale);
@@ -884,6 +1077,18 @@ impl Worktree {
             self.pair_epoch.update(|v| v + 1);
         }
         scores.insert(key, DatedScore { score, frame });
+    }
+
+    /// Hold at most `kept` rename scores, so a test can fill the record with
+    /// a fixture of a few dozen files. A test seam.
+    #[doc(hidden)]
+    pub fn keep_pairs(&self, kept: usize) {
+        self.pairs_kept.set(kept);
+    }
+
+    /// The most scores the record holds.
+    pub(crate) fn pairs_kept(&self) -> usize {
+        self.pairs_kept.get()
     }
 
     /// How many times the record dropped scores.
@@ -1954,6 +2159,27 @@ fn maybe_symlink(item: &Item, summary: &Summary) -> bool {
     }
 }
 
+fn plain_file(mode: gix::index::entry::Mode) -> bool {
+    matches!(
+        mode,
+        gix::index::entry::Mode::FILE | gix::index::entry::Mode::FILE_EXECUTABLE
+    )
+}
+
+/// Whether this item's side is a regular file: the index's for a removal, the
+/// disk's for anything found there.
+fn regular(item: &Item, summary: &Summary) -> bool {
+    let on_disk =
+        |kind: Option<gix::dir::entry::Kind>| matches!(kind, Some(gix::dir::entry::Kind::File));
+    match item {
+        // Its mode says nothing; sizing reads the disk instead.
+        _ if matches!(summary, Summary::IntentToAdd) => true,
+        Item::Modification { entry, .. } => plain_file(entry.mode),
+        Item::DirectoryContents { entry, .. } => on_disk(entry.disk_kind),
+        Item::Rewrite { dirwalk_entry, .. } => on_disk(dirwalk_entry.disk_kind),
+    }
+}
+
 /// The right-hand side an index-worktree change of this kind has.
 pub(crate) fn reads_side(kind: &ChangeKind) -> Option<Side> {
     match kind {
@@ -2118,6 +2344,7 @@ fn committed_change(change: &gix::diff::tree_with_rewrites::Change) -> Option<Fi
         // Both sides are blobs the object database holds, so nothing here reads a
         // link off disk and the answer cannot reach anything.
         maybe_symlink: false,
+        regular: change.entry_mode().is_blob(),
         mode_changed: false,
     })
 }
@@ -2131,29 +2358,43 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
         return None;
     }
 
-    let (path, kind, before, after) = match change {
-        ChangeRef::Addition { location, id, .. } => (
+    let (path, kind, before, after, mode) = match change {
+        ChangeRef::Addition {
+            location,
+            id,
+            entry_mode,
+            ..
+        } => (
             path_of(location.as_ref()),
             ChangeKind::Added,
             None,
             Some(Side::Blob(id.as_ref().to_owned())),
+            *entry_mode,
         ),
-        ChangeRef::Deletion { location, id, .. } => (
+        ChangeRef::Deletion {
+            location,
+            id,
+            entry_mode,
+            ..
+        } => (
             path_of(location.as_ref()),
             ChangeKind::Removed,
             Some(id.as_ref().to_owned()),
             None,
+            *entry_mode,
         ),
         ChangeRef::Modification {
             location,
             previous_id,
             id,
+            entry_mode,
             ..
         } => (
             path_of(location.as_ref()),
             ChangeKind::Modified,
             Some(previous_id.as_ref().to_owned()),
             Some(Side::Blob(id.as_ref().to_owned())),
+            *entry_mode,
         ),
         // The *destination* names the change, exactly as it does for an
         // index-worktree rewrite: the row a reader sees is the path the content
@@ -2164,6 +2405,7 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
             location,
             id,
             copy,
+            entry_mode,
             ..
         } => {
             let from = path_of(source_location.as_ref());
@@ -2177,6 +2419,7 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
                 kind,
                 Some(source_id.as_ref().to_owned()),
                 Some(Side::Blob(id.as_ref().to_owned())),
+                *entry_mode,
             )
         }
     };
@@ -2189,6 +2432,7 @@ fn staged_change(change: &gix::diff::index::ChangeRef<'_, '_>) -> Option<FileCha
         after,
         // Conservative, and it costs nothing here.
         maybe_symlink: true,
+        regular: plain_file(mode),
         mode_changed: false,
     })
 }
@@ -2286,6 +2530,7 @@ impl Iterator for Inner {
                 // The working tree, unless there is nothing there to read.
                 after,
                 maybe_symlink: maybe_symlink(&item, &summary),
+                regular: regular(&item, &summary),
                 mode_changed: matches!(
                     &item,
                     Item::Modification {
@@ -2391,7 +2636,61 @@ pub fn indexed_extensions(root: &Path, per_extension: usize) -> Vec<Indexed> {
 
 #[cfg(test)]
 mod tests {
-    use super::git_separators;
+    use super::{COMPARE_CHUNK, git_separators, same_readers};
+
+    /// A reader of `len` zero bytes, with a byte flipped at `flip`, that
+    /// counts what it hands out and refuses a read past one chunk.
+    struct Counted {
+        len: u64,
+        flip: Option<u64>,
+        at: u64,
+        read: std::rc::Rc<std::cell::Cell<u64>>,
+    }
+
+    impl std::io::Read for Counted {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            assert!(out.len() <= COMPARE_CHUNK, "a read of {} bytes", out.len());
+            let n = out
+                .len()
+                .min(usize::try_from(self.len - self.at).unwrap_or(usize::MAX));
+            for (i, byte) in out[..n].iter_mut().enumerate() {
+                *byte = u8::from(self.flip == Some(self.at + i as u64));
+            }
+            self.at += n as u64;
+            self.read.set(self.read.get() + n as u64);
+            Ok(n)
+        }
+    }
+
+    /// Two sides of a 2 GiB compare that differ in the first chunk: no read is
+    /// larger than a chunk, and nothing past it is read.
+    #[test]
+    fn compare_bounded() {
+        let len = 2 * 1024 * 1024 * 1024;
+        let read = std::rc::Rc::new(std::cell::Cell::new(0));
+        let side = |flip| Counted {
+            len,
+            flip,
+            at: 0,
+            read: read.clone(),
+        };
+        assert_eq!(same_readers(side(None), side(Some(10)), len), Some(false));
+        assert_eq!(
+            read.get(),
+            2 * COMPARE_CHUNK as u64,
+            "read past the first difference"
+        );
+        read.set(0);
+        let small = 3 * COMPARE_CHUNK as u64 + 5;
+        let side = |flip| Counted {
+            len: small,
+            flip,
+            at: 0,
+            read: read.clone(),
+        };
+        assert_eq!(same_readers(side(None), side(None), small), Some(true));
+        assert_eq!(read.get(), 2 * small);
+    }
 
     /// The separator rule, on every platform rather than on one.
     #[test]
@@ -2433,6 +2732,55 @@ mod tests {
         } else {
             assert_eq!(converted, raw);
         }
+    }
+}
+
+#[cfg(test)]
+mod record {
+    use super::{DatedScore, Worktree};
+
+    /// A full record's stale list, found at the first answer past it, skips a
+    /// score a walk asked for since: that score stays, and the answer goes.
+    #[test]
+    fn stale_list_rechecked() {
+        let dir = std::env::temp_dir().join(format!(
+            "vigia-stale-list-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["init", "-q"])
+            .output()
+            .expect("run git");
+        assert!(out.status.success(), "git init");
+        let worktree = Worktree::discover(&dir).expect("discover");
+        worktree.keep_pairs(4);
+        {
+            let mut scores = worktree.pair_scores.borrow_mut();
+            for n in 0..4u64 {
+                scores.insert((n, n), DatedScore { score: 0, frame: 0 });
+            }
+        }
+        worktree.pair_frame.set(1);
+        worktree.keep_score((10, 10), 0);
+        assert_eq!(worktree.pair_epoch(), 1, "the first answer made no room");
+        // Every score left is asked for again, as a walk between answers asks.
+        for dated in worktree.pair_scores.borrow_mut().values_mut() {
+            dated.frame = 1;
+        }
+        worktree.keep_score((11, 11), 0);
+        assert_eq!(
+            worktree.pair_epoch(),
+            1,
+            "an answer evicted a score a walk had just asked for"
+        );
+        assert!(!worktree.pair_scores.borrow().contains_key(&(11, 11)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -2562,31 +2910,45 @@ mod composing {
 /// stored blob.
 type LfsKey = (Fingerprint, gix::ObjectId);
 
+/// What [`Worktree::lfs_score`] found.
+enum LfsScore {
+    /// Decided in this walk.
+    Scored(u64),
+    /// Past the walk's compare budget, for the worker to compare: the score
+    /// when the bytes are not the object.
+    Worker(u64),
+    /// The object, at the path given, is not fetched, so the bytes could not
+    /// be compared.
+    Unfetched(u64, PathBuf),
+}
+
+/// An oid no LFS object has, being no hex, for a pointer whose object is not
+/// the one compared.
+const NO_OID: &str = "----------------------------------------------------------------";
+
 /// Bytes one status walk may compare between LFS files and their objects.
 const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 
-/// The most rename scores kept.
-const PAIRS_KEPT: usize = 4096;
+/// The most rename scores kept: git's whole matrix to about 360 by 360. Past
+/// it a pair shows as removed and added.
+const PAIRS_KEPT: usize = 131_072;
 
-/// The most walks a frame of `files` changes takes to weigh every side, and
-/// to list every pair for the worker, before it goes quiet; `None` past what
-/// it is derived for: sides no larger than `largest_side`, at most a sniff,
-/// and scores that pair nothing, since a pairing score walks again. A test
-/// seam.
+/// The most blob sizes kept, one per side rather than per pair.
+const SIDES_KEPT: usize = 4096;
+
+/// The most walks a frame of `files` changes takes to size every side, and
+/// to list every pair for the worker, before it goes quiet, when no score
+/// pairs anything, since a pairing score walks again. A test seam.
 #[doc(hidden)]
-pub fn listing_walks(files: usize, largest_side: u64) -> Option<(u64, u64)> {
-    if largest_side > rename::READ_COST {
-        return None;
-    }
-    // A removed side costs a header and a sniff, an added one a sniff, and a
-    // walk stops short only once a sniff no longer fits. The last finds none.
-    let sides = (files as u64 * 2 * rename::READ_COST)
-        .div_ceil(rename::FRAME_BUDGET - rename::READ_COST)
-        + 1;
+pub fn listing_walks(files: usize, kept: usize) -> (u64, u64) {
+    // A side costs at most a header, and a walk stops short only once a
+    // header no longer fits. The last finds none left.
+    let sides =
+        (files as u64 * rename::READ_COST).div_ceil(rename::FRAME_BUDGET - rename::READ_COST) + 1;
     // A pair walk follows a listed batch landing, and listing stops once the
     // scores are full. The last finds the record full.
-    let pairs = PAIRS_KEPT.div_ceil(rename::LISTED_MAX) as u64 + 1;
-    Some((sides, pairs))
+    let pairs = kept.div_ceil(rename::LISTED_MAX) as u64 + 1;
+    (sides, pairs)
 }
 
 /// `repo` with every `filter` section removed from its configuration.
@@ -2618,8 +2980,7 @@ fn lfs_configured(repo: &gix::Repository) -> bool {
 /// Whether two regular files of `len` bytes each hold the same bytes, read side
 /// by side and stopped at the first chunk that differs, or `None` when a read
 /// failed and nothing is known.
-fn same_bytes(a: &Path, b: &Path, len: u64) -> Option<bool> {
-    use std::io::Read;
+pub(crate) fn same_bytes(a: &Path, b: &Path, len: u64) -> Option<bool> {
     // Checked by path first, so a fifo is never opened.
     let regular = |path: &Path| std::fs::metadata(path).is_ok_and(|meta| meta.is_file());
     if !regular(a) || !regular(b) {
@@ -2630,15 +2991,22 @@ fn same_bytes(a: &Path, b: &Path, len: u64) -> Option<bool> {
         let meta = file.metadata().ok()?;
         Some((meta.is_file() && meta.len() == len).then_some(file))
     };
-    let (Some(mut a), Some(mut b)) = (open(a)?, open(b)?) else {
+    let (Some(a), Some(b)) = (open(a)?, open(b)?) else {
         return Some(false);
     };
-    let (mut left, mut right) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    same_readers(a, b, len)
+}
+
+/// The most either side of a byte compare holds at once.
+const COMPARE_CHUNK: usize = 64 * 1024;
+
+/// Whether `a` and `b` hold the same `len` bytes, read a chunk at a time and
+/// no further than the first that differs.
+fn same_readers(mut a: impl std::io::Read, mut b: impl std::io::Read, len: u64) -> Option<bool> {
+    let (mut left, mut right) = (vec![0u8; COMPARE_CHUNK], vec![0u8; COMPARE_CHUNK]);
     let mut remaining = len;
     while remaining > 0 {
-        let chunk = left
-            .len()
-            .min(usize::try_from(remaining).unwrap_or(usize::MAX));
+        let chunk = COMPARE_CHUNK.min(usize::try_from(remaining).unwrap_or(usize::MAX));
         a.read_exact(&mut left[..chunk]).ok()?;
         b.read_exact(&mut right[..chunk]).ok()?;
         if left[..chunk] != right[..chunk] {
