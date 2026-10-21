@@ -434,21 +434,38 @@ fn rename_limit_product() {
 
 #[test]
 fn rename_limit_past() {
-    // Past 1,000 times 1,000 nothing is weighed, as git weighs nothing.
+    // Past 1,000 times 1,000 nothing is weighed, as git weighs nothing, once
+    // every side is sized.
     let files: Vec<(String, Vec<u8>)> = (0..1001)
-        .map(|n| (format!("old/{n:04}.txt"), format!("old {n}\n").into_bytes()))
+        .map(|n| {
+            (
+                format!("old/o{n:04}.txt"),
+                format!("old {n}\n").into_bytes(),
+            )
+        })
         .collect();
     let written: Vec<(String, Vec<u8>)> = (0..1001)
-        .map(|n| (format!("new/{n:04}.txt"), format!("new {n}\n").into_bytes()))
+        .map(|n| {
+            (
+                format!("new/n{n:04}.txt"),
+                format!("new {n}\n").into_bytes(),
+            )
+        })
         .collect();
     let scratch = moved("rename-limit-past", &refs(&files), &refs(&written));
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    assert_eq!(
-        scored(&mut frame),
-        0,
-        "a walk past the limit weighed a pair"
-    );
+    for _ in 0..40 {
+        assert_eq!(
+            scored(&mut frame),
+            0,
+            "a walk past the limit weighed a pair"
+        );
+        assert!(
+            frame.unscored_pairs().is_empty(),
+            "a walk past the limit listed a pair"
+        );
+    }
 }
 
 #[test]
@@ -726,6 +743,8 @@ fn symlink_never_renamed() {
         frame.advance().expect("advance");
     }
     assert_eq!(kind_of(frame.files(), "plain.txt"), &ChangeKind::Added);
+    scratch.git(&["add", "-A"]);
+    assert_eq!(kind_of(&staged(&scratch), "plain.txt"), &ChangeKind::Added);
 }
 
 #[cfg(unix)]
@@ -802,11 +821,21 @@ fn basename_past_limit() {
     // 1,000 times 1,000 the shared name still pairs.
     let shared = noise(93, 4_000);
     let files: Vec<(String, Vec<u8>)> = (0..1000)
-        .map(|n| (format!("old/o{n:04}.txt"), format!("old {n}\n").into_bytes()))
+        .map(|n| {
+            (
+                format!("old/o{n:04}.txt"),
+                format!("old {n}\n").into_bytes(),
+            )
+        })
         .chain([("old/shared.bin".to_owned(), shared.clone())])
         .collect();
     let written: Vec<(String, Vec<u8>)> = (0..999)
-        .map(|n| (format!("new/n{n:04}.txt"), format!("new {n}\n").into_bytes()))
+        .map(|n| {
+            (
+                format!("new/n{n:04}.txt"),
+                format!("new {n}\n").into_bytes(),
+            )
+        })
         .chain([("new/shared.bin".to_owned(), tail_changed(&shared, 0.1))])
         .collect();
     let scratch = moved("rename-basename-limit", &refs(&files), &refs(&written));
@@ -852,4 +881,69 @@ fn symlink_names_count() {
         frame.advance().expect("advance");
     }
     assert_eq!(kind_of(frame.files(), "d1/x.bin"), &renamed("r.bin"));
+}
+
+#[test]
+fn limit_after_basename() {
+    // Git counts its limit after the file-name pass, so one shared name
+    // brings 1,001 by 1,000 within it and m.bin pairs with k.bin.
+    let text = |tag: &str, n: usize| format!("{tag} {n}\n").repeat(500).into_bytes();
+    let shared = noise(95, 4_000);
+    let m = noise(96, 1_000);
+    let files: Vec<(String, Vec<u8>)> = (0..999)
+        .map(|n| (format!("old/o{n:04}.txt"), text("old", n)))
+        .chain([
+            ("old/shared.bin".to_owned(), shared.clone()),
+            ("old/m.bin".to_owned(), m.clone()),
+        ])
+        .collect();
+    let written: Vec<(String, Vec<u8>)> = (0..998)
+        .map(|n| (format!("new/n{n:04}.txt"), text("new", n)))
+        .chain([
+            ("new/shared.bin".to_owned(), tail_changed(&shared, 0.1)),
+            ("new/k.bin".to_owned(), tail_changed(&m, 0.1)),
+        ])
+        .collect();
+    let scratch = moved("rename-limit-after", &refs(&files), &refs(&written));
+    let found = ("R old/m.bin".to_owned(), "new/k.bin".to_owned());
+    assert!(
+        git_unstaged(&scratch).contains(&found),
+        "the fixture is wrong"
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..40 {
+        frame.advance().expect("advance");
+        if kind_of(frame.files(), "new/k.bin") == &renamed("old/m.bin") {
+            return;
+        }
+    }
+    panic!(
+        "k.bin never paired: {:?}",
+        kind_of(frame.files(), "new/k.bin")
+    );
+}
+
+#[test]
+fn tie_to_same_name() {
+    // Two removals score the same against x.bin, under the file-name bar, and
+    // the one of the same name pairs, though the other comes first.
+    let old = noise(97, 4_000);
+    let scratch = moved(
+        "rename-tie",
+        &[("a/y.bin", old.clone()), ("b/x.bin", old.clone())],
+        &[("c/x.bin", tail_changed(&old, 0.35))],
+    );
+    let named = ("R b/x.bin".to_owned(), "c/x.bin".to_owned());
+    assert!(
+        git_unstaged(&scratch).contains(&named),
+        "the fixture is wrong: {:?}",
+        git_unstaged(&scratch)
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(kind_of(frame.files(), "c/x.bin"), &renamed("b/x.bin"));
 }
