@@ -671,8 +671,8 @@ impl<'w> Frame<'w> {
         self.worktree.pairs_unlisted()
     }
 
-    /// How many times the rename scores were started again, after which a
-    /// pair sent to the worker before is sent again.
+    /// How many times the rename record dropped scores, after which a pair
+    /// sent to the worker before is sent again.
     pub fn pair_epoch(&self) -> u64 {
         self.worktree.pair_epoch()
     }

@@ -291,18 +291,24 @@ fn binary_rename_limit() {
 }
 
 #[test]
-fn pair_scores_start_again() {
+fn full_record_makes_room() {
     let scratch = moved("rename-epoch", &[("a.txt", b"a\n".to_vec())], &[]);
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
-    assert_eq!(frame.pair_epoch(), 0);
     for n in 0..4097u64 {
         frame.learn_pair((n, n), 0);
     }
     assert_eq!(
         frame.pair_epoch(),
+        0,
+        "a score past a record of current ones evicted one"
+    );
+    frame.advance().expect("advance");
+    frame.learn_pair((u64::MAX, 0), 0);
+    assert_eq!(
+        frame.pair_epoch(),
         1,
-        "4,097 scores did not start the record again"
+        "a score past a record of stale ones did not take one's place"
     );
 }
 
