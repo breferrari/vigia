@@ -20,8 +20,8 @@ pub(crate) const FRAME_BUDGET: u64 = 256 * 1024;
 /// What scoring one pair costs that budget beyond its sides' bytes, so a
 /// frame scores at most 256 pairs however small.
 pub(crate) const PAIR_COST: u64 = 1024;
-/// The least any read of a side costs that budget, a sniff's length, since
-/// what a small read costs is opening the file.
+/// The least any read of a side costs that budget, since what a small read
+/// costs is opening the file.
 pub(crate) const READ_COST: u64 = crate::hunk::BINARY_SNIFF_LEN as u64;
 /// The most pairs one frame lists for the worker.
 pub(crate) const LISTED_MAX: usize = (FRAME_BUDGET / PAIR_COST) as usize;
@@ -62,7 +62,13 @@ pub(crate) struct Spans {
 impl Spans {
     /// `data`'s chunks. A text side drops the CR of a CRLF.
     pub(crate) fn of(data: &[u8]) -> Self {
-        let binary = crate::hunk::is_binary(data);
+        Self::of_side(data, false)
+    }
+
+    /// [`Spans::of`] for a side its attributes may make binary, as git's
+    /// `diff` attribute does, though its bytes read as text.
+    pub(crate) fn of_side(data: &[u8], unset: bool) -> Self {
+        let binary = unset || crate::hunk::is_binary(data);
         let mut hashes = Vec::new();
         let (mut first, mut second, mut length) = (0u32, 0u32, 0u64);
         for (at, &byte) in data.iter().enumerate() {

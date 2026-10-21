@@ -1,4 +1,4 @@
-//! A changed binary paired as a rename, by git's rule. `SPEC.md` §11.1.
+//! A removal and an addition `gix` left unpaired, paired as a rename by git's rule. `SPEC.md` §11.1.
 
 mod support;
 
@@ -311,7 +311,7 @@ fn text_rename_reordered() {
 #[test]
 fn text_rename_diff_unset() {
     // A side whose attributes unset `diff` is binary to git, and git still
-    // scores the pair; the sniff alone would call it text and leave it.
+    // scores the pair.
     let lines: Vec<String> = (0..12).map(|n| format!("note {n}\n")).collect();
     let mut kept: Vec<String> = lines[..9].to_vec();
     kept.reverse();
@@ -358,6 +358,36 @@ fn text_rename_basename_first() {
     );
     assert_eq!(
         kind_of(&staged(&scratch), "d1/notes.txt"),
+        &renamed("d0/notes.txt")
+    );
+}
+
+#[test]
+fn text_rename_basename_bar() {
+    // The same file name below git's basename bar earns no preference, so the
+    // better match elsewhere wins.
+    let lines: Vec<String> = (0..20)
+        .map(|n| format!("entry {n} with some text\n"))
+        .collect();
+    let reversed = |kept: usize| lines[..kept].iter().rev().cloned().collect::<String>();
+    let same_name = reversed(12) + &(0..8).map(|n| format!("new {n}\n")).collect::<String>();
+    let elsewhere = reversed(18) + "a\nb\n";
+    let scratch = moved(
+        "rename-basename-bar",
+        &[("d0/notes.txt", lines.concat().into_bytes())],
+        &[
+            ("d1/notes.txt", same_name.into_bytes()),
+            ("d1/other.txt", elsewhere.into_bytes()),
+        ],
+    );
+    scratch.git(&["add", "-A"]);
+    assert!(
+        git_staged(&scratch).contains(&("R d0/notes.txt".to_owned(), "d1/other.txt".to_owned())),
+        "the fixture is wrong: {:?}",
+        git_staged(&scratch)
+    );
+    assert_eq!(
+        kind_of(&staged(&scratch), "d1/other.txt"),
         &renamed("d0/notes.txt")
     );
 }
@@ -418,9 +448,8 @@ fn pair_scores_start_again() {
 
 #[test]
 fn binary_rename_charged_once() {
-    // The old side is read whole to learn it is binary, and that read serves
-    // the score too: the frame pays for each side once.
-    // Binary only before, so the old side is the one read to learn it.
+    // Each side is read whole once to score it: the frame pays for each side
+    // once.
     let mut old: Vec<u8> = noise(70, 100_000)
         .into_iter()
         .map(|byte| byte.max(1))
@@ -509,31 +538,26 @@ fn staged_count_own_budget() {
 }
 
 #[test]
-fn text_rename_basename_bar() {
-    // The same file name below git's basename bar earns no preference, so the
-    // better match elsewhere wins.
-    let lines: Vec<String> = (0..20)
-        .map(|n| format!("entry {n} with some text\n"))
-        .collect();
-    let reversed = |kept: usize| lines[..kept].iter().rev().cloned().collect::<String>();
-    let same_name = reversed(12) + &(0..8).map(|n| format!("new {n}\n")).collect::<String>();
-    let elsewhere = reversed(18) + "a\nb\n";
+fn text_rename_crlf_diff_unset() {
+    // Git keeps the CR of a CRLF on a side whose attributes unset `diff`, and
+    // drops it on a text side, so the two sides' chunks differ.
+    let lines: Vec<String> = (0..12).map(|n| format!("line {n}\r\n")).collect();
+    let mut changed = lines.clone();
+    changed[5] = "changed\r\n".to_owned();
     let scratch = moved(
-        "rename-basename-bar",
-        &[("d0/notes.txt", lines.concat().into_bytes())],
-        &[
-            ("d1/notes.txt", same_name.into_bytes()),
-            ("d1/other.txt", elsewhere.into_bytes()),
-        ],
+        "rename-crlf-unset",
+        &[("d.md", lines.concat().into_bytes())],
+        &[("new.txt", changed.concat().into_bytes())],
     );
+    scratch.write(".gitattributes", "*.md -diff\n");
     scratch.git(&["add", "-A"]);
-    assert!(
-        git_staged(&scratch).contains(&("R d0/notes.txt".to_owned(), "d1/other.txt".to_owned())),
-        "the fixture is wrong: {:?}",
-        git_staged(&scratch)
-    );
+    let git = git_staged(&scratch);
+    let paired = git.contains(&("R d.md".to_owned(), "new.txt".to_owned()));
+    let ours = kind_of(&staged(&scratch), "new.txt").clone();
     assert_eq!(
-        kind_of(&staged(&scratch), "d1/other.txt"),
-        &renamed("d0/notes.txt")
+        ours == renamed("d.md"),
+        paired,
+        "git {} the pair ({git:?}) and this reported {ours:?}",
+        if paired { "paired" } else { "did not pair" }
     );
 }

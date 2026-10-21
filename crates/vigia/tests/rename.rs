@@ -360,8 +360,7 @@ fn full_scores_stop_listing() {
     );
     // Counted, not timed: a slow runner only scores slowly, and a walk that
     // re-arms itself is the only thing that raises the count.
-    let (side_walks_max, pair_walks_max) =
-        listing_walks(frame.files().len(), SIDE as u64).expect("sides small enough to bound");
+    let (side_walks_max, pair_walks_max) = listing_walks(frame.files().len());
     let (began, mut quiet, mut walks) = (Instant::now(), 0, 0);
     let (mut side_walks, mut pair_walks) = (0, 0);
     while quiet < 100 {

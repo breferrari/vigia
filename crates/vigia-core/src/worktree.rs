@@ -211,7 +211,7 @@ impl Worktree {
         Ok(Inner::Collected(self.paired(walked).into_iter()))
     }
 
-    /// [`Worktree::unstaged`] before binaries are paired.
+    /// [`Worktree::unstaged`] before what `gix` left unpaired is paired.
     fn unstaged_lfs(&self, track_renames: bool) -> Result<Inner> {
         let walked = self.unstaged_walk(track_renames)?;
         if !self.lfs.get() {
@@ -477,8 +477,8 @@ impl Worktree {
         })
     }
 
-    /// `changes` with each removal and addition `gix` left unpaired, where a
-    /// side is binary, paired by git's rule. A pair this frame cannot afford
+    /// `changes` with each removal and addition `gix` left unpaired paired by
+    /// git's rule. A pair this frame cannot afford
     /// to score is left unpaired and listed for the picture worker.
     fn paired(&self, mut changes: Vec<FileChange>) -> Vec<FileChange> {
         /// A removal and an addition weighed as one rename.
@@ -577,7 +577,9 @@ impl Worktree {
             if let Some(spans) = cut.borrow().get(&at) {
                 return spans.clone();
             }
-            let spans = bytes_of(at).map(|bytes| std::rc::Rc::new(rename::Spans::of(&bytes)));
+            let unset = matches!(self.diff_attribute(&changes[at]), Ok(Some(false)));
+            let spans =
+                bytes_of(at).map(|bytes| std::rc::Rc::new(rename::Spans::of_side(&bytes, unset)));
             cut.borrow_mut().insert(at, spans.clone());
             spans
         };
@@ -621,17 +623,8 @@ impl Worktree {
         let mut scored = Vec::new();
         // Where a candidate's blobs are read, asked once a walk.
         let mut homes: Option<(PathBuf, PathBuf)> = None;
-        // Every side is weighed before a pair is scored, so a burst's sides are
-        // weighed within a few frames, and what they cannot score goes to the
-        // worker.
-        let weighed: Vec<(Weighed, Option<u64>)> = weighed
-            .into_iter()
-            .map(|pair| {
-                let known = self.pair_scores.borrow().get(&pair.key).copied();
-                (pair, known)
-            })
-            .collect();
-        for (pair, known) in weighed {
+        for pair in weighed {
+            let known = self.pair_scores.borrow().get(&pair.key).copied();
             // What is left to read of the two sides.
             let unread = |at: usize, size: u64| {
                 if charged.borrow().contains(&at) {
@@ -689,18 +682,21 @@ impl Worktree {
         });
         // Git pairs a file name held by one removal and one addition first,
         // when it clears the higher bar, and only then the best of the rest.
-        let once = |side: &[(usize, u64, u64)], at: usize| {
-            side.iter()
-                .filter(|&&(other, _, _)| name(other) == name(at))
-                .count()
-                == 1
+        let counted = |side: &[(usize, u64, u64)]| {
+            let mut counts: HashMap<&str, usize> = HashMap::new();
+            for &(at, _, _) in side {
+                *counts.entry(name(at)).or_default() += 1;
+            }
+            counts
         };
+        let (removed_names, added_names) = (counted(&removed), counted(&added));
+        let once = |counts: &HashMap<&str, usize>, at: usize| counts.get(name(at)) == Some(&1);
         let (by_name, rest): (Vec<_>, Vec<_>) =
             scored.into_iter().partition(|&(score, from, to)| {
                 name(from) == name(to)
                     && rename::pairs_by_name(score)
-                    && once(&removed, from)
-                    && once(&added, to)
+                    && once(&removed_names, from)
+                    && once(&added_names, to)
             });
         let scored = by_name.into_iter().chain(rest);
         let mut used = std::collections::HashSet::new();
@@ -2470,25 +2466,19 @@ const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 /// The most rename scores kept before the cache starts again.
 const PAIRS_KEPT: usize = 4096;
 
-/// The most walks a frame of `files` changes takes to weigh every side, and
-/// to list every pair for the worker, before it goes quiet; `None` past what
-/// it is derived for: sides no larger than `largest_side`, at most a sniff,
-/// and scores that pair nothing, since a pairing score walks again. A test
-/// seam.
+/// The most walks a frame of `files` changes takes to size every side, and
+/// to list every pair for the worker, before it goes quiet, when no score
+/// pairs anything, since a pairing score walks again. A test seam.
 #[doc(hidden)]
-pub fn listing_walks(files: usize, largest_side: u64) -> Option<(u64, u64)> {
-    if largest_side > rename::READ_COST {
-        return None;
-    }
-    // A removed side costs a header and a sniff, an added one a sniff, and a
-    // walk stops short only once a sniff no longer fits. The last finds none.
-    let sides = (files as u64 * 2 * rename::READ_COST)
-        .div_ceil(rename::FRAME_BUDGET - rename::READ_COST)
-        + 1;
+pub fn listing_walks(files: usize) -> (u64, u64) {
+    // A side costs at most a header, and a walk stops short only once a
+    // header no longer fits. The last finds none left.
+    let sides =
+        (files as u64 * rename::READ_COST).div_ceil(rename::FRAME_BUDGET - rename::READ_COST) + 1;
     // A pair walk follows a listed batch landing, and listing stops once the
     // scores are full. The last finds the record full.
     let pairs = PAIRS_KEPT.div_ceil(rename::LISTED_MAX) as u64 + 1;
-    Some((sides, pairs))
+    (sides, pairs)
 }
 
 /// `repo` with every `filter` section removed from its configuration.
