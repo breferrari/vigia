@@ -121,7 +121,9 @@ impl Writer {
             .spawn(move || {
                 let mut out = out;
                 for bytes in frames {
-                    if theirs.stopping() {
+                    // Empty is the end `stop` queues, which a sink still open
+                    // would otherwise keep from coming.
+                    if bytes.is_empty() || theirs.stopping() {
                         break;
                     }
                     if write_out(&mut out, &bytes, &theirs, &wakes).is_err() {
@@ -187,20 +189,24 @@ impl Writer {
 
     /// Write what is queued for up to `limit`, then drop the rest and stop.
     /// Returns once the thread has stopped, or after `limit` and one more
-    /// wait if a write it cannot leave is in flight.
-    pub fn stop(&mut self, limit: Duration) {
-        drop(self.queue.take());
-        if self.finished.recv_timeout(limit).is_ok() {
-            return;
+    /// wait if a write it cannot leave is in flight: whether it stopped.
+    pub fn stop(&mut self, limit: Duration) -> bool {
+        if let Some(queue) = self.queue.take() {
+            let _ = queue.send(Vec::new());
+        }
+        // A thread already gone has dropped its end, which is as good as done.
+        let ended = |waited| !matches!(waited, Err(mpsc::RecvTimeoutError::Timeout));
+        if ended(self.finished.recv_timeout(limit)) {
+            return true;
         }
         self.shared.abandon.store(true, Ordering::Release);
-        let _ = self.finished.recv_timeout(POLL * 2);
+        ended(self.finished.recv_timeout(POLL * 2))
     }
 }
 
 impl Drop for Writer {
     fn drop(&mut self) {
-        self.stop(STOP_WAIT);
+        let _ = self.stop(STOP_WAIT);
     }
 }
 
@@ -580,12 +586,44 @@ mod tests {
         sink.write_all(&[b'x'; 100_000]).expect("write");
         sink.flush().expect("flush");
         let began = Instant::now();
-        writer.stop(Duration::from_millis(100));
+        let finished = writer.stop(Duration::from_millis(100));
         assert!(
-            began.elapsed() < Duration::from_millis(400),
+            finished,
+            "a stop against a terminal that never reads left its thread running"
+        );
+        // A hang guard only: the stop's own work is the thread ending above.
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
             "a stop against a terminal that never reads took {:?}",
             began.elapsed()
         );
+    }
+
+    #[test]
+    fn stop_open_sink() {
+        // Everything written and a sink still open: the stop ends the thread
+        // at once rather than waiting out its limit for a frame that never comes.
+        let out = Taken::default();
+        out.room.store(usize::MAX, Ordering::Release);
+        let mut writer = Writer::start(out, Wakes::none());
+        let mut sink = writer.sink();
+        sink.write_all(b"frame").expect("write");
+        sink.flush().expect("flush");
+        assert!(
+            writer.drain(Duration::from_secs(2)),
+            "the frame was not written"
+        );
+        let began = Instant::now();
+        assert!(
+            writer.stop(Duration::from_secs(5)),
+            "the thread did not stop"
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "with a sink open the stop waited {:?}, its limit rather than the thread",
+            began.elapsed()
+        );
+        drop(sink);
     }
 
     #[test]
