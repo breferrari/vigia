@@ -306,7 +306,7 @@ fn every_settings_action_moves_its_own_row_and_no_other() {
             apply(app, frame, area(), setting.action());
             let after = app.settings();
             for other in SETTINGS {
-                let moved = other.of(before) != other.of(after);
+                let moved = other.word(before) != other.word(after);
                 assert_eq!(
                     moved,
                     other == setting,
@@ -315,8 +315,16 @@ fn every_settings_action_moves_its_own_row_and_no_other() {
                     other.label()
                 );
             }
-            // Back, so each setting is measured from the same pane.
-            apply(app, frame, area(), setting.action());
+            // Back, so each setting is measured from the same pane. Pictures cycles
+            // through every choice rather than flipping between two.
+            let back = if setting == Setting::Pictures {
+                vigia::pictures::Choice::ALL.len() - 1
+            } else {
+                1
+            };
+            for _ in 0..back {
+                apply(app, frame, area(), setting.action());
+            }
             assert_eq!(
                 app.settings(),
                 before,
@@ -1160,5 +1168,109 @@ fn menu_frame() {
         apply(app, frame, area(), Action::ToggleMenu);
         let (buf, _) = paint(app, frame, highlighter, history, area());
         insta::assert_snapshot!(text_of(&buf, area()));
+    });
+}
+
+#[test]
+fn launch_rows_drawn() {
+    let mut pane = Pane::open("menu-launch-rows");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        let (text, _) = drawn(&buf, &laid);
+        for setting in [Setting::Update, Setting::Pictures] {
+            let row = text
+                .lines()
+                .find(|line| line.contains(setting.label()))
+                .unwrap_or_else(|| panic!("no row for {:?}:\n{text}", setting.label()));
+            assert!(
+                row.contains("next launch"),
+                "{:?} does not say it applies at the next launch:\n{text}",
+                setting.label()
+            );
+        }
+        assert_eq!(state_of(&text, Setting::Update.label()), "on");
+        assert_eq!(state_of(&text, Setting::Pictures.label()), "auto");
+
+        // Every word in turn, and back to the first.
+        for want in ["kitty", "sixel", "iterm2", "halfblocks", "auto"] {
+            apply(app, frame, area(), Setting::Pictures.action());
+            let (buf, laid) = paint(app, frame, highlighter, history, area());
+            let (text, _) = drawn(&buf, &laid);
+            assert_eq!(
+                state_of(&text, Setting::Pictures.label()),
+                want,
+                "the pictures row does not read {want:?} after a flip:\n{text}"
+            );
+        }
+    });
+}
+
+#[test]
+fn env_marker_drawn() {
+    let mut pane = Pane::open("menu-env-rows");
+    pane.with(|app, frame, highlighter, history| {
+        app.set_overrides(vigia::Overrides {
+            update: Some(false),
+            pictures: Some(vigia::pictures::Choice::Sixel),
+        });
+        apply(app, frame, area(), Action::ToggleMenu);
+        let (buf, laid) = paint(app, frame, highlighter, history, area());
+        let (text, _) = drawn(&buf, &laid);
+        let row = |label: &str| {
+            text.lines()
+                .find(|line| line.contains(label))
+                .unwrap_or_else(|| panic!("no row for {label:?}:\n{text}"))
+                .to_owned()
+        };
+        assert!(
+            row(Setting::Update.label()).contains("env off"),
+            "the update row does not say the environment turns it off:\n{text}"
+        );
+        assert!(
+            row(Setting::Pictures.label()).contains("env sixel"),
+            "the pictures row does not say the environment picks sixel:\n{text}"
+        );
+        // The state cell is still the file's, so a flip still shows.
+        assert_eq!(state_of(&text, Setting::Pictures.label()), "auto");
+        apply(app, frame, area(), Setting::Pictures.action());
+        assert_eq!(
+            app.config().pictures,
+            vigia::pictures::Choice::Kitty,
+            "a flip under an override did not move what the file is written with"
+        );
+    });
+}
+
+#[test]
+fn launch_rows_narrow() {
+    // At the narrowest box the hint gives way, and the name and the word survive.
+    let mut pane = Pane::open("menu-launch-narrow");
+    pane.with(|app, frame, highlighter, history| {
+        for _ in 0..4 {
+            apply(app, frame, area(), Setting::Pictures.action());
+        }
+        let mut narrowest = None;
+        for width in 20..WIDE {
+            let at = Rect::new(0, 0, width, TALL);
+            if !app.menu_open() {
+                apply(app, frame, at, Action::ToggleMenu);
+            }
+            let (buf, laid) = paint(app, frame, highlighter, history, at);
+            if laid.menu.is_some() {
+                narrowest = Some(drawn(&buf, &laid).0);
+                break;
+            }
+        }
+        let text = narrowest.expect("no width drew the menu");
+        assert_eq!(
+            state_of(&text, Setting::Pictures.label()),
+            "halfblocks",
+            "the widest word does not fit the narrowest box:\n{text}"
+        );
+        assert!(
+            text.contains(Setting::Pictures.label()),
+            "the pictures row lost its name:\n{text}"
+        );
     });
 }

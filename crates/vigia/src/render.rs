@@ -15,7 +15,7 @@ use vigia_core::{
 use crate::app::Voice;
 use crate::glyphs::Glyphs;
 use crate::input::{Grabbed, Hovered, OVERLAY_FRAME, Region, Regions, Selection, Sheet, Token};
-use crate::menu::{self, Menu, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
+use crate::menu::{self, ENV, Menu, NEXT_LAUNCH, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH};
 use crate::positions::{self, Positions};
 use crate::quote::Run;
 use crate::theme::Theme;
@@ -3086,6 +3086,25 @@ const MENU_LABEL: usize = {
     widest
 };
 
+/// Where a row's hint starts, counted from its label: past the widest label of
+/// a row that carries one, so the hints share a column.
+const MENU_HINT_AT: usize = {
+    let mut widest = 0;
+    let mut at = 0;
+    while at < SETTINGS.len() {
+        let len = SETTINGS[at].label().len();
+        if matches!(
+            SETTINGS[at],
+            menu::Setting::Update | menu::Setting::Pictures
+        ) && len > widest
+        {
+            widest = len;
+        }
+        at += 1;
+    }
+    widest + MENU_GAP
+};
+
 /// Where a row's label starts, counted from the box's own left edge, and the gap
 /// that rung wants beside the state cell. Widest first. The caret hangs two
 /// columns inside the inset rather than widening it, so the names keep their
@@ -3343,13 +3362,13 @@ fn spelled_age(when: i64, now: i64) -> String {
 pub fn menu_cell(area: Rect, chrome: &Chrome, files: usize) -> Option<Rect> {
     let menu = chrome.menu?;
     // The reset spells no state, so there is no cell for a receipt to run over.
-    if !matches!(menu::ROWS.get(menu.caret.at)?, menu::Row::Toggle(_)) {
+    let menu::Row::Toggle(setting) = menu::ROWS.get(menu.caret.at)? else {
         return None;
-    }
+    };
     let footer = Footer::plan(area, chrome, files).height();
     let plan = menu_drawn(area, footer, margins_of(area.width), menu)?;
     let window = menu.caret.window(plan.rows);
-    Some(plan.state_cell(menu.caret.at.checked_sub(window)?))
+    Some(plan.state_cell(menu.caret.at.checked_sub(window)?, setting.width()))
 }
 
 /// The plan for one open menu on this pane, or `None` where it draws none.
@@ -3395,16 +3414,16 @@ impl MenuPlan {
         overlay_target(self.area, self.close)
     }
 
-    /// The state cell of the row `offset` rows down the drawn window. It ends
-    /// `inset` columns from the right edge where a label begins `inset` from the
-    /// left, so the two margins stay equal however wide the box is.
-    fn state_cell(&self, offset: usize) -> Rect {
-        let x =
-            self.area.x + self.area.width - u16::try_from(self.inset + STATE_WIDTH).unwrap_or(0);
+    /// The state cell, `width` columns wide, of the row `offset` rows down the
+    /// drawn window. It ends `inset` columns from the right edge where a label
+    /// begins `inset` from the left, so the two margins stay equal however wide the
+    /// box is.
+    fn state_cell(&self, offset: usize, width: usize) -> Rect {
+        let x = self.area.x + self.area.width - u16::try_from(self.inset + width).unwrap_or(0);
         Rect {
             x,
             y: self.area.y + 2 + u16::try_from(offset).unwrap_or(0),
-            width: u16::try_from(STATE_WIDTH).unwrap_or(0),
+            width: u16::try_from(width).unwrap_or(0),
             height: 1,
         }
     }
@@ -4321,25 +4340,57 @@ impl Painter<'_> {
         if carets {
             self.put(area.x + inset - 2, y, CARET, 1, name);
         }
-        let room = usize::from(area.width).saturating_sub(plan.inset * 2 + STATE_WIDTH);
         let menu::Row::Toggle(setting) = row else {
             // The reset, which throws something away and so has no state to spell.
+            let room = usize::from(area.width).saturating_sub(plan.inset * 2 + STATE_WIDTH);
             self.put(area.x + inset, y, RESET, room, name);
             return;
         };
-        self.put(area.x + inset, y, setting.label(), room, name);
+        let width = setting.width();
+        let room = usize::from(area.width).saturating_sub(plan.inset * 2 + width);
+        let label = setting.label();
+        self.put(area.x + inset, y, label, room, name);
+        if let Some(hint) = setting.hint(menu.settings) {
+            let at = MENU_HINT_AT.max(width_of(label) + MENU_GAP);
+            self.menu_hint(
+                area.x + inset + u16::try_from(at).unwrap_or(0),
+                y,
+                room.saturating_sub(at + MENU_GAP),
+                hint,
+            );
+        }
 
-        let on = setting.of(menu.settings);
-        let (word, ink) = if on {
-            (ON, self.theme.added)
-        } else {
-            (OFF, self.theme.removed)
+        let word = setting.word(menu.settings);
+        let ink = match word {
+            ON => self.theme.added,
+            OFF => self.theme.removed,
+            _ => self.theme.chrome,
         };
-        // Right-aligned by placing it: the field and both words are constants, so
+        // Right-aligned by placing it: the field and every word are constants, so
         // the pad is arithmetic rather than an allocation per drawn row.
-        let cell = plan.state_cell(offset);
-        let pad = u16::try_from(STATE_WIDTH - width_of(word)).unwrap_or(0);
+        let cell = plan.state_cell(offset, width);
+        let pad = u16::try_from(width.saturating_sub(width_of(word))).unwrap_or(0);
         self.put(cell.x + pad, y, word, width_of(word), ink);
+    }
+
+    /// What a row read only at launch says after its name, in `room` columns, or
+    /// nothing where even its shortest form does not fit.
+    fn menu_hint(&mut self, x: u16, y: u16, room: usize, hint: menu::Hint) {
+        let ink = self.theme.chrome_dim;
+        match hint {
+            menu::Hint::Launch if width_of(NEXT_LAUNCH) <= room => {
+                self.put(x, y, NEXT_LAUNCH, room, ink);
+            }
+            menu::Hint::Env(word) if width_of(ENV) <= room => {
+                self.put(x, y, ENV, room, ink);
+                // The value only where it fits whole: a cut word reads as another.
+                if width_of(ENV) + 1 + width_of(word) <= room {
+                    let after = u16::try_from(width_of(ENV) + 1).unwrap_or(0);
+                    self.put(x + after, y, word, width_of(word), ink);
+                }
+            }
+            menu::Hint::Launch | menu::Hint::Env(_) => {}
+        }
     }
 
     fn positions(&mut self, plan: &PositionsPlan, list: &Positions, reading: Reading, now: i64) {

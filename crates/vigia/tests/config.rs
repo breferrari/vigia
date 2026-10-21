@@ -2,6 +2,7 @@
 
 use ratatui::layout::Rect;
 use std::assert_matches;
+use vigia::pictures::Choice;
 use vigia::{Action, App, Config, ConfigError, Pointing, body_layout, config, diff_height};
 
 /// A home directory holding a config file, or holding none.
@@ -134,6 +135,8 @@ fn each_key_sets_the_state_the_pane_starts_in() {
             // Untouched by the file, so the hand-written defaults hold: on.
             notes: true,
             links: true,
+            update: true,
+            pictures: Choice::Auto,
             hide: None,
         }
     );
@@ -162,6 +165,8 @@ fn the_key_still_toggles_from_the_configured_state() {
         notes: false,
         icons: false,
         links: false,
+        update: true,
+        pictures: Choice::Auto,
         hide: None,
     };
     let mut app = App::configured(&config);
@@ -343,6 +348,7 @@ fn config_error_spacing() {
             | ConfigError::UnknownKey { .. }
             | ConfigError::BadPattern { .. }
             | ConfigError::UnknownValue { .. }
+            | ConfigError::UnknownPictures { .. }
             | ConfigError::MissingValue { .. }
             | ConfigError::MissingSeparator { .. }
             | ConfigError::RepeatedKey { .. } => err.to_string(),
@@ -375,6 +381,8 @@ fn comments_and_blank_lines_and_a_byte_order_mark_are_all_survivable() {
             // Untouched by the file, so the hand-written defaults hold: on.
             notes: true,
             links: true,
+            update: true,
+            pictures: Choice::Auto,
             hide: None,
         }
     );
@@ -523,6 +531,8 @@ fn the_configured_pane_is_the_pane_the_keys_would_have_made() {
         wrap: false,
         notes: false,
         icons: false,
+        update: true,
+        pictures: Choice::Auto,
         hide: None,
     });
 
@@ -596,6 +606,8 @@ fn every_key_is_a_field_and_every_field_is_a_key() {
             wrap: true,
             notes: true,
             icons: true,
+            update: true,
+            pictures: Choice::Auto,
             hide: None,
         },
         "setting every key in KEYS did not set every field, so the two have drifted"
@@ -744,10 +756,10 @@ fn every_view_toggle_has_a_key_or_a_reason() {
 
 #[test]
 fn every_key_the_file_accepts_is_a_gesture_or_is_config_only() {
-    // The three `SPEC.md` §11.2 B6 names as reaching no key at all, which is why
-    // they cannot come out of the sweep. `persist` joined them with B22: it is a row
-    // of the config menu and no key of its own.
-    const CONFIG_ONLY: [&str; 3] = ["icons", "links", "persist"];
+    // The ones `SPEC.md` §11.2 B6 names as reaching no key at all, which is why
+    // they cannot come out of the sweep. `persist` and `update` are rows of the
+    // config menu and no key of their own.
+    const CONFIG_ONLY: [&str; 4] = ["icons", "links", "update", "persist"];
 
     let mut reachable: Vec<&str> = actions_keys_reach()
         .iter()
@@ -776,7 +788,9 @@ fn every_key_the_file_accepts_is_a_gesture_or_is_config_only() {
     // them the parser refuses is a list that has drifted, and a key on neither
     // that the parser takes is a setting no gate here can see.
     for key in config::KEYS.into_iter().chain(config::VALUES) {
-        let source = if config::VALUES.contains(&key) {
+        let source = if key == "pictures" {
+            format!("{key} = kitty\n")
+        } else if config::VALUES.contains(&key) {
             format!("{key} = ^x\n")
         } else {
             format!("{key} = on\n")
@@ -1128,7 +1142,7 @@ fn a_rewrite_adds_no_line_the_reader_did_not_have() {
             "{what}: the rewrite left the first line with nothing on it:\n{out:?}"
         );
         assert!(
-            out.ends_with(&format!("persist = off{ends}")),
+            out.ends_with(&format!("pictures = auto{ends}")),
             "{what}: the appended keys did not take the {ends:?} the file opens \
              with:\n{out:?}"
         );
@@ -1346,4 +1360,82 @@ fn a_save_through_a_link_with_nothing_behind_it_makes_what_it_names() {
             "{what}: what was saved is not what reads back through the link"
         );
     }
+}
+
+#[test]
+fn update_key_read() {
+    assert!(
+        config::parse("").expect("empty").update,
+        "the check is off by default"
+    );
+    assert!(
+        !config::parse("update = off\n").expect("a config").update,
+        "`update = off` did not turn the check off"
+    );
+    assert_matches!(
+        config::parse("update = auto\n"),
+        Err(ConfigError::UnknownValue { line: 1, .. }),
+        "the file takes on or off, and auto is the variable's word"
+    );
+}
+
+#[test]
+fn pictures_key_read() {
+    assert_eq!(config::parse("").expect("empty").pictures, Choice::Auto);
+    for choice in Choice::ALL {
+        let source = format!("pictures = {}  # mine\n", choice.word());
+        assert_eq!(
+            config::parse(&source).expect("a config").pictures,
+            choice,
+            "{source:?} was not read"
+        );
+    }
+    let refused = config::parse("rail = on\npictures = png\n").expect_err("png was accepted");
+    assert_eq!(
+        refused,
+        ConfigError::UnknownPictures {
+            line: 2,
+            value: "png".to_owned()
+        }
+    );
+    let said = refused.to_string();
+    assert!(
+        said.contains("line 2") && said.contains("halfblocks"),
+        "the refusal does not name its line and the words it takes: {said}"
+    );
+    assert!(
+        config::parse("pictures = Kitty\n").is_err(),
+        "the file is case-sensitive like every other value in it"
+    );
+}
+
+#[test]
+fn launch_keys_round_trip() {
+    let source = "# mine\npictures   = sixel # the terminal lies\nupdate = on\n";
+    let wanted = Config {
+        update: false,
+        pictures: Choice::Halfblocks,
+        ..config::parse(source).expect("the fixture parses")
+    };
+    let out = config::rewrite(source, &wanted);
+    assert!(
+        out.contains("pictures   = halfblocks # the terminal lies\n"),
+        "the pictures line lost its spacing or comment:\n{out}"
+    );
+    assert!(
+        out.contains("update = off\n"),
+        "update was not rewritten:\n{out}"
+    );
+    assert_eq!(config::parse(&out).expect("the rewrite parses"), wanted);
+
+    // A file without either key gains both.
+    let out = config::rewrite("rail = on\n", &wanted);
+    assert_eq!(config::parse(&out).expect("the rewrite parses"), wanted);
+    assert_eq!(
+        out.lines()
+            .filter(|line| line.starts_with("pictures"))
+            .count(),
+        1,
+        "pictures was appended more than once:\n{out}"
+    );
 }

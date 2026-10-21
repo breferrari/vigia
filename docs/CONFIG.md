@@ -9,9 +9,9 @@ Three independent settings decide how the pane is **drawn**, and most confusion 
 | 🎨 **Palette** | `VIGIA_THEME` (a name, or a path) → `~/.config/vigia/theme` → **your terminal's own background** → `ansi` |
 | 🔦 **Depth** | `VIGIA_COLOR` → `NO_COLOR` → `TERM=dumb` → `COLORTERM` → `TERM_PROGRAM` → `TERM` → 16 |
 | ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → **an engine that draws octants and names its version** → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
-| 🖼️ **Pictures** | `VIGIA_PICTURES` → **your terminal's answer** (Kitty graphics, then Sixel) → `TERM_PROGRAM`/`TERM`/`WT_SESSION`, when the cell size is known → half-blocks, at 24-bit colour only |
-| 🪟 **View** | `~/.config/vigia/config` → everything off, except `links` and `notes`, and nothing hidden |
-| 🔔 **Updates** | one look at crates.io when the pane opens, and a footer line only if there is a newer release. `VIGIA_UPDATE=off` declines it |
+| 🖼️ **Pictures** | `VIGIA_PICTURES` → `pictures` in `~/.config/vigia/config` → **your terminal's answer** (Kitty graphics, then Sixel) → `TERM_PROGRAM`/`TERM`/`WT_SESSION`, when the cell size is known → half-blocks, at 24-bit colour only |
+| 🪟 **View** | `~/.config/vigia/config` → everything off, except `links`, `notes` and `update`, and nothing hidden |
+| 🔔 **Updates** | one look at crates.io when the pane opens, and a footer line only if there is a newer release. `VIGIA_UPDATE=off`, or `update = off` in `~/.config/vigia/config`, declines it |
 
 ```sh
 VIGIA_THEME=ansi     # the fallback: the sixteen names, inherited from your scheme
@@ -22,7 +22,7 @@ VIGIA_THEME=~/themes/mine
 
 Nothing else is read. There is no flag for any of them, and no setting in one can change another.
 
-The update look is one request, once, and it never repeats. It costs the opening frame nothing, because it runs beside the pane and not in front of it. Every way it can go wrong (no network, a slow answer, a reply that makes no sense) has the same result as having nothing to say: **silence**. If you prefer that it does not ask at all, set `VIGIA_UPDATE=off`.
+The update look is one request, once, and it never repeats. It costs the opening frame nothing, because it runs beside the pane and not in front of it. Every way it can go wrong (no network, a slow answer, a reply that makes no sense) has the same result as having nothing to say: **silence**. If you prefer that it does not ask at all, write `update = off` in `~/.config/vigia/config`, or set `VIGIA_UPDATE=off` for one run. The variable wins over the file: `VIGIA_UPDATE=auto` asks even when the file says `off`.
 
 A theme file is usually about three lines. `base` picks a palette to start from and every line after it overrides one thing, so this keeps your terminal's own sixteen colours and adds the two backgrounds `ansi` declines to guess:
 
@@ -92,6 +92,8 @@ VIGIA_PICTURES=iterm2
 VIGIA_PICTURES=halfblocks   # two pixels a cell, in any terminal with 24-bit colour
 VIGIA_PICTURES=auto         # decide for me, which is the default
 ```
+
+To keep a choice, write it in `~/.config/vigia/config` as `pictures = sixel`, or pick it from the `Pictures` row of the `m` menu. It takes the same five words. `VIGIA_PICTURES` wins over the file when it is set, and the menu row then says `env` and the variable's value. The choice is read when the pane starts, so a change applies the next time you open it.
 
 </details>
 
@@ -170,15 +172,17 @@ wrap     = on     # a long line continues on the row below
 notes    = off    # the note rows under their lines; this is the off switch
 icons    = on     # a file-type glyph before every listed path (needs a Nerd Font)
 links    = off    # paths are clickable file:// links; this is the off switch
+update   = off    # do not ask crates.io for a newer release; this is the off switch
+pictures = sixel  # how pictures are drawn: auto, kitty, sixel, iterm2 or halfblocks
 persist  = on     # write what you flip in the menu back into this file
 hide     = ^target/|\.lock$   # paths to keep out of the pane entirely
 ```
 
 Same shape as the theme file: one key per line, `#` for a comment, and a key it does not know is an error and not ignored. No file is the ordinary case. The keys still work, so a setting is a starting point rather than a decision: `s` gives the whole diff back for as long as you want it. With `persist` on, the menu writes your flips back here and leaves every other line exactly as you wrote it, `hide` and your comments included.
 
-**`hide` is the one setting that takes a value rather than `on` or `off`.** It is a regular expression, and it is *searched* rather than anchored, so `^target/|\.lock$` reads the way it looks and a bare `target` hides every path with that word anywhere in it. A matching file is gone from the list, the diff and the counts. The header says `12 hidden` beside the changed count, so you always know something is being kept from you. If your pattern covers everything that changed, the empty pane says `12 hidden` and does not pretend the tree is clean. The notes server does not take the pattern: it is about what the pane draws, and your agent has no pane. A pattern that does not compile is an error with its line on it, before the screen is taken. `#` still opens a comment, so a pattern that needs a literal one writes `[#]`. There is no key for it, deliberately: a gesture is for what changes while you are watching, and a file is for what was true before you opened the pane.
+**`hide` and `pictures` take a value rather than `on` or `off`.** `pictures` is described under Pictures above. `hide` is a regular expression, and it is *searched* rather than anchored, so `^target/|\.lock$` reads the way it looks and a bare `target` hides every path with that word anywhere in it. A matching file is gone from the list, the diff and the counts. The header says `12 hidden` beside the changed count, so you always know something is being kept from you. If your pattern covers everything that changed, the empty pane says `12 hidden` and does not pretend the tree is clean. The notes server does not take the pattern: it is about what the pane draws, and your agent has no pane. A pattern that does not compile is an error with its line on it, before the screen is taken. `#` still opens a comment, so a pattern that needs a literal one writes `[#]`. There is no key or menu row for it, deliberately: a gesture is for what changes while you are watching, and a file is for what was true before you opened the pane.
 
-**`links` and `notes` are the two keys that start on**, so both are written above as the off switches they are. Every listed path is an OSC 8 hyperlink to its file, so a Ctrl+click (or however your terminal opens links) lands in your editor. A terminal that does not speak OSC 8 shows the same text and swallows the link, which is why nothing has to be detected. And a note you left for the agent draws its own rows under the line it is on, which `notes = off` turns down to the mark alone, the way `c` does for a session.
+**`links`, `notes` and `update` are the keys that start on**, so they are written above as the off switches they are. `update` and `pictures` are read when the pane starts, so the menu marks their rows `next launch`, and `VIGIA_UPDATE` and `VIGIA_PICTURES` win over them for one run. Every listed path is an OSC 8 hyperlink to its file, so a Ctrl+click (or however your terminal opens links) lands in your editor. A terminal that does not speak OSC 8 shows the same text and swallows the link, which is why nothing has to be detected. And a note you left for the agent draws its own rows under the line it is on, which `notes = off` turns down to the mark alone, the way `c` does for a session.
 
 **`follow = off` starts the pane without following.** Following the newest change is what makes the pane correct without being touched, so it is on unless the file says otherwise, and `f` turns it on or off for a session.
 

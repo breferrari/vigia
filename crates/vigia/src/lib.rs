@@ -61,8 +61,8 @@ pub use input::{
     drag_action, hover_after, patience, repainted, scroll_mark, selection_after, settled,
 };
 pub use menu::{
-    Caret, Menu, MenuRoute, OFF, ON, RESET, ROWS, SETTINGS, STATE_WIDTH, Setting, Settings,
-    menu_route,
+    CHOICE_WIDTH, Caret, ENV, Hint, Menu, MenuRoute, NEXT_LAUNCH, OFF, ON, Overrides, RESET, ROWS,
+    SETTINGS, STATE_WIDTH, Setting, Settings, menu_route,
 };
 pub use motion::{
     ALERT_ARRIVING, ARRIVED_LINGER, ARRIVING_FRAME, BOX_ARRIVING, LEAVING, NOTICE_ARRIVING,
@@ -388,15 +388,19 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // environment anything. An unrecognised value is refused, not defaulted.
     let glyphs = Glyphs::detect()?;
 
-    // Only the override is read here, so a value it refuses is reported on a
-    // terminal the reader can still read. The query itself waits for the first
-    // paint.
-    let forced = pictures::forced(&|key: &str| std::env::var(key).ok())?;
-
     // Here rather than inside `App` for the palette's reason: a config file that
     // does not parse has to be reported on a terminal the reader can still read.
     // `SPEC.md` §11.2 B6.
     let config = config::from_env(|key| std::env::var(key).ok())?;
+
+    // Only the override is read here, so a value it refuses is reported on a
+    // terminal the reader can still read. The query itself waits for the first
+    // paint.
+    let forced = pictures::forced(&|key: &str| std::env::var(key).ok(), config.pictures)?;
+    let overrides = menu::Overrides {
+        update: update::env_wanted(|key| std::env::var(key).ok())?,
+        pictures: pictures::env_choice(&|key: &str| std::env::var(key).ok())?,
+    };
 
     // Resolved beside the read rather than at the first flip: a reader with no home
     // has nowhere to keep settings, and that is a fact about the environment the
@@ -404,7 +408,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let config_path = theme::home_file(config::CONFIG_FILE, &|key| std::env::var(key).ok());
 
     // Read here for that same reason, and acted on after the first paint.
-    let update = update::wanted(|key| std::env::var(key).ok())?;
+    let update = update::wanted(|key| std::env::var(key).ok(), config.update)?;
 
     // Where the reader's notes live, resolved once with the rest of the
     // environment. `None` with no home to keep them under, which the first click
@@ -444,7 +448,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     let mut shell = Shell {
         pictures,
         session: Session::enter(writer_wakes(&tx))?,
-        app: App::configured(&config),
+        app: {
+            let mut app = App::configured(&config);
+            app.set_overrides(overrides);
+            app
+        },
         hide: config.hide.clone(),
         config_path,
         // Its 318µs of grammar *loading* lands before first paint, which is

@@ -204,7 +204,7 @@ It is read every time the pane starts. [**Theme**](https://github.com/breferrari
 
 **Settings** (staged changes, wrapping, the note rows, what the pane opens as) live in `~/.config/vigia/config`. Press `m` in the pane to switch them, and with `persist` on your choices are written back to that file.
 
-For a single run, `VIGIA_THEME` and `NO_COLOR` still work, and so do `VIGIA_PICTURES` for how pictures are drawn and `VIGIA_UPDATE=off` for the update check. [**Configuration**](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) covers them.
+The config file also holds `pictures`, for how pictures are drawn, and `update`, for the update check. For a single run, `VIGIA_THEME` and `NO_COLOR` still work, and so do `VIGIA_PICTURES` and `VIGIA_UPDATE=off`, which win over the file. [**Configuration**](https://github.com/breferrari/vigia/blob/main/docs/CONFIG.md) covers them.
 
 ---
 
@@ -231,7 +231,7 @@ These pages track `main`. For a released version, browse its tag.
 
 **Does it need an agent?** No. It is a live diff on its own. An agent is only needed to receive your notes.
 
-**Does it go online?** Once per start, to ask crates.io whether a newer release exists. `VIGIA_UPDATE=off` turns that off. Nothing else leaves the machine.
+**Does it go online?** Once per start, to ask crates.io whether a newer release exists. `update = off` in the config file, or `VIGIA_UPDATE=off`, turns that off. Nothing else leaves the machine.
 
 **Does it need git-lfs?** No. The pane never starts `git-lfs`, and it reads an LFS image from the local LFS store.
 

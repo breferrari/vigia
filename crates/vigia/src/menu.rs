@@ -5,6 +5,7 @@ use ratatui::crossterm::event::{
 };
 
 use crate::input::{Action, Sheet};
+use crate::pictures::Choice;
 
 /// One toggle the menu draws.
 ///
@@ -30,6 +31,11 @@ pub enum Setting {
     Icons,
     /// No key either.
     Links,
+    /// The update check. No key, and read at the next launch.
+    Update,
+    /// How pictures are drawn. No key, read at the next launch, and the one row
+    /// that cycles through words rather than flipping.
+    Pictures,
     /// Write what the reader flips back into the file. No key: the menu's own row
     /// and nothing else, which is what keeps it a thing the reader asked for.
     Persist,
@@ -40,7 +46,7 @@ pub enum Setting {
 /// The order is the reader's drawing: what the body is made of first, then what
 /// a listed path carries. `b` is absent because where the pane stands is a
 /// state rather than a setting, which is `SPEC.md` §11.2 B22's rule.
-pub const SETTINGS: [Setting; 10] = [
+pub const SETTINGS: [Setting; 12] = [
     Setting::Follow,
     Setting::Rail,
     Setting::Single,
@@ -50,6 +56,8 @@ pub const SETTINGS: [Setting; 10] = [
     Setting::Notes,
     Setting::Icons,
     Setting::Links,
+    Setting::Update,
+    Setting::Pictures,
     Setting::Persist,
 ];
 
@@ -66,6 +74,35 @@ pub const OFF: &str = "off";
 /// that does not.
 pub const STATE_WIDTH: usize = 3;
 
+/// Columns the pictures row's state cell takes, which is its widest word. Its own
+/// rather than [`STATE_WIDTH`], so the other rows keep their narrow cell.
+pub const CHOICE_WIDTH: usize = {
+    let mut widest = 0;
+    let mut at = 0;
+    while at < Choice::ALL.len() {
+        let len = Choice::ALL[at].word().len();
+        if len > widest {
+            widest = len;
+        }
+        at += 1;
+    }
+    widest
+};
+
+/// What a row read only at launch says beside its name.
+pub const NEXT_LAUNCH: &str = "next launch";
+
+/// What it says instead when the environment overrides the file.
+pub const ENV: &str = "env";
+
+/// What a row read only at launch says beside its name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hint {
+    /// A flip applies at the next launch: [`NEXT_LAUNCH`].
+    Launch,
+    /// The environment sets it, to this word, whatever the file says.
+    Env(&'static str),
+}
 impl Setting {
     /// What the row spells.
     #[must_use]
@@ -80,6 +117,8 @@ impl Setting {
             Self::Notes => "Notes",
             Self::Icons => "File icons",
             Self::Links => "Path links",
+            Self::Update => "Update check",
+            Self::Pictures => "Pictures",
             Self::Persist => "Save settings",
         }
     }
@@ -97,14 +136,17 @@ impl Setting {
             Self::Notes => Action::ToggleNotes,
             Self::Icons => Action::ToggleIcons,
             Self::Links => Action::ToggleLinks,
+            Self::Update => Action::ToggleUpdate,
+            Self::Pictures => Action::CyclePictures,
             Self::Persist => Action::TogglePersist,
         }
     }
 
-    /// Where it stands right now.
+    /// The word for where it stands right now: [`ON`] or [`OFF`], or the
+    /// pictures choice.
     #[must_use]
-    pub const fn of(self, settings: Settings) -> bool {
-        match self {
+    pub const fn word(self, settings: Settings) -> &'static str {
+        let on = match self {
             Self::Follow => settings.follow,
             Self::Rail => settings.rail,
             Self::Single => settings.single,
@@ -114,9 +156,47 @@ impl Setting {
             Self::Notes => settings.notes,
             Self::Icons => settings.icons,
             Self::Links => settings.links,
+            Self::Update => settings.update,
+            Self::Pictures => return settings.pictures.word(),
             Self::Persist => settings.persist,
+        };
+        if on { ON } else { OFF }
+    }
+
+    /// Columns its state cell takes.
+    #[must_use]
+    pub const fn width(self) -> usize {
+        match self {
+            Self::Pictures => CHOICE_WIDTH,
+            _ => STATE_WIDTH,
         }
     }
+
+    /// What it says beside its name, for the two rows read only at launch.
+    #[must_use]
+    pub const fn hint(self, settings: Settings) -> Option<Hint> {
+        match self {
+            Self::Update => Some(match settings.env.update {
+                Some(true) => Hint::Env("auto"),
+                Some(false) => Hint::Env(OFF),
+                None => Hint::Launch,
+            }),
+            Self::Pictures => Some(match settings.env.pictures {
+                Some(choice) => Hint::Env(choice.word()),
+                None => Hint::Launch,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// What the environment sets over the file, for the rows that say so.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Overrides {
+    /// `VIGIA_UPDATE`, where it is set.
+    pub update: Option<bool>,
+    /// `VIGIA_PICTURES`, where it is set.
+    pub pictures: Option<Choice>,
 }
 
 /// Every toggle the pane has, as it stands.
@@ -143,6 +223,12 @@ pub struct Settings {
     pub icons: bool,
     /// Whether a listed path is an OSC 8 hyperlink.
     pub links: bool,
+    /// Whether the file asks for the update check at the next launch.
+    pub update: bool,
+    /// How the file asks for pictures to be drawn at the next launch.
+    pub pictures: Choice,
+    /// What the environment sets over the file. No flip moves it.
+    pub env: Overrides,
     /// Whether a flip is written back into the reader's own file.
     pub persist: bool,
 }
@@ -166,7 +252,7 @@ pub enum Row {
 }
 
 /// Every drawn row, top to bottom.
-pub const ROWS: [Row; 14] = [
+pub const ROWS: [Row; 16] = [
     Row::Toggle(Setting::Follow),
     Row::Toggle(Setting::Rail),
     Row::Toggle(Setting::Single),
@@ -176,6 +262,8 @@ pub const ROWS: [Row; 14] = [
     Row::Toggle(Setting::Notes),
     Row::Toggle(Setting::Icons),
     Row::Toggle(Setting::Links),
+    Row::Toggle(Setting::Update),
+    Row::Toggle(Setting::Pictures),
     Row::Gap,
     Row::Rule,
     Row::Gap,
