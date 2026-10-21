@@ -672,7 +672,7 @@ static OFF_WORKER: AtomicU64 = AtomicU64::new(0);
 const WORKER: &str = "vigia-pictures";
 /// The thread that scores renames.
 const PAIRS: &str = "vigia-pairs";
-/// The most pairs remembered as sent before the record starts again.
+/// The most pairs remembered as sent: one for each score the record holds.
 const ASKED_KEPT: usize = vigia_core::PAIRS_KEPT;
 
 pub use vigia_core::{Stage, panic_next};

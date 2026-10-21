@@ -1478,8 +1478,7 @@ fn rename_frame_many_small() {
     );
 }
 
-/// [`support::refactor_files`] of a hundred, committed: with `moved` the old
-/// files go, ten thousand pairs to score; without, they stay.
+/// A hundred-file refactor, the old files removed only when `moved`.
 fn refactor_repo(name: &str, moved: bool) -> Scratch {
     let (files, written) = support::refactor_files(100);
     let scratch = Scratch::new(name);

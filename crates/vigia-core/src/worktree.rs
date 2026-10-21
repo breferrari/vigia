@@ -93,7 +93,7 @@ pub struct Worktree {
     worktree_pointers: RefCell<HashMap<u64, bool>>,
     /// The scores an LFS pair took without its object, by the object's path.
     lfs_unfetched: RefCell<HashMap<rename::PairKey, PathBuf>>,
-    /// The most scores `pair_scores` holds.
+    /// [`PAIRS_KEPT`], lower in a test that fills the record.
     pairs_kept: Cell<usize>,
     /// The scores a full record may drop this frame, found when first needed.
     stale_keys: RefCell<Option<Vec<rename::PairKey>>>,
@@ -623,7 +623,7 @@ impl Worktree {
                             self.side_reads.update(|v| v + 1);
                             let size = self.repo().find_header(id).ok()?.size();
                             let mut sizes = self.blob_sizes.borrow_mut();
-                            if sizes.len() >= SIZES_KEPT {
+                            if sizes.len() >= SIDES_KEPT {
                                 sizes.clear();
                             }
                             sizes.insert(id, size);
@@ -658,7 +658,7 @@ impl Worktree {
                                 };
                                 let pointer = picture::lfs_oid(&read).is_some();
                                 let mut seen = self.worktree_pointers.borrow_mut();
-                                if seen.len() >= SIZES_KEPT {
+                                if seen.len() >= SIDES_KEPT {
                                     seen.clear();
                                 }
                                 seen.insert(stamp, pointer);
@@ -2929,7 +2929,7 @@ const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 pub const PAIRS_KEPT: usize = 131_072;
 
 /// The most blob sizes kept, one per side rather than per pair.
-const SIZES_KEPT: usize = 4096;
+const SIDES_KEPT: usize = 4096;
 
 /// The most walks a frame of `files` changes takes to size every side, and
 /// to list every pair for the worker, before it goes quiet, when no score
