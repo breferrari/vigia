@@ -770,14 +770,34 @@ impl Worktree {
             // Git's four candidate slots for each addition, offered every
             // removal in order: a slot is taken by the first worst entry, and
             // only by one strictly better, ranked by score, then same name. A
-            // pair it could not score holds a slot at 0, as git's does.
+            // pair it could not score holds a slot at 0, as git's does. Once the
+            // slots are full such a pair takes none unless it shares the name, so
+            // only the first few, the scored and the same-named are offered.
+            let sources = left(&every_removed);
+            let mut scored_for: HashMap<usize, Vec<usize>> = HashMap::new();
+            for &(from, to) in known.keys() {
+                scored_for.entry(to).or_default().push(from);
+            }
+            let mut named_as: HashMap<&str, Vec<usize>> = HashMap::new();
+            for &from in &sources {
+                named_as.entry(name(from)).or_default().push(from);
+            }
             let rank =
                 |slot: &Option<(u64, bool, usize)>| slot.map(|(score, same, _)| (score, same));
             let mut scored = Vec::new();
             for to in left(&added) {
                 let mut slots: [Option<(u64, bool, usize)>; rename::CANDIDATES] =
                     [None; rename::CANDIDATES];
-                for from in left(&every_removed) {
+                let mut offered: Vec<usize> = sources
+                    .iter()
+                    .take(rename::CANDIDATES)
+                    .chain(scored_for.get(&to).into_iter().flatten())
+                    .chain(named_as.get(name(to)).into_iter().flatten())
+                    .copied()
+                    .collect();
+                offered.sort_unstable();
+                offered.dedup();
+                for from in offered {
                     let offered = Some((
                         known.get(&(from, to)).copied().unwrap_or(0),
                         name(from) == name(to),
