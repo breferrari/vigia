@@ -435,3 +435,45 @@ fn record_keeps_current_pairs() {
         "a full record dropped a score the last frame asked about"
     );
 }
+
+#[test]
+fn record_over_cap() {
+    // 65 by 65 binaries is 4,225 live pairs, more than the record holds. Once
+    // it is full of them it must hold still, or the worker would score the
+    // same pairs again every frame.
+    let olds: Vec<(String, Vec<u8>)> = (0..65)
+        .map(|n| (format!("old/{n:02}.bin"), noise(300 + n, 1_000)))
+        .collect();
+    let news: Vec<(String, Vec<u8>)> = (0..65)
+        .map(|n| (format!("new/{n:02}.bin"), noise(400 + n, 1_000)))
+        .collect();
+    let scratch = moved("rename-over-cap", &refs(&olds), &refs(&news));
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut quiet = 0;
+    for _ in 0..200 {
+        frame.advance().expect("advance");
+        let pending = frame.unscored_pairs();
+        if pending.is_empty() {
+            quiet += 1;
+            if quiet == 5 {
+                break;
+            }
+            continue;
+        }
+        quiet = 0;
+        for candidate in pending {
+            frame.learn_pair(candidate.key, 0);
+        }
+    }
+    assert_eq!(quiet, 5, "the frames never stopped listing pairs");
+    let (epoch, scored) = (frame.pair_epoch(), frame.stats().pairs_scored);
+    for _ in 0..5 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(
+        (frame.pair_epoch(), frame.stats().pairs_scored),
+        (epoch, scored),
+        "a record full of live pairs started again or scored again"
+    );
+}
