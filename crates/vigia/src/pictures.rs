@@ -673,7 +673,7 @@ const WORKER: &str = "vigia-pictures";
 /// The thread that scores renames.
 const PAIRS: &str = "vigia-pairs";
 /// The most pairs remembered as sent before the record starts again.
-const ASKED_KEPT: usize = 4096;
+const ASKED_KEPT: usize = 131_072;
 
 pub use vigia_core::{Stage, panic_next};
 

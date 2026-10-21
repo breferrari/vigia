@@ -524,6 +524,7 @@ fn full_record_makes_room() {
         &[("b.bin", tail_changed(&old, 0.1))],
     );
     let worktree = scratch.worktree();
+    worktree.keep_pairs(4096);
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     // Past the frame's budget, the pair waits for the worker.
@@ -1063,6 +1064,7 @@ fn record_keeps_current_pairs() {
         &[("b.bin", tail_changed(&old, 0.1))],
     );
     let worktree = scratch.worktree();
+    worktree.keep_pairs(4096);
     let mut frame = worktree.frame();
     for n in 0..4096u64 {
         frame.learn_pair((u64::MAX - n, n), 0);
@@ -1114,6 +1116,7 @@ fn record_over_cap() {
             &refs(&news),
         );
         let worktree = scratch.worktree();
+        worktree.keep_pairs(4096);
         let mut frame = worktree.frame();
         let (mut quiet, mut asked, mut learned) = (0, Vec::new(), 0);
         for _ in 0..200 {
@@ -1180,6 +1183,7 @@ fn listed_room_no_wake() {
         .collect();
     let scratch = moved("rename-listed-room", &refs(&olds), &refs(&news));
     let worktree = scratch.worktree();
+    worktree.keep_pairs(4096);
     let mut frame = worktree.frame();
     for n in 0..3900u64 {
         frame.learn_pair((u64::MAX - n, n), 0);

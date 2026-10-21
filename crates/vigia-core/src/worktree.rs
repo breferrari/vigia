@@ -93,6 +93,8 @@ pub struct Worktree {
     worktree_pointers: RefCell<HashMap<u64, bool>>,
     /// The scores an LFS pair took without its object, by the object's path.
     lfs_unfetched: RefCell<HashMap<rename::PairKey, PathBuf>>,
+    /// The most scores `pair_scores` holds.
+    pairs_kept: Cell<usize>,
     /// Frames walked, which dates each score.
     pair_frame: Cell<u64>,
     /// Candidate bytes the current frame may still score.
@@ -154,6 +156,7 @@ impl Worktree {
             pair_scores: RefCell::new(HashMap::new()),
             lfs_unfetched: RefCell::new(HashMap::new()),
             worktree_pointers: RefCell::new(HashMap::new()),
+            pairs_kept: Cell::new(PAIRS_KEPT),
             pair_frame: Cell::new(0),
             pair_budget: Cell::new(rename::FRAME_BUDGET),
             unscored: RefCell::new(Vec::new()),
@@ -798,7 +801,7 @@ impl Worktree {
                     // Past what the scores hold with those listed, a new score
                     // would evict another.
                     None if self.pair_scores.borrow().len() + self.unscored.borrow().len()
-                        >= PAIRS_KEPT =>
+                        >= self.pairs_kept.get() =>
                     {
                         self.room_wanted.set(true);
                         self.pairs_unlisted.set(true);
@@ -983,7 +986,7 @@ impl Worktree {
         let last = self.pair_frame.get();
         self.pair_frame.set(last + 1);
         let mut scores = self.pair_scores.borrow_mut();
-        if scores.len() >= PAIRS_KEPT {
+        if scores.len() >= self.pairs_kept.get() {
             let before = scores.len();
             scores.retain(|_, kept| kept.frame == last);
             if scores.len() < before {
@@ -1024,7 +1027,7 @@ impl Worktree {
         let frame = self.pair_frame.get();
         let scores = self.pair_scores.borrow();
         self.room_wanted.get()
-            && scores.len() >= PAIRS_KEPT
+            && scores.len() >= self.pairs_kept.get()
             && scores.values().any(|dated| dated.frame < frame)
     }
 
@@ -1043,13 +1046,13 @@ impl Worktree {
         self.keep_score(key, score);
     }
 
-    /// Keep a pair's score, bounded by [`PAIRS_KEPT`]: a full record makes
+    /// Keep a pair's score, bounded by the record's size: a full record makes
     /// room by dropping a score this frame has not asked for, and drops the new
     /// one when there is none.
     fn keep_score(&self, key: rename::PairKey, score: u64) {
         let mut scores = self.pair_scores.borrow_mut();
         let frame = self.pair_frame.get();
-        if scores.len() >= PAIRS_KEPT && !scores.contains_key(&key) {
+        if scores.len() >= self.pairs_kept.get() && !scores.contains_key(&key) {
             let Some(stale) = scores
                 .iter()
                 .find(|(_, dated)| dated.frame < frame)
@@ -1062,6 +1065,13 @@ impl Worktree {
             self.pair_epoch.update(|v| v + 1);
         }
         scores.insert(key, DatedScore { score, frame });
+    }
+
+    /// Hold at most `kept` rename scores, so a test can fill the record with
+    /// a fixture of a few dozen files. A test seam.
+    #[doc(hidden)]
+    pub fn keep_pairs(&self, kept: usize) {
+        self.pairs_kept.set(kept);
     }
 
     /// How many times the record dropped scores.
@@ -2853,21 +2863,21 @@ const NO_OID: &str = "----------------------------------------------------------
 /// Bytes one status walk may compare between LFS files and their objects.
 const LFS_COMPARE_MAX: u64 = 16 * 1024 * 1024;
 
-/// The most rename scores kept.
-const PAIRS_KEPT: usize = 4096;
+/// The most rename scores kept: git's whole matrix to about 360 by 360.
+const PAIRS_KEPT: usize = 131_072;
 
 /// The most walks a frame of `files` changes takes to size every side, and
 /// to list every pair for the worker, before it goes quiet, when no score
 /// pairs anything, since a pairing score walks again. A test seam.
 #[doc(hidden)]
-pub fn listing_walks(files: usize) -> (u64, u64) {
+pub fn listing_walks(files: usize, kept: usize) -> (u64, u64) {
     // A side costs at most a header, and a walk stops short only once a
     // header no longer fits. The last finds none left.
     let sides =
         (files as u64 * rename::READ_COST).div_ceil(rename::FRAME_BUDGET - rename::READ_COST) + 1;
     // A pair walk follows a listed batch landing, and listing stops once the
     // scores are full. The last finds the record full.
-    let pairs = PAIRS_KEPT.div_ceil(rename::LISTED_MAX) as u64 + 1;
+    let pairs = kept.div_ceil(rename::LISTED_MAX) as u64 + 1;
     (sides, pairs)
 }
 

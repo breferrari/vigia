@@ -120,6 +120,7 @@ fn pairs_sent_again() {
     std::fs::remove_file(scratch.path_of("a.bin")).expect("remove");
     scratch.write("b.bin", tail_changed(&old, 0.6));
     let worktree = scratch.worktree();
+    worktree.keep_pairs(4096);
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut pictures = Pictures::new(
@@ -350,6 +351,7 @@ fn full_scores_stop_listing() {
         scratch.write(&format!("new/{n:02}.bin"), noise(500 + n, SIDE));
     }
     let worktree = scratch.worktree();
+    worktree.keep_pairs(4096);
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
     let mut pictures = Pictures::new(
@@ -362,7 +364,7 @@ fn full_scores_stop_listing() {
     );
     // Counted, not timed: a slow runner only scores slowly, and a walk that
     // re-arms itself is the only thing that raises the count.
-    let (side_walks_max, pair_walks_max) = listing_walks(frame.files().len());
+    let (side_walks_max, pair_walks_max) = listing_walks(frame.files().len(), 4096);
     let (began, mut quiet, mut walks) = (Instant::now(), 0, 0);
     let (mut side_walks, mut pair_walks) = (0, 0);
     while quiet < 100 {
