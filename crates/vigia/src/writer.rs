@@ -211,9 +211,15 @@ impl Lanes {
 
     /// Whether an upload waits.
     fn waiting(&self) -> bool {
-        self.graphics
-            .iter()
-            .any(|graphic| matches!(graphic, Graphic::Upload(..)))
+        self.oldest().is_some()
+    }
+
+    /// The id of the upload queued longest.
+    fn oldest(&self) -> Option<u32> {
+        self.graphics.iter().find_map(|graphic| match graphic {
+            Graphic::Upload(upload, _) => Some(upload.id),
+            _ => None,
+        })
     }
 
     fn take(&mut self, job: Job) {
@@ -243,6 +249,10 @@ impl Lanes {
 
     /// Drop the uploads `which` names; one part sent is closed in its place.
     fn cancel(&mut self, which: impl Fn(u32) -> bool) {
+        // The oldest is the one the clock times.
+        if self.oldest().is_some_and(&which) {
+            self.clear_starvation();
+        }
         self.graphics.retain_mut(|graphic| {
             let Graphic::Upload(upload, sent) = graphic else {
                 return true;
@@ -316,7 +326,6 @@ impl Lanes {
                     // It moved in a gap between frames, so it was not starved.
                     (self.starved_since, self.chunk_owed) = (None, false);
                 }
-
                 *sent += 1;
                 if *sent == upload.ends.len() && !shared.stopping() {
                     (self.starved_since, self.chunk_owed) = (None, false);
@@ -574,7 +583,6 @@ fn write_out(
         let written = out.write_some(piece, POLL);
         WRITING.store(false, Ordering::SeqCst);
         let written = written?;
-
         if written > 0 {
             count(written);
             rest = &rest[written..];
@@ -1242,6 +1250,38 @@ mod tests {
         assert!(
             lanes.starved_since.is_none(),
             "an upload that moved was still counted as starved"
+        );
+    }
+
+    #[test]
+    fn cancel_restarts() {
+        // The oldest upload, starving, is cancelled while another waits: the
+        // other has not waited behind the frames, so its clock starts afresh.
+        let mut out = Taken::default();
+        out.room.store(usize::MAX, Ordering::Release);
+        let shared = Shared::default();
+        let wakes = Wakes::none();
+        let mut lanes = Lanes::default();
+        let (first, _) = big_upload(52, 3, 100);
+        let (second, _) = big_upload(53, 3, 100);
+        shared.unwritten.store(b"<frame>".len(), Ordering::Release);
+        lanes.take(Job::Upload(first));
+        lanes.take(Job::Upload(second));
+        lanes.take(Job::Frame(b"<frame>".to_vec()));
+        lanes
+            .write_next(&mut out, &shared, &wakes)
+            .expect("the frame");
+        assert!(
+            lanes.starved_since.is_some(),
+            "the frame did not arm the clock"
+        );
+        lanes.take(Job::Delete {
+            id: 52,
+            bytes: b"<delete>".to_vec(),
+        });
+        assert!(
+            lanes.starved_since.is_none(),
+            "the upload behind a cancelled one inherited its wait"
         );
     }
 
