@@ -439,8 +439,7 @@ fn record_keeps_current_pairs() {
 #[test]
 fn record_over_cap() {
     // 65 by 65 binaries is 4,225 live pairs, more than the record holds. Once
-    // it is full of them it must hold still, or the worker would score the
-    // same pairs again every frame.
+    // it is full of them it must drop none, or the worker scores them again.
     let olds: Vec<(String, Vec<u8>)> = (0..65)
         .map(|n| (format!("old/{n:02}.bin"), noise(300 + n, 1_000)))
         .collect();
@@ -467,13 +466,18 @@ fn record_over_cap() {
         }
     }
     assert_eq!(quiet, 5, "the frames never stopped listing pairs");
-    let (epoch, scored) = (frame.pair_epoch(), frame.stats().pairs_scored);
+    let scored = frame.stats().pairs_scored;
     for _ in 0..5 {
         frame.advance().expect("advance");
     }
     assert_eq!(
-        (frame.pair_epoch(), frame.stats().pairs_scored),
-        (epoch, scored),
-        "a record full of live pairs started again or scored again"
+        frame.pair_epoch(),
+        0,
+        "a record of live pairs dropped some, so the worker scores them again"
+    );
+    assert_eq!(
+        frame.stats().pairs_scored,
+        scored,
+        "a full record scored again"
     );
 }
