@@ -422,4 +422,16 @@ fn record_keeps_current_pairs() {
         "the stale scores went without starting the record again, so the worker \
          would never ask again for a dropped pair"
     );
+    // Full again beside that score, the record keeps it.
+    let scored = frame.stats().pairs_scored;
+    for n in 0..4095u64 {
+        frame.learn_pair((n, u64::MAX - n), 0);
+    }
+    frame.advance().expect("advance");
+    assert_eq!(kind_of(frame.files(), "b.bin"), &renamed("a.bin"));
+    assert_eq!(
+        frame.stats().pairs_scored,
+        scored,
+        "a full record dropped a score the last frame asked about"
+    );
 }
