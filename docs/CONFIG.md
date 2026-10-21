@@ -157,7 +157,7 @@ set -ga terminal-features ",*:clipboard"
 
 `f`, `r`, `s`, `o`, `a`, `w` and `c` change what the body is made of. Press `m` and flip them there:
 
-![The vigia pane with the settings menu open over it: every setting in its group with where it stands, a marker on each one changed from the default, a box saying what the selected row does, a row to save the settings and a row to reset them.](../assets/frame-menu.svg)
+![The vigia pane with the config menu open over it: every setting in its group with where it stands, a marker on each one changed from the default, a row to save the settings and a row to reset them.](../assets/frame-menu.svg)
 
 Or say so once by hand:
 

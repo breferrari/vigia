@@ -100,6 +100,9 @@ pub const RESTART: &str = "restart to apply";
 /// And once it has been flipped and not written.
 pub const UNSAVED: &str = "not saved: turn on Save settings";
 
+/// And once it has been flipped while the environment overrides it.
+pub const OVERRIDDEN: &str = "the environment sets this, so a restart keeps its value";
+
 impl Setting {
     /// What the row spells.
     #[must_use]
@@ -145,22 +148,33 @@ impl Setting {
         self.word(Settings::shipped())
     }
 
-    /// The word for what is in effect: the environment's where it sets one, the
-    /// file's otherwise.
+    /// The word the state cell spells: the environment's own where it sets one,
+    /// the file's otherwise.
     #[must_use]
     pub fn effective(self, settings: Settings) -> &'static str {
-        match self.env(settings) {
-            Some("auto") => ON,
-            Some(word) => word,
-            None => self.word(settings),
-        }
+        self.env(settings).unwrap_or_else(|| self.word(settings))
     }
 
     /// Whether what is in effect differs from the shipped pane, which the row marks.
+    /// Not `follow`, which scrolling turns off without the reader changing a setting.
     #[must_use]
     pub fn changed(self, settings: Settings) -> bool {
-        let effective = self.effective(settings);
-        effective != self.shipped()
+        let effective = match self.effective(settings) {
+            // `VIGIA_UPDATE=auto` is the check on.
+            "auto" if self == Self::Update => ON,
+            word => word,
+        };
+        self != Self::Follow && effective != self.shipped()
+    }
+
+    /// The variable that overrides it, for a row read only at launch.
+    #[must_use]
+    pub const fn variable(self) -> Option<&'static str> {
+        match self {
+            Self::Update => Some("VIGIA_UPDATE"),
+            Self::Pictures => Some("VIGIA_PICTURES"),
+            _ => None,
+        }
     }
 
     /// The action that flips it, which is the same action its key sends.
@@ -321,14 +335,15 @@ pub fn description(row: Row, settings: Settings, flipped: Flipped) -> &'static s
                 Setting::Pictures => flipped.pictures,
                 _ => false,
             };
-            match (moved, settings.persist) {
-                (true, true) => RESTART,
-                (true, false) => UNSAVED,
-                (false, _) => setting.description(),
+            match (moved, setting.env(settings).is_some(), settings.persist) {
+                (true, true, _) => OVERRIDDEN,
+                (true, false, true) => RESTART,
+                (true, false, false) => UNSAVED,
+                (false, _, _) => setting.description(),
             }
         }
         Row::Reset => "Put every setting back to how vigia ships.",
-        Row::Header(_) | Row::Gap | Row::Rule => "",
+        Row::Header(_) | Row::Gap => "",
     }
 }
 
@@ -338,6 +353,7 @@ pub fn descriptions() -> impl Iterator<Item = &'static str> {
         description(Row::Reset, Settings::default(), Flipped::default()),
         RESTART,
         UNSAVED,
+        OVERRIDDEN,
     ])
 }
 
@@ -429,9 +445,8 @@ pub struct Settings {
 
 /// One drawn row of the menu, in the order it draws them.
 ///
-/// Not [`SETTINGS`], because two of the rows are neither: `SPEC.md` §11.2 B22 puts
-/// remembering and the reset under a rule of their own, and the rule and the air
-/// around it are rows a caret may not land on.
+/// Not [`SETTINGS`], because headers, the air between groups and the reset are
+/// not settings, and only the reset of those takes the caret.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
     /// A group's title. Drawn dim and skipped.
@@ -440,39 +455,31 @@ pub enum Row {
     Toggle(Setting),
     /// Air. Drawn blank and skipped.
     Gap,
-    /// The rule that separates what the pane is from what is kept.
-    Rule,
     /// The one row that throws something away, drawn as the act it is and with no
     /// state cell.
     Reset,
 }
 
 /// Every drawn row, top to bottom.
-pub const ROWS: [Row; 26] = [
+pub const ROWS: [Row; 20] = [
     Row::Header(Group::Changes),
     Row::Toggle(Setting::Follow),
     Row::Toggle(Setting::Staged),
-    Row::Gap,
     Row::Header(Group::Layout),
     Row::Toggle(Setting::Rail),
     Row::Toggle(Setting::Single),
     Row::Toggle(Setting::Overview),
     Row::Toggle(Setting::Wrap),
-    Row::Gap,
     Row::Header(Group::Look),
     Row::Toggle(Setting::Icons),
     Row::Toggle(Setting::Links),
-    Row::Gap,
     Row::Header(Group::Pictures),
     Row::Toggle(Setting::Pictures),
-    Row::Gap,
     Row::Header(Group::Agent),
     Row::Toggle(Setting::Notes),
-    Row::Gap,
     Row::Header(Group::App),
     Row::Toggle(Setting::Update),
     Row::Gap,
-    Row::Rule,
     Row::Toggle(Setting::Persist),
     Row::Reset,
 ];
@@ -530,7 +537,9 @@ impl Caret {
         }
         let top = self.top.min(ROWS.len() - rows);
         if self.at < top {
-            self.at
+            // The group's header comes into view with its first row.
+            let headed = self.at > 0 && matches!(ROWS[self.at - 1], Row::Header(_));
+            self.at - usize::from(headed && rows > 1)
         } else if self.at >= top + rows {
             self.at + 1 - rows
         } else {

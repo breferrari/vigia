@@ -24,14 +24,13 @@ const FILES: usize = 3;
 /// The word the menu's own title bar spells, restated rather than imported: a
 /// gate that reads the constant it is checking cannot fail when the constant is
 /// wrong.
-const TITLE: &str = "Settings";
+const TITLE: &str = "config menu";
 
 /// The close control's glyph, restated for [`TITLE`]'s reason.
 const CLOSE: char = '✕';
 
-/// The bar on the row the caret is on, restated for [`TITLE`]'s reason. The
-/// plain tier's, which is what [`Glyphs::default`] draws.
-const CARET: char = '>';
+/// The mark on the row the caret is on, restated for [`TITLE`]'s reason.
+const CARET: char = '▸';
 
 fn area() -> Rect {
     Rect::new(0, 0, WIDE, TALL)
@@ -544,7 +543,7 @@ fn a_pointer_marks_the_row_it_rests_on_and_leaves_the_caret_where_it_was() {
                 Glyphs::default(),
                 &chrome,
             );
-            buf[(menu.left + 6, row)].fg
+            buf[(menu.left + 8, row)].fg
         };
         let theme = Theme::default();
         assert_eq!(
@@ -932,7 +931,7 @@ fn an_overlay_swallows_the_bars_and_the_gutter_under_it() {
 
 #[test]
 fn the_caret_steps_over_the_rule_and_the_air_around_it() {
-    // The rule and its air are rows a caret may not sit on, so a step is a step over
+    // Headers and air are rows a caret may not sit on, so a step is a step over
     // the rows that answer to one: three keystrokes from `Path links` would otherwise
     // land on a blank and do nothing twice.
     let mut pane = Pane::open("menu-steps");
@@ -958,19 +957,6 @@ fn the_caret_steps_over_the_rule_and_the_air_around_it() {
             "the caret visited {} rows where {selectable} answer to it, so it sat on \
              the rule or on the air around it",
             landed.len()
-        );
-
-        // And the rule is drawn, or the gate above is about a box with no furniture
-        // in it. It is the one row whose glyphs are the frame's and whose ends are
-        // not the frame.
-        let (buf, laid) = paint(app, frame, highlighter, history, area());
-        let (text, _) = drawn(&buf, &laid);
-        assert!(
-            text.lines().any(|line| {
-                let inside = line.trim_matches(['\u{2502}', ' ']);
-                !inside.is_empty() && inside.chars().all(|c| c == '\u{2500}')
-            }),
-            "the menu draws no rule between the toggles and what is kept:\n{text}"
         );
     });
 }
@@ -1043,15 +1029,18 @@ fn a_press_on_the_rule_or_the_air_around_it_moves_nothing() {
         let menu = laid.menu.expect("a menu region");
         let (text, at) = drawn(&buf, &laid);
 
-        // The rule's own row, found by what it draws rather than by its index.
-        let rule = text
-            .lines()
-            .position(|line| {
-                let inside = line.trim_matches(['\u{2502}', ' ']);
-                !inside.is_empty() && inside.chars().all(|c| c == '\u{2500}')
-            })
-            .expect("the menu draws no rule");
-        let furniture = [rule - 1, rule];
+        // A header's row and the air before the actions, found by what they draw.
+        let lines: Vec<&str> = text.lines().collect();
+        let header = lines
+            .iter()
+            .position(|line| line.contains("Layout"))
+            .expect("the menu draws no Layout header");
+        let air = lines
+            .iter()
+            .position(|line| line.contains("Check for updates"))
+            .expect("no Check for updates row")
+            + 1;
+        let furniture = [header, air];
 
         let before = app.settings();
         for row in furniture {
@@ -1067,14 +1056,13 @@ fn a_press_on_the_rule_or_the_air_around_it_moves_nothing() {
             assert_eq!(
                 app.settings(),
                 before,
-                "a press on row {row}, which is the rule or the air around it, moved \
-                 a setting"
+                "a press on row {row}, which is a header or the air, moved a setting"
             );
         }
 
         // Non-vacuity: the same press on a row that is a toggle does move one, so
         // the loop above is about the furniture rather than about a dead action.
-        let real = u16::try_from(rule - 2).expect("a small row");
+        let real = u16::try_from(header + 1).expect("a small row");
         apply(app, frame, area(), Action::MenuRow(real - 2));
         assert_ne!(
             app.settings(),
@@ -1174,18 +1162,20 @@ fn refresh_over_overlays() {
 #[test]
 fn menu_frame() {
     // Staged changes and the rail on, VIGIA_PICTURES=sixel, the caret on the rail.
+    // The docs frame's pane, which is shorter than the menu: its rows scroll.
+    let docs = Rect::new(0, 0, WIDE, 24);
     let mut pane = Pane::open("menu-frame");
     pane.with(|app, frame, highlighter, history| {
         app.set_overrides(vigia::Overrides {
             update: None,
             pictures: Some(vigia::pictures::Choice::Sixel),
         });
-        apply(app, frame, area(), Action::ToggleStaged);
-        apply(app, frame, area(), Action::ToggleRail);
-        apply(app, frame, area(), Action::ToggleMenu);
-        apply(app, frame, area(), Action::MenuMove(2));
-        let (buf, _) = paint(app, frame, highlighter, history, area());
-        insta::assert_snapshot!(text_of(&buf, area()));
+        apply(app, frame, docs, Action::ToggleStaged);
+        apply(app, frame, docs, Action::ToggleRail);
+        apply(app, frame, docs, Action::ToggleMenu);
+        apply(app, frame, docs, Action::MenuMove(2));
+        let (buf, _) = paint(app, frame, highlighter, history, docs);
+        insta::assert_snapshot!(text_of(&buf, docs));
     });
 }
 
@@ -1355,7 +1345,7 @@ fn groups_in_order() {
                     members.push(setting);
                 }
             }
-            Row::Gap | Row::Rule | Row::Reset => {}
+            Row::Gap | Row::Reset => {}
         }
     }
     let want: Vec<(&str, Vec<Setting>)> = vec![
@@ -1372,7 +1362,7 @@ fn groups_in_order() {
         ("Look", vec![Setting::Icons, Setting::Links]),
         ("Pictures", vec![Setting::Pictures]),
         ("Agent", vec![Setting::Notes]),
-        // Save settings sits under the rule after the last group, not in it.
+        // Save settings sits under the air after the last group, not in it.
         ("App", vec![Setting::Update, Setting::Persist]),
     ];
     assert_eq!(groups, want);
@@ -1383,12 +1373,11 @@ fn groups_in_order() {
         "a header takes the caret"
     );
     assert!(ROWS[vigia::FIRST].selectable() && !ROWS[0].selectable());
-    let rule = ROWS
-        .iter()
-        .position(|row| *row == Row::Rule)
-        .expect("a rule");
-    assert_eq!(ROWS[rule - 1], Row::Gap, "no air above the rule");
-    assert_eq!(ROWS[rule + 1], Row::Toggle(Setting::Persist));
+    // One row of air, between the last group and the actions, and none between groups.
+    let air: Vec<usize> = (0..ROWS.len()).filter(|at| ROWS[*at] == Row::Gap).collect();
+    assert_eq!(air.len(), 1, "air between the groups");
+    assert_eq!(ROWS[air[0] - 1], Row::Toggle(Setting::Update));
+    assert_eq!(ROWS[air[0] + 1], Row::Toggle(Setting::Persist));
 }
 
 #[test]
@@ -1477,56 +1466,21 @@ fn short_pane_fallback() {
     pane.with(|app, frame, highlighter, history| {
         let tall = Rect::new(0, 0, WIDE, 60);
         apply(app, frame, tall, Action::ToggleMenu);
-        // The rail's text takes two lines, so one line has to cut it.
         apply(app, frame, tall, Action::MenuMove(2));
         let (buf, laid) = paint(app, frame, highlighter, history, tall);
         let (text, _) = drawn(&buf, &laid);
         assert!(
-            text.contains("changed"),
-            "no footer on a tall pane:\n{text}"
-        );
-        assert!(
-            !text.contains('…'),
-            "a tall pane cut the description:\n{text}"
+            text.contains("│  ┌ Left rail"),
+            "no description box on a tall pane:\n{text}"
         );
 
-        // Short enough that the box keeps one line.
-        let mut cut = None;
-        for height in (8..60).rev() {
-            let at = Rect::new(0, 0, WIDE, height);
-            let (buf, laid) = paint(app, frame, highlighter, history, at);
-            if laid.menu.is_none() {
-                continue;
-            }
-            let (text, _) = drawn(&buf, &laid);
-            if text.contains('…') {
-                cut = Some(text);
-                break;
-            }
-        }
-        let text = cut.expect("no height cut the description to one line");
+        // A pane whose rows scroll has no room for the box.
+        let short = Rect::new(0, 0, WIDE, 24);
+        let (buf, laid) = paint(app, frame, highlighter, history, short);
+        let (text, _) = drawn(&buf, &laid);
         assert!(
-            text.contains("changed"),
-            "the footer went before the box line:\n{text}"
-        );
-
-        // Shorter still, the box goes and the footer stays a while longer.
-        let mut seen_footer_only = false;
-        for height in (4..60).rev() {
-            let at = Rect::new(0, 0, WIDE, height);
-            let (buf, laid) = paint(app, frame, highlighter, history, at);
-            if laid.menu.is_none() {
-                continue;
-            }
-            let (text, _) = drawn(&buf, &laid);
-            // The box's own corner, indented inside the menu's frame.
-            if text.contains("changed") && !text.contains("│  ┌") {
-                seen_footer_only = true;
-            }
-        }
-        assert!(
-            seen_footer_only,
-            "no height drew the footer without the box"
+            !text.contains("│  ┌"),
+            "a scrolling menu drew the box:\n{text}"
         );
     });
 }

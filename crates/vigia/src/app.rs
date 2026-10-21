@@ -120,7 +120,7 @@ fn flips(at: usize) -> Option<Action> {
     match ROWS.get(at)? {
         Row::Toggle(setting) => Some(setting.action()),
         Row::Reset => Some(Action::MenuReset),
-        Row::Header(_) | Row::Gap | Row::Rule => None,
+        Row::Header(_) | Row::Gap => None,
     }
 }
 
@@ -161,6 +161,9 @@ pub struct App {
     /// The two as the pane launched with them, so a save can leave a key the
     /// reader never flipped to whatever the file says now.
     launched: (bool, crate::pictures::Choice),
+    /// Which of the two a save writes: any the reader flipped since launch, even
+    /// one flipped back to its launch value.
+    touched: Flipped,
     /// Whether a flip is written back into the reader's own file. `SPEC.md` §11.2
     /// B22, and the one setting that is about the file rather than about the pane.
     persist: bool,
@@ -293,6 +296,7 @@ impl Default for App {
             picture_choice: crate::pictures::Choice::Auto,
             env: Overrides::default(),
             launched: (true, crate::pictures::Choice::Auto),
+            touched: Flipped::default(),
             persist: false,
             staged_files: 0,
             sheet: None,
@@ -345,6 +349,7 @@ impl App {
             update: config.update,
             picture_choice: config.pictures,
             launched: (config.update, config.pictures),
+            touched: Flipped::default(),
             persist: config.persist,
             ..Self::new()
         }
@@ -806,8 +811,8 @@ impl App {
     #[must_use]
     pub fn flipped(&self) -> Flipped {
         Flipped {
-            update: self.update != self.launched.0,
-            pictures: self.picture_choice != self.launched.1,
+            update: self.touched.update || self.update != self.launched.0,
+            pictures: self.touched.pictures || self.picture_choice != self.launched.1,
         }
     }
 
@@ -1041,8 +1046,14 @@ impl App {
             Action::ToggleIcons => self.icons = !self.icons,
             Action::ToggleLinks => self.links = !self.links,
             // Read at launch, so a flip here changes only what the file says.
-            Action::ToggleUpdate => self.update = !self.update,
-            Action::CyclePictures => self.picture_choice = self.picture_choice.next(),
+            Action::ToggleUpdate => {
+                self.update = !self.update;
+                self.touched.update = true;
+            }
+            Action::CyclePictures => {
+                self.picture_choice = self.picture_choice.next();
+                self.touched.pictures = true;
+            }
             Action::TogglePersist => self.persist = !self.persist,
             // Every toggle back to the shipped pane, remembering included: a reset
             // that kept remembering on would write the defaults over the reader's
@@ -1076,6 +1087,8 @@ impl App {
                 self.notes_shown = notes;
                 self.icons = icons;
                 self.links = links;
+                self.touched.update |= self.update != update;
+                self.touched.pictures |= self.picture_choice != pictures;
                 self.update = update;
                 self.picture_choice = pictures;
                 self.persist = persist;
