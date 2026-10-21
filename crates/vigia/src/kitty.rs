@@ -2,6 +2,7 @@
 //! the Unicode placeholder cells that place it. `SPEC.md` §11.1.
 
 use std::fmt::Write as _;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use std::num::NonZeroU16;
@@ -23,7 +24,7 @@ const UNIT_WIDTH: CellDiffOption = CellDiffOption::ForcedWidth(NonZeroU16::MIN);
 
 /// The transmit of `rgba`, `width` by `height` pixels, as image `id` placed
 /// virtually over `cells`: one escape a chunk, and under tmux each in its own
-/// passthrough.
+/// passthrough. With where each chunk ends.
 fn transmit(
     rgba: &[u8],
     (width, height): (u32, u32),
@@ -31,7 +32,7 @@ fn transmit(
     id: u32,
     tmux: bool,
     compress: bool,
-) -> String {
+) -> (String, Vec<usize>) {
     let deflated;
     let bytes = if compress {
         deflated = zlib(rgba);
@@ -43,6 +44,7 @@ fn transmit(
     let pieces = bytes.chunks(CHUNK / 4 * 3);
     let count = pieces.len();
     let mut out = String::with_capacity(count * (CHUNK + 32) + 96);
+    let mut ends = Vec::with_capacity(count);
     for (i, piece) in pieces.enumerate() {
         out.push_str(start);
         let _ = write!(out, "{escape}_Gq=2,");
@@ -58,8 +60,23 @@ fn transmit(
         base64_simd::STANDARD.encode_append(piece, &mut out);
         let _ = write!(out, "{escape}\\");
         out.push_str(end);
+        ends.push(out.len());
     }
-    out
+    (out, ends)
+}
+
+/// The empty last chunk that closes an image left part sent. Its load then
+/// fails, quietly, in kitty and in Ghostty, where a delete alone leaves it open.
+pub fn cancel(tmux: bool) -> String {
+    let (start, escape, end) = Parser::tmux_start_escape_end(tmux);
+    format!("{start}{escape}_Gm=0,q=2;{escape}\\{end}")
+}
+
+/// The delete of image `id`. `q=2`: an answer would reach the event reader
+/// as keys.
+pub fn delete(id: u32, tmux: bool) -> String {
+    let (start, escape, end) = Parser::tmux_start_escape_end(tmux);
+    format!("{start}{escape}_Ga=d,d=I,i={id},q=2{escape}\\{end}")
 }
 
 /// The least of an image [`worth_deflating`] deflates to decide.
@@ -95,9 +112,8 @@ fn zlib(raw: &[u8]) -> Vec<u8> {
 }
 
 /// Draw image `id`'s placeholder cells over all of `room`, its first `skip`
-/// rows above it. `leading` goes in front of the first cell, as the transmit
-/// does on the frame that sends it.
-fn placeholders(room: Rect, id: u32, skip: u16, buf: &mut Buffer, mut leading: Option<&str>) {
+/// rows above it.
+fn placeholders(room: Rect, id: u32, skip: u16, buf: &mut Buffer) {
     let [high, r, g, b] = id.to_be_bytes();
     let fg = Color::Rgb(r, g, b);
     let mut symbol = String::with_capacity(64);
@@ -107,9 +123,6 @@ fn placeholders(room: Rect, id: u32, skip: u16, buf: &mut Buffer, mut leading: O
                 continue;
             };
             symbol.clear();
-            if let Some(leading) = leading.take() {
-                symbol.push_str(leading);
-            }
             symbol.push(PLACEHOLDER);
             if x == 0 {
                 symbol.push(diacritic(y + skip));
@@ -127,9 +140,14 @@ fn placeholders(room: Rect, id: u32, skip: u16, buf: &mut Buffer, mut leading: O
 pub struct Image {
     id: u32,
     cells: Size,
-    transmit: String,
-    sent: AtomicBool,
+    transmit: Arc<str>,
+    ends: Arc<[usize]>,
+    tmux: bool,
     deflated: bool,
+    /// Handed to the writer, and not cancelled since.
+    queued: AtomicBool,
+    /// Written whole, so its cells may be drawn.
+    uploaded: AtomicBool,
 }
 
 impl Image {
@@ -156,13 +174,56 @@ impl Image {
         tmux: bool,
         compress: bool,
     ) -> Self {
+        let (transmit, ends) = transmit(rgba, pixels, cells, id, tmux, compress);
         Self {
             id,
             cells,
-            transmit: transmit(rgba, pixels, cells, id, tmux, compress),
-            sent: AtomicBool::new(false),
+            transmit: transmit.into(),
+            ends: ends.into(),
+            tmux,
             deflated: compress,
+            queued: AtomicBool::new(false),
+            uploaded: AtomicBool::new(false),
         }
+    }
+
+    /// Its id.
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    /// Its transmit, once: none if it is already with the writer or written.
+    pub fn upload(&self) -> Option<crate::writer::Upload> {
+        (!self.uploaded() && !self.queued.swap(true, Ordering::AcqRel)).then(|| {
+            crate::writer::Upload {
+                id: self.id,
+                data: Arc::clone(&self.transmit),
+                ends: Arc::clone(&self.ends),
+                close: cancel(self.tmux).into(),
+                tmux: self.tmux,
+            }
+        })
+    }
+
+    /// Whether the terminal has all of it, so its cells place it.
+    pub fn uploaded(&self) -> bool {
+        self.uploaded.load(Ordering::Acquire)
+    }
+
+    /// The writer wrote its last chunk.
+    pub fn mark_uploaded(&self) {
+        self.uploaded.store(true, Ordering::Release);
+    }
+
+    /// Its upload was cancelled, or never finished: send it again when next
+    /// shown.
+    pub fn unsent(&self) {
+        self.queued.store(false, Ordering::Release);
+    }
+
+    /// Whether it is with the writer and not yet written whole.
+    pub fn in_flight(&self) -> bool {
+        self.queued.load(Ordering::Acquire) && !self.uploaded()
     }
 
     /// Whether its transmit is deflated.
@@ -175,8 +236,8 @@ impl Image {
         self.cells
     }
 
-    /// Draw it into `area` with its first `above` rows scrolled above the
-    /// area's top. The first draw carries the transmit.
+    /// Draw its cells into `area` with its first `above` rows scrolled above
+    /// the area's top. The transmit goes separately, before.
     pub fn render(&self, area: Rect, buf: &mut Buffer, above: u16) {
         // A position past the table cannot be encoded, so it is left undrawn
         // rather than drawn at the wrong offset.
@@ -189,12 +250,10 @@ impl Image {
                 .min(most.saturating_sub(above)),
             ..area
         };
-        // Otherwise no cell would carry the transmit, and it would be lost.
-        if room.is_empty() || !buf.area().contains((room.x, room.y).into()) {
+        if room.is_empty() {
             return;
         }
-        let first = (!self.sent.swap(true, Ordering::AcqRel)).then_some(self.transmit.as_str());
-        placeholders(room, self.id, above, buf, first);
+        placeholders(room, self.id, above, buf);
     }
 }
 
@@ -323,6 +382,13 @@ mod tests {
         );
         let mut buf = Buffer::empty(frame(area));
         image.render(area, &mut buf, skip);
+        // Where the crate puts the transmit, so the two compare whole.
+        if let Some(cell) = buf.cell_mut((area.x, area.y))
+            && cell.symbol().starts_with(PLACEHOLDER)
+        {
+            let joined = format!("{}{}", image.transmit, cell.symbol());
+            cell.set_symbol(&joined);
+        }
         buf
     }
 
@@ -398,8 +464,9 @@ mod tests {
     }
 
     #[test]
-    fn kitty_once() {
-        // The transmit rides the first frame that draws the image and no other.
+    fn upload_once() {
+        // Handed to the writer once; again only after a cancel; never once
+        // written whole. Its cells carry no transmit.
         let pixels = image(40, 40);
         let image = Image::new(
             pixels.as_raw(),
@@ -409,19 +476,31 @@ mod tests {
             false,
             false,
         );
+        let upload = image.upload().expect("the first upload");
+        assert_eq!(upload.data.len(), *upload.ends.last().expect("a chunk"));
+        assert!(
+            image.upload().is_none(),
+            "the same image was handed over twice"
+        );
+        image.unsent();
+        assert!(
+            image.upload().is_some(),
+            "a cancelled image was not sent again"
+        );
+        image.mark_uploaded();
+        image.unsent();
+        assert!(
+            image.upload().is_none(),
+            "an image written whole was sent again"
+        );
         let area = Rect::new(0, 0, 4, 2);
-        let drawn = |image: &Image| {
-            let mut buf = Buffer::empty(area);
-            image.render(area, &mut buf, 0);
+        let mut buf = Buffer::empty(area);
+        image.render(area, &mut buf, 0);
+        assert!(
             buf.content()
                 .iter()
-                .map(|cell| cell.symbol().len())
-                .sum::<usize>()
-        };
-        let (first, second) = (drawn(&image), drawn(&image));
-        assert!(
-            first > second + 1000 && second > 0,
-            "the transmit was not sent exactly once: {first} then {second} bytes of cells"
+                .all(|cell| !cell.symbol().contains("_G")),
+            "a cell carried a graphics escape"
         );
     }
 
@@ -430,7 +509,7 @@ mod tests {
         // 3072 bytes of pixels are exactly one full chunk, and 6144 exactly two.
         for (height, count) in [(24, 1), (48, 2)] {
             let pixels = image(32, height);
-            let sent = transmit(
+            let (sent, ends) = transmit(
                 pixels.as_raw(),
                 pixels.dimensions(),
                 Size::new(4, 2),
@@ -439,6 +518,7 @@ mod tests {
                 false,
             );
             let chunks: Vec<&str> = sent.split_inclusive("\x1b\\").collect();
+            assert_eq!(ends.len(), chunks.len(), "a chunk end was not recorded");
             assert_eq!(
                 chunks.len(),
                 count,
@@ -468,27 +548,6 @@ mod tests {
         assert!(
             !drawn(287),
             "row 297, past the table, was drawn as another row"
-        );
-    }
-
-    #[test]
-    fn transmit_kept_offscreen() {
-        // A draw that lands outside the buffer leaves the transmit for the next.
-        let pixels = image(40, 40);
-        let image = Image::new(
-            pixels.as_raw(),
-            pixels.dimensions(),
-            Size::new(4, 2),
-            3,
-            false,
-            false,
-        );
-        let mut buf = Buffer::empty(Rect::new(0, 0, 4, 2));
-        image.render(Rect::new(10, 10, 4, 2), &mut buf, 0);
-        image.render(Rect::new(0, 0, 4, 2), &mut buf, 0);
-        assert!(
-            buf[(0, 0)].symbol().contains("_Gq=2,i=3"),
-            "a draw outside the buffer spent the transmit"
         );
     }
 
@@ -534,7 +593,7 @@ mod tests {
         // decoded and inflated are the pixels.
         let pixels = image(300, 200);
         for compress in [false, true] {
-            let sent = transmit(
+            let (sent, ends) = transmit(
                 pixels.as_raw(),
                 pixels.dimensions(),
                 Size::new(30, 10),
@@ -543,6 +602,15 @@ mod tests {
                 compress,
             );
             let chunks: Vec<&str> = sent.split_inclusive("\x1b\\").collect();
+            let mut at = 0;
+            for (chunk, end) in chunks.iter().zip(&ends) {
+                assert_eq!(
+                    &sent[at..*end],
+                    *chunk,
+                    "a recorded end is not where its chunk ends"
+                );
+                at = *end;
+            }
             assert!(
                 chunks.len() > 1,
                 "the image fits one chunk, so this proves nothing"

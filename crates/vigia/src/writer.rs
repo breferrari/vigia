@@ -2,8 +2,9 @@
 //! goes through it, on its own thread, so a terminal that reads slowly holds
 //! this thread and never the event loop. `SPEC.md` §6, the terminal writer.
 
+use std::collections::VecDeque;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
@@ -27,6 +28,53 @@ pub fn poison() {
     while WRITING.load(Ordering::SeqCst) && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+/// The image part sent, as [`image_bits`] packs it, or 0.
+static OPEN: AtomicU64 = AtomicU64::new(0);
+
+/// The last images whose upload began, as [`image_bits`] packs them, for a
+/// restore that has no other record of them.
+static SENT: [AtomicU64; 64] = [const { AtomicU64::new(0) }; 64];
+
+/// Where the next entry of [`SENT`] goes.
+static SENT_NEXT: AtomicUsize = AtomicUsize::new(0);
+
+/// An image id and whether its escapes pass through tmux, in one word, never 0.
+fn image_bits(id: u32, tmux: bool) -> u64 {
+    u64::from(id) | (u64::from(tmux) << 32) | (1 << 33)
+}
+
+/// [`image_bits`] undone.
+fn image_of(bits: u64) -> Option<(u32, bool)> {
+    (bits != 0).then_some((bits as u32, bits & (1 << 32) != 0))
+}
+
+/// The image left part sent, if one is: its id, and whether through tmux.
+pub fn open_image() -> Option<(u32, bool)> {
+    image_of(OPEN.load(Ordering::SeqCst))
+}
+
+/// The last images whose upload began, for a restore no delete reached.
+pub fn sent_images() -> Vec<(u32, bool)> {
+    SENT.iter()
+        .filter_map(|bits| image_of(bits.load(Ordering::Acquire)))
+        .collect()
+}
+
+/// A picture's transmit as the writer takes it: whole chunks, each a separate
+/// escape, that no other graphics command may come between.
+pub struct Upload {
+    /// The image's id.
+    pub id: u32,
+    /// Every chunk, in order.
+    pub data: Arc<str>,
+    /// Where each chunk ends in `data`.
+    pub ends: Arc<[usize]>,
+    /// The empty last chunk that closes it if it is cut short.
+    pub close: Arc<str>,
+    /// Whether its escapes pass through tmux.
+    pub tmux: bool,
 }
 
 /// The longest one wait for room to write lasts, so a stop is noticed this soon.
@@ -57,6 +105,8 @@ pub struct Wakes {
     pub cells: Box<dyn Fn() + Send>,
     /// A write failed, so nothing the pane draws reaches the terminal any more.
     pub lost: Box<dyn Fn() + Send>,
+    /// An image's last chunk was written, so its cells may be drawn.
+    pub uploaded: Box<dyn Fn(u32) + Send>,
 }
 
 impl Wakes {
@@ -66,6 +116,7 @@ impl Wakes {
         Self {
             cells: Box::new(|| {}),
             lost: Box::new(|| {}),
+            uploaded: Box::new(|_| {}),
         }
     }
 }
@@ -104,11 +155,117 @@ impl Shared {
 
 /// What the writer's queue carries.
 enum Job {
-    /// Bytes to write, in order.
+    /// A frame's bytes: text, written ahead of any graphics waiting.
     Frame(Vec<u8>),
+    /// An image to send, chunk by chunk, between frames.
+    Upload(Upload),
+    /// Graphics bytes to write in turn with the uploads, such as a delete.
+    Graphic(Vec<u8>),
+    /// Drop the image's chunks not yet written; close it if it is part sent.
+    Cancel(u32),
     /// The end `stop` queues, which a sink still open would otherwise keep
     /// from coming.
     Stop,
+}
+
+/// One entry of the graphics lane.
+enum Graphic {
+    /// An upload and how many of its chunks are written.
+    Upload(Upload, usize),
+    /// Bytes written whole.
+    Raw(Vec<u8>),
+}
+
+/// What waits to be written: frames first, then graphics in order.
+#[derive(Default)]
+struct Lanes {
+    text: VecDeque<Vec<u8>>,
+    graphics: VecDeque<Graphic>,
+    /// `stop` asked for the end: what is written next is all there is.
+    stopping: bool,
+}
+
+impl Lanes {
+    fn is_empty(&self) -> bool {
+        self.text.is_empty() && self.graphics.is_empty()
+    }
+
+    fn take(&mut self, job: Job) {
+        match job {
+            Job::Frame(bytes) => self.text.push_back(bytes),
+            Job::Upload(upload) if !self.stopping => {
+                self.graphics.push_back(Graphic::Upload(upload, 0));
+            }
+            Job::Upload(_) => {}
+            Job::Graphic(bytes) => self.graphics.push_back(Graphic::Raw(bytes)),
+            Job::Cancel(id) => self.cancel(|of| of == id),
+            Job::Stop => {
+                self.stopping = true;
+                self.cancel(|_| true);
+            }
+        }
+    }
+
+    /// Drop the uploads `which` names; one part sent is closed in its place.
+    fn cancel(&mut self, which: impl Fn(u32) -> bool) {
+        self.graphics = std::mem::take(&mut self.graphics)
+            .into_iter()
+            .filter_map(|graphic| match graphic {
+                Graphic::Upload(upload, sent) if which(upload.id) => (sent > 0).then(|| {
+                    OPEN.store(0, Ordering::SeqCst);
+                    Graphic::Raw(upload.close.as_bytes().to_vec())
+                }),
+                other => Some(other),
+            })
+            .collect();
+    }
+
+    /// Write the next thing due: a frame, else one graphics chunk whole.
+    /// `Ok(false)` once there is nothing left to write.
+    fn write_next(
+        &mut self,
+        out: &mut impl Out,
+        shared: &Shared,
+        wakes: &Wakes,
+    ) -> io::Result<bool> {
+        if let Some(frame) = self.text.pop_front() {
+            write_out(out, &frame, shared, &mut |written| {
+                shared.wrote(written, wakes)
+            })?;
+            return Ok(true);
+        }
+        let Some(graphic) = self.graphics.front_mut() else {
+            return Ok(false);
+        };
+        match graphic {
+            Graphic::Raw(bytes) => {
+                write_out(out, bytes, shared, &mut |_| {})?;
+                self.graphics.pop_front();
+            }
+            Graphic::Upload(upload, sent) => {
+                if *sent == 0 {
+                    let bits = image_bits(upload.id, upload.tmux);
+                    OPEN.store(bits, Ordering::SeqCst);
+                    let slot = SENT_NEXT.fetch_add(1, Ordering::AcqRel) % SENT.len();
+                    SENT[slot].store(bits, Ordering::Release);
+                }
+                let from = if *sent == 0 {
+                    0
+                } else {
+                    upload.ends[*sent - 1]
+                };
+                let to = upload.ends[*sent];
+                write_out(out, &upload.data.as_bytes()[from..to], shared, &mut |_| {})?;
+                *sent += 1;
+                if *sent == upload.ends.len() && !shared.stopping() {
+                    OPEN.store(0, Ordering::SeqCst);
+                    (wakes.uploaded)(upload.id);
+                    self.graphics.pop_front();
+                }
+            }
+        }
+        Ok(true)
+    }
 }
 
 /// The thread that writes the terminal, and the handle the loop draws through.
@@ -129,14 +286,29 @@ impl Writer {
             .name(THREAD.to_owned())
             .spawn(move || {
                 let mut out = out;
-                for job in jobs {
-                    let Job::Frame(bytes) = job else {
-                        break;
+                let mut lanes = Lanes::default();
+                loop {
+                    // Everything that has arrived is sorted first, so a frame
+                    // queued behind an upload goes ahead of its next chunk.
+                    let job = if lanes.is_empty() {
+                        if lanes.stopping {
+                            break;
+                        }
+                        match jobs.recv() {
+                            Ok(job) => Some(job),
+                            Err(_) => break,
+                        }
+                    } else {
+                        jobs.try_recv().ok()
                     };
+                    if let Some(job) = job {
+                        lanes.take(job);
+                        continue;
+                    }
                     if theirs.stopping() {
                         break;
                     }
-                    if write_out(&mut out, &bytes, &theirs, &wakes).is_err() {
+                    if lanes.write_next(&mut out, &theirs, &wakes).is_err() {
                         (wakes.lost)();
                         break;
                     }
@@ -251,6 +423,44 @@ impl Sink {
         self.hand_over(false)
     }
 
+    /// Queue `upload` on the graphics lane.
+    ///
+    /// # Errors
+    ///
+    /// The writer has stopped.
+    pub fn upload(&mut self, upload: Upload) -> io::Result<()> {
+        self.job(Job::Upload(upload))
+    }
+
+    /// Queue `bytes` on the graphics lane, after the uploads before them.
+    ///
+    /// # Errors
+    ///
+    /// The writer has stopped.
+    pub fn graphic(&mut self, bytes: Vec<u8>) -> io::Result<()> {
+        self.job(Job::Graphic(bytes))
+    }
+
+    /// Cancel image `id`'s upload: what is not written is dropped, and a part
+    /// sent is closed.
+    ///
+    /// # Errors
+    ///
+    /// The writer has stopped.
+    pub fn cancel(&mut self, id: u32) -> io::Result<()> {
+        self.job(Job::Cancel(id))
+    }
+
+    fn job(&mut self, job: Job) -> io::Result<()> {
+        let queue = self
+            .queue
+            .as_ref()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::BrokenPipe))?;
+        queue
+            .send(job)
+            .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))
+    }
+
     fn hand_over(&mut self, frame: bool) -> io::Result<()> {
         if self.pending.is_empty() {
             return Ok(());
@@ -290,14 +500,19 @@ pub trait Out {
 }
 
 /// Write all of `bytes` in pieces, counting each as it goes, unless told to stop.
-fn write_out(out: &mut impl Out, bytes: &[u8], shared: &Shared, wakes: &Wakes) -> io::Result<()> {
+fn write_out(
+    out: &mut impl Out,
+    bytes: &[u8],
+    shared: &Shared,
+    count: &mut dyn FnMut(usize),
+) -> io::Result<()> {
     let mut rest = bytes;
     while !rest.is_empty() {
         // Marked before the check, so `poison` either stops this write or waits for it.
         WRITING.store(true, Ordering::SeqCst);
         if shared.stopping() {
             WRITING.store(false, Ordering::SeqCst);
-            shared.wrote(rest.len(), wakes);
+            count(rest.len());
             return Ok(());
         }
         let piece = &rest[..rest.len().min(PIECE)];
@@ -305,7 +520,7 @@ fn write_out(out: &mut impl Out, bytes: &[u8], shared: &Shared, wakes: &Wakes) -
         WRITING.store(false, Ordering::SeqCst);
         let written = written?;
         if written > 0 {
-            shared.wrote(written, wakes);
+            count(written);
             rest = &rest[written..];
         }
     }
@@ -563,6 +778,7 @@ mod tests {
                     count.fetch_add(1, Ordering::AcqRel);
                 }),
                 lost: Box::new(|| {}),
+                uploaded: Box::new(|_| {}),
             },
         );
         let mut sink = writer.sink();
@@ -636,6 +852,160 @@ mod tests {
         drop(sink);
     }
 
+    /// An upload of three chunks, each its own escape.
+    fn three_chunks(id: u32) -> Upload {
+        let chunks = [
+            "\x1b_Gi=7,m=1;AAAA\x1b\\",
+            "\x1b_Gm=1;BBBB\x1b\\",
+            "\x1b_Gm=0;CCCC\x1b\\",
+        ];
+        let mut ends = Vec::new();
+        let mut at = 0;
+        for chunk in chunks {
+            at += chunk.len();
+            ends.push(at);
+        }
+        Upload {
+            id,
+            data: chunks.concat().into(),
+            ends: ends.into(),
+            close: "\x1b_Gm=0,q=2;\x1b\\".into(),
+            tmux: false,
+        }
+    }
+
+    /// Wait until `out` has taken `len` bytes.
+    fn taken_len(out: &Taken, len: usize) {
+        let until = Instant::now() + Duration::from_secs(5);
+        while out.bytes.lock().expect("bytes").len() < len && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            out.bytes.lock().expect("bytes").len(),
+            len,
+            "the writer never took {len} bytes"
+        );
+    }
+
+    fn written(out: &Taken) -> String {
+        String::from_utf8(out.bytes.lock().expect("bytes").clone()).expect("utf8")
+    }
+
+    #[test]
+    fn lane_order() {
+        // Text first; a chunk written whole; text only between chunks; a
+        // delete queued behind an image after its last chunk; the upload
+        // reported once whole.
+        let out = Taken::default();
+        let (tx, rx) = mpsc::channel();
+        let writer = Writer::start(
+            out.clone(),
+            Wakes {
+                uploaded: Box::new(move |id| {
+                    let _ = tx.send(id);
+                }),
+                ..Wakes::none()
+            },
+        );
+        let mut sink = writer.sink();
+        let upload = three_chunks(7);
+        let first = upload.ends[0];
+        sink.upload(upload).expect("upload");
+        sink.graphic(b"<delete>".to_vec()).expect("delete");
+        sink.write_all(b"<frame1>").expect("write");
+        sink.flush().expect("flush");
+        // Room for the frame and the first chunk, then none: the second chunk waits.
+        out.room.store(8 + first, Ordering::Release);
+        taken_len(&out, 8 + first);
+        sink.write_all(b"<frame2>").expect("write");
+        sink.flush().expect("flush");
+        std::thread::sleep(Duration::from_millis(20));
+        out.room.store(usize::MAX, Ordering::Release);
+        assert!(
+            writer.drain(Duration::from_secs(5)),
+            "the frames were not written"
+        );
+        let until = Instant::now() + Duration::from_secs(5);
+        while !written(&out).ends_with("<delete>") && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            written(&out),
+            "<frame1>\x1b_Gi=7,m=1;AAAA\x1b\\\x1b_Gm=1;BBBB\x1b\\<frame2>\x1b_Gm=0;CCCC\x1b\\<delete>",
+            "the lanes were not written in their order"
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(2)),
+            Ok(7),
+            "the upload was not reported"
+        );
+    }
+
+    #[test]
+    fn cancel_open() {
+        // Cancelled part sent: the chunk being written finishes, the rest goes,
+        // the close and then the delete follow, and no upload is reported.
+        let out = Taken::default();
+        let (tx, rx) = mpsc::channel();
+        let writer = Writer::start(
+            out.clone(),
+            Wakes {
+                uploaded: Box::new(move |id| {
+                    let _ = tx.send(id);
+                }),
+                ..Wakes::none()
+            },
+        );
+        let mut sink = writer.sink();
+        let upload = three_chunks(9);
+        let first = upload.ends[0];
+        sink.upload(upload).expect("upload");
+        out.room.store(first, Ordering::Release);
+        taken_len(&out, first);
+        sink.cancel(9).expect("cancel");
+        sink.graphic(b"<delete>".to_vec()).expect("delete");
+        std::thread::sleep(Duration::from_millis(20));
+        out.room.store(usize::MAX, Ordering::Release);
+        let until = Instant::now() + Duration::from_secs(5);
+        while !written(&out).ends_with("<delete>") && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            written(&out),
+            "\x1b_Gi=7,m=1;AAAA\x1b\\\x1b_Gm=1;BBBB\x1b\\\x1b_Gm=0,q=2;\x1b\\<delete>",
+            "a cancelled upload was not closed, then deleted"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "a cancelled upload was reported whole"
+        );
+    }
+
+    #[test]
+    fn cancel_queued() {
+        // Cancelled before it starts: none of it is written.
+        let out = Taken::default();
+        let writer = Writer::start(out.clone(), Wakes::none());
+        let mut sink = writer.sink();
+        sink.write_all(b"<frame>").expect("write");
+        sink.flush().expect("flush");
+        // The writer holds the frame while these arrive.
+        std::thread::sleep(Duration::from_millis(20));
+        sink.upload(three_chunks(11)).expect("upload");
+        sink.cancel(11).expect("cancel");
+        sink.graphic(b"<delete>".to_vec()).expect("delete");
+        out.room.store(usize::MAX, Ordering::Release);
+        let until = Instant::now() + Duration::from_secs(5);
+        while !written(&out).ends_with("<delete>") && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            written(&out),
+            "<frame><delete>",
+            "a cancelled upload was written"
+        );
+    }
+
     #[test]
     fn empty_frame_kept() {
         // A frame with no bytes is a frame, not a stop: the writer goes on.
@@ -705,6 +1075,7 @@ mod tests {
                 lost: Box::new(move || {
                     let _ = tx.send(());
                 }),
+                uploaded: Box::new(|_| {}),
             },
         );
         let mut sink = writer.sink();

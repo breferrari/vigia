@@ -311,6 +311,15 @@ pub struct Built {
 }
 
 impl Built {
+    /// Whether every Kitty image of it is in the terminal, so its cells place
+    /// it.
+    pub fn placed(&self) -> bool {
+        self.panels.iter().all(|(_, panel)| match panel {
+            Panel::Kitty(image) => image.uploaded(),
+            Panel::Sliced(_) => true,
+        })
+    }
+
     /// What the size line adds once the comparison is done.
     pub fn suffix(&self) -> Option<String> {
         let found = self.found();
@@ -1008,19 +1017,63 @@ impl Pictures {
         self.retire_where(|_, built| !built.kitty.is_empty());
     }
 
-    /// The Kitty deletes owed since the last call, to write before the next
-    /// frame. Empty for any other protocol.
+    /// The Kitty deletes owed since the last call, as escapes. Empty for any
+    /// other protocol.
     pub fn retired(&mut self) -> String {
-        use ratatui_image::picker::cap_parser::Parser;
-        let (start, escape, end) = Parser::tmux_start_escape_end(self.tmux);
-        let mut deletes = String::new();
-        for id in self.retired.drain(..) {
-            // `q=2`: an answer would reach the event reader as keys.
-            deletes.push_str(&format!(
-                "{start}{escape}_Ga=d,d=I,i={id},q=2{escape}\\{end}"
-            ));
+        self.retired_ids()
+            .into_iter()
+            .map(|id| crate::kitty::delete(id, self.tmux))
+            .collect()
+    }
+
+    /// The Kitty images to delete since the last call, each cancelled first in
+    /// case its upload is still going.
+    pub fn retired_ids(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.retired)
+    }
+
+    /// Whether Kitty escapes pass through tmux.
+    pub fn tmux(&self) -> bool {
+        self.tmux
+    }
+
+    /// The uploads of on-screen Kitty images not yet handed to the writer, and
+    /// the images off screen whose upload has to stop.
+    pub fn uploads(&mut self) -> (Vec<crate::writer::Upload>, Vec<u32>) {
+        let shown = self
+            .shown
+            .lock()
+            .map(|shown| shown.clone())
+            .unwrap_or_default();
+        let (mut uploads, mut stopped) = (Vec::new(), Vec::new());
+        for (key, ready) in &self.built {
+            for (_, panel) in &ready.0.panels {
+                let Panel::Kitty(image) = panel else {
+                    continue;
+                };
+                if shown.contains(key) {
+                    uploads.extend(image.upload());
+                } else if image.in_flight() {
+                    // Sent again if it comes back.
+                    image.unsent();
+                    stopped.push(image.id());
+                }
+            }
         }
-        deletes
+        (uploads, stopped)
+    }
+
+    /// The writer wrote Kitty image `id` whole.
+    pub fn uploaded(&mut self, id: u32) {
+        for ready in self.built.values() {
+            for (_, panel) in &ready.0.panels {
+                if let Panel::Kitty(image) = panel
+                    && image.id() == id
+                {
+                    image.mark_uploaded();
+                }
+            }
+        }
     }
 
     /// Take in what the worker finished since the last call.
@@ -1118,7 +1171,8 @@ impl Pictures {
         }
         for row in rows.iter_mut() {
             if let Row::Sized { key, ready, .. } | Row::Picture { key, ready, .. } = row {
-                *ready = self.get(key);
+                // A Kitty picture draws once the terminal holds all of it.
+                *ready = self.get(key).filter(|ready| ready.0.placed());
             }
         }
         // Blank where a picture did not decode, in place: the rows below are
@@ -1936,16 +1990,10 @@ mod tests {
                 compress,
             )
             .expect("a panel");
-            let area = ratatui::layout::Rect::new(0, 0, 4, 2);
-            let mut buf = ratatui::buffer::Buffer::empty(area);
             let Panel::Kitty(image) = &protocol else {
                 panic!("a Kitty picker built another panel");
             };
-            image.render(area, &mut buf, 0);
-            buf.content()
-                .iter()
-                .map(|cell| cell.symbol())
-                .collect::<String>()
+            image.upload().expect("an upload").data.to_string()
         };
         assert!(sent(true).contains("o=z"), "asked to compress, it sent raw");
         assert!(!sent(false).contains("o=z"), "it compressed unasked");

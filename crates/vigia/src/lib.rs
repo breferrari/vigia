@@ -147,6 +147,8 @@ enum Wake {
     Cells,
     /// A write to the terminal failed, so nothing drawn reaches it any more.
     OutputLost,
+    /// A Kitty image's last chunk reached the terminal, so its cells can draw.
+    Uploaded(u32),
 }
 
 /// The backlog below which a frame is always drawn, so a small frame never
@@ -164,13 +166,16 @@ const QUERY_DRAIN: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// What the terminal writer tells this shell, wired to its wake channel.
 fn writer_wakes(tx: &Sender<Wake>) -> writer::Wakes {
-    let (cells, lost) = (tx.clone(), tx.clone());
+    let (cells, lost, uploaded) = (tx.clone(), tx.clone(), tx.clone());
     writer::Wakes {
         cells: Box::new(move || {
             let _ = cells.send(Wake::Cells);
         }),
         lost: Box::new(move || {
             let _ = lost.send(Wake::OutputLost);
+        }),
+        uploaded: Box::new(move |id| {
+            let _ = uploaded.send(Wake::Uploaded(id));
         }),
     }
 }
@@ -908,6 +913,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                 }
                 // Deliberately nothing.
                 Wake::Warmed | Wake::Pictured | Wake::Cells => {}
+                Wake::Uploaded(id) => shell.pictures.uploaded(id),
                 Wake::OutputLost => {
                     return Err(
                         "the terminal stopped taking output, so nothing could be drawn".into(),
@@ -1243,9 +1249,25 @@ impl Shell {
     /// Send the Kitty deletes owed. A failed write leaves the images to the
     /// terminal's own quota.
     fn write_retired(&mut self) {
-        let retired = self.pictures.retired();
-        if !retired.is_empty() {
-            let _ = self.session.send(&retired);
+        let tmux = self.pictures.tmux();
+        for id in self.pictures.retired_ids() {
+            let _ = self.session.cancel(id);
+            let _ = self.session.graphic(kitty::delete(id, tmux));
+        }
+    }
+
+    /// Hand the writer the Kitty images now on screen, and stop the uploads of
+    /// those that left it. A stopped one is deleted, since the terminal may
+    /// hold part of it.
+    fn write_uploads(&mut self) {
+        let (uploads, stopped) = self.pictures.uploads();
+        let tmux = self.pictures.tmux();
+        for id in stopped {
+            let _ = self.session.cancel(id);
+            let _ = self.session.graphic(kitty::delete(id, tmux));
+        }
+        for upload in uploads {
+            let _ = self.session.upload(upload);
         }
     }
 
@@ -2308,8 +2330,9 @@ impl Shell {
             &self.root,
         );
         // Before the draw, so the terminal drops the Kitty images of pictures that
-        // left the screen.
+        // left the screen, and takes those coming onto it.
         self.write_retired();
+        self.write_uploads();
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
