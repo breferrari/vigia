@@ -505,8 +505,14 @@ mod tests {
             }
         });
         assert!(!worth_deflating(&noise, 1000), "noise was deflated");
-        // Every row the same noise: a row alone does not shrink, the image does.
-        let rows: Vec<u8> = noise[..5000 * 4].repeat(40);
+        // Four bands of ten rows, each band one row of noise repeated: a row
+        // alone does not shrink, and only rows within one band repeat, so the
+        // sample sees it only if a strip holds more than one row.
+        let rows: Vec<u8> = noise
+            .chunks(5000 * 4)
+            .take(4)
+            .flat_map(|row| row.repeat(10))
+            .collect();
         assert!(
             worth_deflating(&rows, 5000),
             "a texture repeated row by row was sent raw"
