@@ -490,6 +490,19 @@ pub fn drawn(truecolour: bool, protocol: ProtocolType) -> bool {
     truecolour || protocol != ProtocolType::Halfblocks
 }
 
+/// Whether the terminal can be sent `o=z`: Ghostty up to 1.3 inflates with
+/// Zig 0.15's flate, which crashes on valid streams. A Ghostty that gives no
+/// version is not trusted with it.
+fn inflates_safely(lookup: &impl Fn(&str) -> Option<String>) -> bool {
+    let program = lookup("TERM_PROGRAM")
+        .map(|p| p.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    program != "ghostty"
+        || lookup("TERM_PROGRAM_VERSION")
+            .and_then(|raw| crate::glyphs::version_of(&raw))
+            .is_some_and(|version| version > (1, 3))
+}
+
 /// The protocol a terminal is known to draw, from its environment.
 fn protocol_by_name(lookup: &impl Fn(&str) -> Option<String>) -> Option<ProtocolType> {
     use crate::colour::names;
@@ -735,6 +748,7 @@ impl Pictures {
         let still = Arc::clone(&shown);
         let decoded = Arc::new(AtomicU64::new(0));
         let counted = Arc::clone(&decoded);
+        let trusted = inflates_safely(&|key: &str| std::env::var(key).ok());
         // Detached: it ends when the cache, and with it the sender, is dropped.
         let _ = std::thread::Builder::new()
             .name(WORKER.to_owned())
@@ -744,9 +758,10 @@ impl Pictures {
                 };
                 let queried = (base.font_size().width, base.font_size().height);
                 // Read here: a picker resized for a zoom has lost what the query found.
-                let compress = base
-                    .capabilities()
-                    .contains(&ratatui_image::picker::Capability::KittyCompression);
+                let compress = trusted
+                    && base
+                        .capabilities()
+                        .contains(&ratatui_image::picker::Capability::KittyCompression);
                 let mut resized: Option<(Cell, Picker)> = None;
                 for job in inbox {
                     let picker = match job.cell {
@@ -2783,6 +2798,53 @@ mod tests {
                 .all(|(c, pane)| c.abs_diff(pane) <= 38),
             "an unchanged pixel of the mask is {quiet:?}, not near the pane"
         );
+    }
+
+    #[test]
+    fn inflate_gate() {
+        for (pairs, deflate) in [
+            (
+                &[
+                    ("TERM_PROGRAM", "ghostty"),
+                    ("TERM_PROGRAM_VERSION", "1.3.1"),
+                ][..],
+                false,
+            ),
+            (
+                &[
+                    ("TERM_PROGRAM", "ghostty"),
+                    ("TERM_PROGRAM_VERSION", "1.3.0"),
+                ][..],
+                false,
+            ),
+            (
+                &[
+                    ("TERM_PROGRAM", "ghostty"),
+                    ("TERM_PROGRAM_VERSION", "1.4.0"),
+                ][..],
+                true,
+            ),
+            (&[("TERM_PROGRAM", "ghostty")][..], false),
+            (
+                &[
+                    ("TERM_PROGRAM", "WezTerm"),
+                    ("TERM_PROGRAM_VERSION", "1.3.1"),
+                ][..],
+                true,
+            ),
+            (
+                &[("TERM_PROGRAM", "tmux"), ("TERM_PROGRAM_VERSION", "3.5a")][..],
+                true,
+            ),
+            (&[][..], true),
+        ] {
+            assert_eq!(
+                inflates_safely(&env(pairs)),
+                deflate,
+                "{pairs:?} is sent o=z: {}",
+                !deflate
+            );
+        }
     }
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
