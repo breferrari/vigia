@@ -105,7 +105,8 @@ pub fn user_frame(session: &str, content: &str) -> String {
 
 /// What the agent reads: the anchor, the reader's words, the lines around it,
 /// and the id to resolve it by. Plain text, because plain text is all the
-/// channel carries.
+/// channel carries. A question is named there as a last resort, asked in the
+/// session with options, because neither tool has a way to ask one.
 #[must_use]
 pub fn content(note: &Note, context: &[(u32, String)]) -> String {
     // Writing to a String cannot fail, so the results are discarded, which is
@@ -132,8 +133,11 @@ pub fn content(note: &Note, context: &[(u32, String)]) -> String {
     }
     let _ = writeln!(
         out,
-        "\nResolve it with the vigia MCP server: resolve(id: {:?}, note: \"<one line saying what \
-         you did>\").",
+        "\nAct on this note and decide from it and the code. Resolve it with the vigia MCP \
+         server: resolve(id: {:?}, note: \"<one line saying what you did>\"). reply writes a \
+         line under the note and leaves it open. Neither tool asks the reader anything.\n\
+         Ask only as a last resort, when something is not clear enough to act on. Ask in this \
+         session, with options.",
         note.id
     );
     out
