@@ -179,6 +179,18 @@ fn the_content_carries_the_note_its_anchor_and_its_context() {
         "the anchored line is marked among the rest: {text}"
     );
     assert!(text.contains("n1"), "the id it is resolved by: {text}");
+    assert!(
+        text.contains("last resort") && text.contains("not clear enough to act on"),
+        "a question is not bounded as a last resort: {text}"
+    );
+    assert!(
+        text.contains("with options"),
+        "a question is not asked with options: {text}"
+    );
+    assert!(
+        text.contains("Neither tool asks the reader anything"),
+        "the tools are left as a way to ask: {text}"
+    );
 }
 
 #[test]

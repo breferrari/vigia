@@ -39,7 +39,10 @@ pub const PROJECT_VAR: &str = "CLAUDE_PROJECT_DIR";
 /// What the client is told the server is for, in the handshake.
 const INSTRUCTIONS: &str = "vigia is the live diff monitor in the reader's other pane. A note the \
                             reader pins to a line of the diff is here: call notes, act on the code \
-                            it points at, then resolve it by id with one line saying what you did.";
+                            it points at, then resolve it by id with one line saying what you did. \
+                            Ask only as a last resort, when something is not clear enough to act \
+                            on, and ask in your own session with options. reply writes a line under \
+                            the note and is not how you ask.";
 
 const LIST_CHANGED: &str = r#"{"jsonrpc":"2.0","method":"notifications/resources/list_changed"}"#;
 
@@ -635,8 +638,8 @@ fn tools() -> Value {
         },
         {
             "name": "reply",
-            "description": "Answer a note by id without resolving it, for a question back to the \
-                            reader. The text draws under the note in the pane.",
+            "description": "Write a line under a note by id without resolving it. The line is an \
+                            answer the reader reads under the note. It is not a question to them.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -848,8 +851,8 @@ pub fn pending_of(listing: &Listing) -> Pending {
         match (note.status, note.reply.is_some()) {
             (Status::Resolved, _) => {}
             (Status::Open, _) => counts.open += 1,
-            // `reply` answers without resolving, for a question back to the
-            // reader, so the agent owes this one nothing until they answer.
+            // A reply leaves the note unresolved, so it waits on the reader
+            // and the agent owes this one nothing further.
             (Status::Seen, true) => counts.replied += 1,
             (Status::Seen, false) => counts.read += 1,
         }
