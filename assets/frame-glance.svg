@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 770 388" width="770" height="388" role="img"
+     aria-label="The vigia pane, labelled down its left side: the header naming the worktree and how many files changed; the list of changed files with their status letters, paths, sparklines and line counts, the newest marked by a pulse, and heat strips showing where in each file the changes sit; a rule; the diff of the file being read, with its heading, hunk and lines; another rule; and the status bar with key hints, frame time, memory and position.">
+  <!-- source: crates/vigia/tests/snapshots/render__glance_frame.snap rows=1-16, rendered at 80x16. Drawn by the xtask frames binary; package.rs::frame_svgs_match holds it to the snapshot. -->
+  <defs>
+    <clipPath id="win"><rect x="8" y="8" width="665" height="372" rx="12"/></clipPath>
+    <style>
+      .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; white-space: pre; }
+      .fg { fill: #e6edf3 } .dim { fill: #7d8590 } .faint { fill: #6e7681 }
+      .grn { fill: #3fb950 } .red { fill: #f85149 } .cyn { fill: #39c5cf }
+      .con { fill: #e3b341 }
+    </style>
+  </defs>
+  <rect x="0.5" y="0.5" width="769" height="387" rx="16" fill="#010409" stroke="#30363d"/>
+  <g transform="translate(89,0)">
+  <rect x="8" y="8" width="665" height="372" rx="12" fill="#0d1117"/>
+  <g clip-path="url(#win)">
+    <rect x="8" y="8" width="665" height="46" fill="#161b22"/>
+    <circle cx="34" cy="31" r="6" fill="#f85149"/>
+    <circle cx="54" cy="31" r="6" fill="#e3b341"/>
+    <circle cx="74" cy="31" r="6" fill="#3fb950"/>
+    <rect x="8" y="350" width="665" height="30" fill="#161b22"/>
+    <line x1="8" y1="350" x2="673" y2="350" stroke="#21262d" stroke-width="1"/>
+    <text class="m row" y="36" font-size="13.5" xml:space="preserve"><tspan x="102.0" class="fg">vigia · current </tspan><tspan x="231.6" class="cyn">▾</tspan><tspan x="239.7" class="fg"> · 3 changed</tspan> <tspan x="591.2" class="fg">watching</tspan></text>
+    <text class="m row" y="76" font-size="13.5" xml:space="preserve"></text>
+    <text class="m row" y="96" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="cyn">▸</tspan><tspan x="40.4" class="dim">M</tspan><tspan x="48.5" class="fg"> src/engine/watch.rs               </tspan><tspan x="340.1" class="cyn">●</tspan><tspan x="356.3" class="dim">■■■■■■■■■■■■</tspan><tspan x="461.6" class="faint">____</tspan><tspan x="494.0" class="cyn">▁▂▂▄▆▄▆█</tspan><tspan x="591.2" class="grn">+3</tspan><tspan x="639.8" class="red">-1</tspan></text>
+    <text class="m row" y="116" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">M</tspan><tspan x="48.5" class="fg"> src/render/frame.rs                 </tspan><tspan x="356.3" class="dim">■■■■■■■■■■■■</tspan><tspan x="461.6" class="faint">_____</tspan><tspan x="502.1" class="cyn">▂▁</tspan><tspan x="518.3" class="faint">_____</tspan><tspan x="583.1" class="grn">+11</tspan><tspan x="639.8" class="red">-3</tspan></text>
+    <text class="m row" y="136" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">M</tspan><tspan x="48.5" class="fg"> Cargo.toml                                       </tspan><tspan x="461.6" class="faint">____________</tspan><tspan x="591.2" class="grn">+2</tspan><tspan x="639.8" class="red">-0</tspan></text>
+    <line class="rule" x1="24.2" y1="151" x2="656.0" y2="151" stroke="#30363d" stroke-width="1"/>
+    <text class="m row" y="176" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">M</tspan><tspan x="48.5" class="fg"> src/engine/watch.rs               </tspan><tspan x="340.1" class="cyn">●</tspan><tspan x="356.3" class="dim">■■■■■■■■■■■■</tspan><tspan x="461.6" class="faint">____</tspan><tspan x="494.0" class="cyn">▁▂▂▄▆▄▆█</tspan><tspan x="591.2" class="grn">+3</tspan><tspan x="639.8" class="red">-1</tspan></text>
+    <text class="m row" y="196" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="cyn">  @@ -258,7 +258,9 @@</tspan></text>
+    <text class="m row" y="216" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">258</tspan><tspan x="113.3" class="fg"> pub fn advance(&amp;mut self) {</tspan></text>
+    <text class="m row" y="236" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">259</tspan><tspan x="145.7" class="fg"> let mut files = Vec::new();</tspan></text>
+    <text class="m row" y="256" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">260</tspan><tspan x="64.7" class="red"> -        </tspan><tspan x="145.7" class="red"> for change in self.changes() {</tspan></text>
+    <text class="m row" y="276" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">260</tspan><tspan x="64.7" class="grn"> +        </tspan><tspan x="145.7" class="grn"> for change in self.walk() {</tspan></text>
+    <text class="m row" y="296" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">261</tspan><tspan x="64.7" class="grn"> +            </tspan><tspan x="178.1" class="grn"> // one per path</tspan></text>
+    <text class="m row" y="316" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">262</tspan><tspan x="64.7" class="grn"> +            </tspan><tspan x="178.1" class="grn"> files.push(change?);</tspan></text>
+    <line class="rule" x1="24.2" y1="331" x2="656.0" y2="331" stroke="#30363d" stroke-width="1"/>
+    <text class="m row" y="370" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="dim">  q quit · f follow · m config · ? keys              </tspan><tspan x="453.5" class="dim"> 0.8ms frame  </tspan><tspan x="566.9" class="dim"> 19MiB </tspan><tspan x="623.6" class="dim"> 1/3</tspan></text>
+  </g>
+  <rect x="8.5" y="8.5" width="664" height="371" rx="12" fill="none" stroke="#30363d"/>
+  </g>
+  <text class="m fg" x="73" y="36" font-size="12.5" text-anchor="end">header</text>
+  <line x1="79" y1="32" x2="93.0" y2="32" stroke="#6e7681" stroke-width="1"/>
+  <text class="m fg" x="73" y="96" font-size="12.5" text-anchor="end">list</text>
+  <line x1="79" y1="92" x2="93.0" y2="92" stroke="#6e7681" stroke-width="1"/>
+  <text class="m fg" x="73" y="156" font-size="12.5" text-anchor="end">rule</text>
+  <line x1="79" y1="152" x2="93.0" y2="152" stroke="#6e7681" stroke-width="1"/>
+  <text class="m fg" x="73" y="176" font-size="12.5" text-anchor="end">diff</text>
+  <line x1="79" y1="172" x2="93.0" y2="172" stroke="#6e7681" stroke-width="1"/>
+  <text class="m fg" x="73" y="336" font-size="12.5" text-anchor="end">rule</text>
+  <line x1="79" y1="332" x2="93.0" y2="332" stroke="#6e7681" stroke-width="1"/>
+  <text class="m fg" x="73" y="370" font-size="12.5" text-anchor="end">status</text>
+  <line x1="79" y1="366" x2="93.0" y2="366" stroke="#6e7681" stroke-width="1"/>
+</svg>

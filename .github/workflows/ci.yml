@@ -4,147 +4,75 @@ on:
   push:
     branches: [main]
   pull_request:
-    # `ready_for_review` is **not** a default type, and the jobs below skip
-    # drafts. Without it the two halves cancel out: a draft is skipped while it
-    # is a draft, and marking it ready fires no event, so a PR could reach
-    # mergeable having never been checked once. The other three are the
-    # defaults, restated because naming any type replaces the whole list.
+    # `ready_for_review` is not a default type. take-next waits for the run it
+    # starts.
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
-  # A warning that reaches main is a warning nobody will ever fix.
-  RUSTFLAGS: -D warnings
+  CARGO_BUILD_WARNINGS: deny
 
 concurrency:
-  # Keyed on the draft flag too: a push made while the PR is a draft and the
-  # `ready_for_review` event after it land in different groups, so the ready
-  # run, the only one whose legs run, is never cancelled by a skipped one.
-  #
-  # On main every commit gets a full run, so each commit is its own group. A
-  # group holds one pending run and cancels the older one whatever
-  # `cancel-in-progress` says, so three merges in a row left the middle one
-  # unrun.
-  group: ci-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.sha || github.event.pull_request.draft }}
-  # On a branch, only the newest push is worth checking.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Every job below carries `if: github.event.pull_request.draft != true`, and it
-# is written five times rather than once because a workflow has no place to say
-# it once. What it buys: a branch iterates inside a draft for free, and the full
-# matrix runs when the work is claimed to be finished rather than on every push
-# toward finishing it. One PR spent nine runs converging here before this
-# existed. `github.event.pull_request` is null outside a pull request, so `push`
-# on main and `workflow_dispatch` are unaffected — `null != true` is true.
-#
-# It is a cost rule, not a correctness rule. Nothing merges without these having
-# run: the same jobs fire on `ready_for_review`, and branch protection reads the
-# result of that run rather than of a run that was skipped.
+permissions: {}
+
+# The slow suites (budgets, benches, the musl build, the forks' own suites)
+# run in `nightly.yml`.
 jobs:
-  # **What a pull request changed decides what runs.** A pull request that
-  # touches only documents, skills, templates or images runs the suites that
-  # read documents on one platform and skips the matrix, the budgets, the
-  # benches and the musl build: nothing they measure moved. Anything else runs
-  # everything, and so does a push to main or a dispatch, which carry no pull
-  # request to read. `change-class.sh` holds the list of what counts as a
-  # document and is driven by a test; a path it does not know is code, so a
-  # file added later runs too much rather than too little. The `full-ci`
-  # label on the pull request forces the full run. `ci-complete.sh` reads
-  # the class so the skips it expects are the only skips it accepts.
+  # A pull request that changes only documents runs the docs job alone.
+  # `change-class.sh` lists what counts as a document.
   changes:
     name: what changed
-    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
     outputs:
       class: ${{ steps.class.outputs.class }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 2
       - id: class
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            gh pr diff "${{ github.event.pull_request.number }}" --name-only > changed
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            git diff --name-only --no-renames HEAD^1 HEAD > changed
           else
             : > changed
-          fi
-          if gh pr view "${{ github.event.pull_request.number }}" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx 'full-ci'; then
-            export CI_FULL=true
           fi
           out=$(sh .github/scripts/change-class.sh < changed)
           printf '%s\n' "$out"
           echo "class=$(printf '%s\n' "$out" | tail -1)" >> "$GITHUB_OUTPUT"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
 
   lint:
-    name: fmt and docs
-    if: github.event.pull_request.draft != true
+    name: fmt and dist
+    needs: [changes]
+    if: needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          fetch-depth: 0
-
-      # A title becomes a release note unless a commit body carries
-      # `Release-note:`. The title arrives through env, never into the script.
-      - name: titles read as plain English
-        if: github.event_name == 'pull_request'
-        run: sh .github/scripts/title-check.sh "origin/${BASE}"
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-          BASE: ${{ github.base_ref }}
-
-      # The body arrives through env, never into the script.
-      - name: cited gates exist
-        if: github.event_name == 'pull_request'
-        run: sh .github/scripts/cited-gates.sh "origin/${BASE}"
-        env:
-          BODY: ${{ github.event.pull_request.body }}
-          BASE: ${{ github.base_ref }}
-
-      - uses: dtolnay/rust-toolchain@stable
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo fmt --all -- --check
-
-      # #131: both crates deny `rustdoc::broken_intra_doc_links` and no job ran
-      # rustdoc, so the deny was decorative. Three links had rotted behind it —
-      # one unresolved and two pointing at private items — and `cargo doc` was
-      # failing outright while every check stayed green.
-      - name: docs build
-        run: cargo doc --workspace --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings
-
-      # `.github/workflows/release.yml` is generated from
-      # `[workspace.metadata.dist]` and must never be hand-edited, so the failure
-      # to worry about is editing the config and not regenerating. Nothing else
-      # would notice: the file only runs on a tag, which is the one event that
-      # cannot be rehearsed.
-      #
-      # `crates/vigia/tests/package.rs` checks the publish wiring specifically,
-      # in `cargo test`, where a developer sees it in a second. This is the
-      # thorough half and checks the whole file, which is the same two-tier
-      # arrangement the budget gates use.
-      #
-      # Proven to bite before it was trusted (2026-08-08): dropping
-      # `./publish-crates-io` from `publish-jobs` without regenerating leaves
-      # this red with a diff and `run 'dist init' to update the file`. Worth
-      # knowing what it does *not* catch, because it is the opposite of the
-      # obvious guess: the target list does not bake into `release.yml` at all
-      # (zero triples appear there; the build matrix is computed at release time
-      # from `dist plan`), so adding a target leaves this green and correctly so.
-      #
-      # The prebuilt binary rather than `cargo install cargo-dist`, which is a
-      # multi-minute source build of a large crate for one boolean.
+      # The members by name: `--all` also formats the forks under `vendor/`.
+      - run: cargo fmt -p vigia-core -p vigia -p xtask -- --check
+      # `release.yml` is generated from `[workspace.metadata.dist]` and must match it.
       - name: the generated release workflow is current
         run: |
           set -euo pipefail
-          # The installer fetches the tarball itself, so the whole install retries.
           for attempt in 1 2 3; do
             if curl --proto '=https' --tlsv1.2 -LsSf \
               https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh \
@@ -159,381 +87,152 @@ jobs:
   test:
     name: test (${{ matrix.os }})
     needs: [changes]
-    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
+    if: needs.changes.outputs.class != 'docs'
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    timeout-minutes: 45
     strategy:
-      # Windows and macOS fail for different reasons than Linux does, and
-      # cancelling the others hides which.
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
           components: clippy
-      # The cache is written from main only, on every job. A pull request
-      # restores main's cache and builds its own delta, which rust-cache would
-      # not keep anyway: it caches dependencies, and the workspace crates are
-      # rebuilt on every run. Saving from every branch spends the repository's
-      # cache quota on copies of the same dependencies and evicts the one copy
-      # every branch reads.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ${{ matrix.os }}-test
           save-if: ${{ github.ref == 'refs/heads/main' }}
-
       # Per platform, because `cfg(windows)` and `cfg(target_os = "macos")`
-      # code is not compiled on Linux, so one run there lints a third of what
-      # the deny above covers.
+      # code is not compiled on Linux.
       - run: cargo clippy --all-targets
-
-      # Correctness first, in debug, where the structural budget gates still
-      # apply and the absolute ones report that they are skipped.
-      #
-      # nextest rather than `cargo test`, for two reasons a run's log shows.
-      # `cargo test` runs the seventy test binaries one after another, so the
-      # step's time is their sum, seven minutes on Linux, and most of it is one
-      # binary's slow tail while every core idles. nextest schedules every test
-      # across every binary at once, so the step's time is closer to the
-      # longest test. And `cargo test` stops at the first failing binary, so a
-      # red run on one platform hides whether the rest ran; the `ci` profile
-      # in `.config/nextest.toml` runs everything and reports every failure.
-      # Each test is its own process, which is also why `relative.rs` can
-      # change the working directory without touching another test. Doctests
-      # are outside nextest's model and keep their own step.
-      #
-      # Installed as a prebuilt binary, the way `dist` is above: `cargo
-      # install` would build it from source on every run.
-      #
-      # **The slack belongs here too, and its absence was a hole.** The claim
-      # above is true of every absolute gate that guards on
-      # `absolute_gates_apply` — those skip in debug and never reach this step.
-      # It is NOT true of `watch.rs`, whose `max_delay` bound is an absolute
-      # wall-clock assertion that runs unconditionally, in debug, right here. It
-      # calls `budget()`, which is the opt-in, and its own comment says it "takes
-      # slack because it is an absolute wall-clock bound on a shared runner" — so
-      # the test was written believing this step supplied it. It did not, and the
-      # bound was held to its raw 500ms on a shared runner. `windows-latest`
-      # measured 773.68ms on a post-merge run of `main` and went red.
-      #
-      # Guarding the bound on `absolute_gates_apply` instead would be worse, and
-      # in a shape this file already records: no step runs `watch.rs` in release,
-      # so the assertion would then run NOWHERE. That is I7's hole below, reached
-      # through the selector rather than the gate — green, and about nothing.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: nextest
       - name: test
         run: cargo nextest run --workspace --profile ci
         env:
           VIGIA_BUDGET_SLACK: "3"
-      - name: doctests, which nextest does not run
+      - name: doctests
         run: cargo test --workspace --doc
-        env:
-          VIGIA_BUDGET_SLACK: "3"
 
-  # The budgets in their own job per platform, beside the test job rather
-  # than after it. They are a separate release build either way, and running
-  # them after the debug suite put three to six minutes on the critical path
-  # of every lane for nothing the ordering bought. Each budget step still runs
-  # in the order it always has: the two budgets binaries, then first paint.
-  budgets:
-    name: budgets (${{ matrix.os }})
+  msrv:
+    name: minimum Rust
     needs: [changes]
-    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      # Then the budgets, in release, because that is what they were set
-      # against. Slack applies to the absolute wall-clock gates only: hosted
-      # runners are shared, and their variance is not a property of this code.
-      # The structural gates take no slack and are what catch a real regression.
-      #
-      # **`first_paint` is here as of #12, and its absence was a hole.** I7 is
-      # the one budget whose gate does not live in a `budgets.rs`: a first-paint
-      # cost is invisible to any gate that warms up, so `SPEC.md` §7 gives it a
-      # file of its own. That file's absolute gate is release-only, via
-      # `absolute_gates_apply`, and this step named only `--test budgets`, so the
-      # gate reported itself skipped under `cargo test --workspace` in debug and
-      # was never selected in release. **I7's absolute gate ran nowhere.** It is
-      # the exact shape §7 keeps recording, arrived at through the test
-      # *selector* rather than through the gate: green, and about nothing.
-      - name: budgets
-        run: cargo test --release --test budgets
-        env:
-          VIGIA_BUDGET_SLACK: "3"
-
-      # **A separate invocation, not `--test budgets --test first_paint`.** That
-      # was the first spelling and it is subtly worse: cargo runs test binaries
-      # one at a time but in its own order, and locally that order put
-      # `first_paint` *between* the two `budgets` binaries. `first_paint` does
-      # three cold starts over a 100 x 500 fixture, so the shell's budgets now
-      # ran immediately after a burst of exactly the disk and allocator work
-      # that an absolute wall-clock gate is most sensitive to. Two flakes landed
-      # in the two runs after that change, on gates that had been green,
-      # which is weak evidence on its own and points at a mechanism that did not
-      # exist before.
-      #
-      # Splitting the step costs one extra cargo startup and restores the
-      # ordering the budget gates have always run in, which makes this addition
-      # additive rather than a change to what the other gates measure.
-      # [#36](https://github.com/breferrari/vigia/issues/36) tracks the
-      # underlying flakiness of these gates on hosted runners.
-      - name: first paint, which is I7 and is not in budgets.rs
-        run: cargo test --release --test first_paint
-        env:
-          VIGIA_BUDGET_SLACK: "3"
-
-  benches:
-    name: benches compile
-    needs: [changes]
-    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
+    if: needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - id: msrv
+        run: echo "version=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # Not run for timings: a hosted runner cannot produce a number worth
-      # comparing. Compiled so they cannot rot unnoticed.
-      - run: cargo bench --no-run
+      - run: cargo check --workspace
 
-  pure-rust:
-    name: no C toolchain
+  deny:
+    name: dependencies
     needs: [changes]
-    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
+    if: needs.changes.outputs.class != 'docs'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      # CLAUDE.md calls a C toolchain in the graph a spec change, not an
-      # implementation detail. This is that rule with teeth: it is the whole
-      # reason musl-static and Windows are cheap.
-      # **The targets are derived, not re-typed.** They were re-typed until #12,
-      # and the two lists came apart the moment a fourth target shipped:
-      # `x86_64-apple-darwin` went into `[workspace.metadata.dist]` and this rule
-      # had never heard of it, so a binary users receive sat outside the check
-      # `CLAUDE.md` calls a spec-level rule rather than an implementation detail.
-      #
-      # A gate over the duplication was written first and it did catch that, but
-      # it can only fire *after* somebody types the fifth target wrong. Reading
-      # the release config directly makes the drift impossible instead: cargo
-      # exposes `[workspace.metadata.dist]` verbatim under `.metadata.dist`, so
-      # there is exactly one list and this is it.
-      # `crates/vigia/tests/package.rs::the_purity_gate_derives_its_targets_from_the_release_config`
-      # holds the derivation in place, in both directions.
-      - name: assert no cc, cmake or bindgen on any tier-1 target
-        run: |
-          set -euo pipefail
-          targets=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.metadata.dist.targets[]')
-          if [ -z "$targets" ]; then
-            echo "::error::no targets in [workspace.metadata.dist]; the release \
-          config moved and this gate is now checking nothing"
-            exit 1
-          fi
-          status=0
-          for target in $targets
-          do
-            found=$(cargo tree --target "$target" -e normal,build \
-              | grep -oiE '\bcc v[0-9.]+|\bcmake v[0-9.]+|\bbindgen v[0-9.]+' \
-              | sort -u || true)
-            if [ -n "$found" ]; then
-              echo "::error::a C build dependency entered the graph for $target: $found"
-              status=1
-            else
-              echo "$target: clean"
-            fi
-          done
-          exit $status
-
-  musl:
-    name: static musl binary
-    needs: [changes]
-    if: github.event.pull_request.draft != true && needs.changes.outputs.class != 'docs'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
+          toolchain: stable
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo build --release --target x86_64-unknown-linux-musl
-      # The claim in CLAUDE.md is a static binary with no cross-toolchain.
-      # Building is half of it; being actually static is the other half.
-      - name: assert the binary is static
-        run: |
-          set -euo pipefail
-          binary=target/x86_64-unknown-linux-musl/release/vigia
-          file "$binary"
-          # A resolved shared library prints as `libfoo.so => /path`. Matching
-          # on that rather than on ldd's summary line, which is "statically
-          # linked" for a static-pie build and "not a dynamic executable" for a
-          # plain one, so keying off either would misfire on the other.
-          if ldd "$binary" 2>&1 | grep -q '=>'; then
-            echo "::error::the musl binary links shared libraries"
-            ldd "$binary" || true
-            exit 1
-          fi
+          tool: cargo-deny@0.20.2
+      - run: cargo deny check advisories licenses sources
+      - run: cargo deny --exclude-dev check bans
 
-      # Static and shipped are two different claims, and until #12 only the
-      # first was checked here. `SPEC.md` §9 makes musl the *only* Linux artifact
-      # a release produces, while every budget number in this repository was
-      # taken on `ubuntu-latest` gnu in the `test` job above. So the binary Linux
-      # users actually receive had never been measured against I7 or I9 at all,
-      # which is §7's recurring shape one target over: a gate that is green about
-      # something adjacent to the thing it looks like it covers.
-      #
-      # It is not a hypothetical difference. musl's allocator is a different
-      # implementation with materially different behaviour under the allocation
-      # pattern a frame produces, and this crate has hard per-frame budgets.
-      #
-      # No runner change is needed and that is why this is affordable: a static
-      # musl test binary executes natively on a glibc host, so the same
-      # `ubuntu-latest` that built it can run it. Same slack as the `test` job,
-      # for the same reason: hosted runners are shared and their variance is not
-      # a property of this code. The structural gates take no slack and are what
-      # catch a real regression.
-      #
-      # **`-p vigia`, and the scoping is the finding rather than a convenience.**
-      # The unscoped form fails to *compile* for this target, and not for any
-      # reason to do with this code: `vigia-core`'s dev-dependency on `criterion`
-      # pulls `alloca`, whose build script is `cc`, which then goes looking for
-      # `x86_64-linux-musl-gcc` and does not find one on a hosted runner. So the
-      # pure-Rust property CLAUDE.md protects holds for the *shipped* graph and
-      # does not hold for the *dev* graph on a cross target, which is a real
-      # constraint and is recorded in `SPEC.md` §7 rather than worked around by
-      # installing a C cross-compiler here.
-      #
-      # It is the right scope regardless, which is what makes the narrowing
-      # honest rather than convenient. `vigia-core`'s budgets are engine
-      # primitives (I2a, I4) rather than anything a reader feels, they are
-      # measured on gnu in the `test` job above, and they were never what "the
-      # artifact Linux ships" was about. `vigia`'s only dev-dependency is
-      # `insta`, which is pure Rust, so this compiles with no C anything.
-      #
-      # **Both test targets, because I7 is not in `budgets.rs`.** An earlier
-      # version of this step named `--test budgets` alone and the comment claimed
-      # it covered I7 and I9. It covered I9: a first-paint cost is invisible to
-      # any gate that warms up, so `SPEC.md` §7 gives I7 a file of its own.
-      #
-      # `--nocapture` so the numbers reach the log. Every gate here prints what
-      # it measured, and libtest discards a *passing* test's output without
-      # this, so the job would prove the artifact holds its budgets and record
-      # nothing about by how much. `SPEC.md` §10 quotes a figure for every other
-      # budget on the reference machine; this is the only place the musl ones
-      # can come from.
-      - name: budgets, against the binary Linux actually ships
-        run: >
-          cargo test -p vigia --release
-          --target x86_64-unknown-linux-musl
-          --test budgets -- --nocapture
-        env:
-          VIGIA_BUDGET_SLACK: "3"
-
-      # Separate for the reason the `test` job above gives at length: sharing an
-      # invocation lets cargo interleave this between the budget binaries.
-      - name: first paint, against the binary Linux actually ships
-        run: >
-          cargo test -p vigia --release
-          --target x86_64-unknown-linux-musl
-          --test first_paint -- --nocapture
-        env:
-          VIGIA_BUDGET_SLACK: "3"
-
-  # **The one check branch protection should require, and the reason it exists is
-  # an instrument that reported green while nothing had run**
-  # ([#236](https://github.com/breferrari/vigia/issues/236)).
-  #
-  # `gh pr checks --watch --fail-fast` exited 0 on a PR whose matrix had not
-  # started. It treats "every check currently attached to the head SHA is terminal
-  # and none failed" as done, and it cannot know more are about to attach. Three
-  # deliberate properties lined up to make that reachable: the jobs above skip on
-  # drafts, so a `skipped` check is normal here and indistinguishable from a
-  # passing one to anything counting failures; a second workflow also triggers on
-  # `pull_request`, so the PR is never checkless, which is the one state a human
-  # would notice; and pushing and marking ready in quick succession fires two runs,
-  # the second cancelling the first, which opens the window.
-  #
-  # This collapses the class rather than narrowing it. A cancelled run fails it, a
-  # skipped matrix fails it, a matrix job that never ran fails it, and a check list
-  # that does not *contain* it is visibly incomplete rather than quietly green.
-  # `SPEC.md` §7's rule reaching the review surface: a gate that cannot fail is
-  # indistinguishable from one that cannot be reached.
-  #
-  # **`if: always()` is what makes it a gate rather than a summary.** Without it
-  # the job inherits `needs`'s own skipping, so the one check that is supposed to
-  # notice an absent matrix would go absent with it, which is the failure it
-  # exists to catch wearing the fix's clothes.
-  #
-  # It carries no draft guard and still runs on a draft, so the required check
-  # always reports rather than going absent. What it must not do is judge a
-  # draft's skips as failure: that turned the check red on every push to a
-  # draft, and a draft cannot be merged in any case, so the run it would be
-  # protecting cannot happen. `ready_for_review` is in this workflow's trigger
-  # list so the full matrix runs the moment the work is claimed finished.
-  # The suites that read a document, on one platform, for a pull request that
-  # changed only documents. `package.rs::docs_suites_named` holds this list to
-  # the tests that read a document at the repository root or under `docs/`.
-  # The cache is the ubuntu test job's, restored and never saved, so a docs
-  # pull request neither builds cold nor overwrites the fuller cache.
+  # Every pull request: the doc build, the PR title, and the suites that read
+  # documents.
   docs:
     name: documents
     needs: [changes]
-    if: github.event.pull_request.draft != true && needs.changes.outputs.class == 'docs'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # A title becomes a release note unless a commit body carries
+      # `Release-note:`. The title arrives through env, never into the script.
+      - name: title
+        if: github.event_name == 'pull_request'
+        run: sh .github/scripts/title-check.sh "origin/${BASE}"
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.base_ref }}
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: ubuntu-latest-test
           save-if: false
-      - uses: taiki-e/install-action@v2
+      - name: docs build
+        run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: nextest
+      # A code pull request runs these in the test job.
       - name: the suites that read documents
+        if: needs.changes.outputs.class == 'docs'
         run: |
           set -euo pipefail
           cargo nextest run -p vigia --profile ci --test package --test register --test sheet --test theme_docs
           cargo nextest run -p vigia-core --profile ci --test coverage
-        env:
-          VIGIA_BUDGET_SLACK: "3"
 
+  zizmor:
+    name: workflow audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: zizmor@1.31.1
+      - run: zizmor --offline --config .github/zizmor.yml .github/workflows
+
+  # The one required check. A skipped job passes, so a documents-only pull
+  # request is green with the docs job alone.
   ci-complete:
     name: ci complete
     if: always()
-    needs: [changes, lint, test, budgets, benches, pure-rust, musl, docs]
+    needs: [changes, lint, test, msrv, deny, docs, zizmor]
     runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
-      # The judgement lives in a script so a test can drive it with fabricated
-      # results. Inline, the draft case was unreachable from any gate.
-      - name: every leg ran and passed
-        run: |
-          sh .github/scripts/ci-complete.sh \
-            '${{ github.event.pull_request.draft }}' \
-            '${{ needs.changes.outputs.class }}' \
-            'lint=${{ needs.lint.result }}' \
-            'test=${{ needs.test.result }}' \
-            'budgets=${{ needs.budgets.result }}' \
-            'benches=${{ needs.benches.result }}' \
-            'pure-rust=${{ needs.pure-rust.result }}' \
-            'musl=${{ needs.musl.result }}' \
-            'docs=${{ needs.docs.result }}'
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo "every job that ran passed"

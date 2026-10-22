@@ -1,0 +1,36 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 1d6bc95..4106b43 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,10 +9,11 @@
+ # will likely look very different (and much more reasonable).
+ # See Cargo.toml.orig for the original contents.
+ 
++# Changed for vigia-hayro-syntax: the package name, description and links, the excluded files. See PATCHES.md.
+ [package]
+ edition = "2024"
+ rust-version = "1.92"
+-name = "hayro-syntax"
++name = "vigia-hayro-syntax"
+ version = "0.8.0"
+ authors = ["Laurenz Stampfl <laurenz.stampfl@gmail.com>"]
+ build = false
+@@ -21,10 +22,16 @@ autobins = false
+ autoexamples = false
+ autotests = false
+ autobenches = false
+-description = "A low-level crate for reading PDF files."
++description = "hayro-syntax 0.8.0 with the patches vigia ships, until upstream releases them. Use hayro-syntax instead."
++documentation = "https://docs.rs/vigia-hayro-syntax"
+ readme = "README.md"
++exclude = [
++    "/Cargo.toml.orig",
++    "/PATCHES.md",
++    "/patches/*",
++]
+ license = "Apache-2.0 OR MIT"
+-repository = "https://github.com/LaurenzV/hayro"
++repository = "https://github.com/breferrari/vigia"
+ resolver = "2"
+ 
+ [features]

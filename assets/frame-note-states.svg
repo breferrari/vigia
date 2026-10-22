@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 681 628" width="681" height="628" role="img"
+     aria-label="The vigia pane with one changed file carrying four notes: one whose line has left the diff, drawn under the file's heading and marked gone; one the agent has read and answered, marked seen with its reply under it; one on the changed line, marked open; and one whose line was edited under it, marked changed.">
+  <!-- source: crates/vigia/tests/snapshots/notes__note_states_frame.snap rows=1-27,40, rendered at 80x40. Drawn by the xtask frames binary; package.rs::frame_svgs_match holds it to the snapshot. -->
+  <defs>
+    <clipPath id="win"><rect x="8" y="8" width="665" height="612" rx="12"/></clipPath>
+    <style>
+      .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; white-space: pre; }
+      .fg { fill: #e6edf3 } .dim { fill: #7d8590 } .faint { fill: #6e7681 }
+      .grn { fill: #3fb950 } .red { fill: #f85149 } .cyn { fill: #39c5cf }
+      .con { fill: #e3b341 }
+    </style>
+  </defs>
+  <rect x="8" y="8" width="665" height="612" rx="12" fill="#0d1117"/>
+  <g clip-path="url(#win)">
+    <rect x="8" y="8" width="665" height="46" fill="#161b22"/>
+    <circle cx="34" cy="31" r="6" fill="#f85149"/>
+    <circle cx="54" cy="31" r="6" fill="#e3b341"/>
+    <circle cx="74" cy="31" r="6" fill="#3fb950"/>
+    <rect x="8" y="590" width="665" height="30" fill="#161b22"/>
+    <line x1="8" y1="590" x2="673" y2="590" stroke="#21262d" stroke-width="1"/>
+    <text class="m row" y="36" font-size="13.5" xml:space="preserve"><tspan x="102.0" class="fg">fixture · current </tspan><tspan x="247.8" class="cyn">▾</tspan><tspan x="255.9" class="fg"> · 1 changed</tspan> <tspan x="591.2" class="fg">+1   </tspan><tspan x="631.7" class="fg"> -1</tspan></text>
+    <text class="m row" y="76" font-size="13.5" xml:space="preserve"></text>
+    <text class="m row" y="96" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="cyn">▸</tspan><tspan x="40.4" class="dim">M</tspan><tspan x="48.5" class="fg"> src/watch.rs                    </tspan><tspan x="323.9" class="cyn">↳</tspan><tspan x="356.3" class="dim">■■■■■■■■■■■■</tspan><tspan x="461.6" class="faint">____________</tspan><tspan x="591.2" class="grn">+1</tspan><tspan x="639.8" class="red">-1</tspan></text>
+    <line class="rule" x1="24.2" y1="111" x2="656.0" y2="111" stroke="#30363d" stroke-width="1"/>
+    <text class="m row" y="136" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">M</tspan><tspan x="48.5" class="fg"> src/watch.rs                    </tspan><tspan x="323.9" class="cyn">↳</tspan><tspan x="356.3" class="dim">■■■■■■■■■■■■</tspan><tspan x="461.6" class="faint">____________</tspan><tspan x="591.2" class="grn">+1</tspan><tspan x="639.8" class="red">-1</tspan></text>
+    <text class="m row" y="156" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">┌──────────────────────────────────────────────────────────────────────┐</tspan></text>
+    <text class="m row" y="176" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">│</tspan><tspan x="80.9" class="fg"> check the end                                                       </tspan><tspan x="647.9" class="faint">│</tspan></text>
+    <text class="m row" y="196" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">└─────────────────────────────────────────────────────────────</tspan><tspan x="583.1" class="con">gone</tspan><tspan x="623.6" class="faint">───┘</tspan></text>
+    <text class="m row" y="216" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="cyn">  @@ -2,7 +2,7 @@</tspan></text>
+    <text class="m row" y="236" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">2</tspan><tspan x="64.7" class="fg"> line 2</tspan></text>
+    <text class="m row" y="256" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">3</tspan><tspan x="64.7" class="fg"> line 3</tspan></text>
+    <text class="m row" y="276" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">┌──────────────────────────────────────────────────────────────────────┐</tspan></text>
+    <text class="m row" y="296" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">│</tspan><tspan x="80.9" class="fg"> why keep this line?                                                 </tspan><tspan x="647.9" class="faint">│</tspan></text>
+    <text class="m row" y="316" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">└─────────────────────────────────────────────────────────────</tspan><tspan x="583.1" class="con">seen</tspan><tspan x="623.6" class="faint">───┘</tspan></text>
+    <text class="m row" y="336" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="cyn">↳</tspan><tspan x="80.9" class="fg"> it seeds the margin; kept</tspan></text>
+    <text class="m row" y="356" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">4</tspan><tspan x="64.7" class="fg"> line 4</tspan></text>
+    <text class="m row" y="376" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">5</tspan><tspan x="48.5" class="red"> - line 5</tspan></text>
+    <text class="m row" y="396" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">5</tspan><tspan x="48.5" class="grn"> +    </tspan><tspan x="97.1" class="grn"> margin.checked_mul(2).unwrap_or(margin)</tspan></text>
+    <text class="m row" y="416" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">┌──────────────────────────────────────────────────────────────────────┐</tspan></text>
+    <text class="m row" y="436" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">│</tspan><tspan x="80.9" class="fg"> use saturating_mul here                                             </tspan><tspan x="647.9" class="faint">│</tspan></text>
+    <text class="m row" y="456" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">└─────────────────────────────────────────────────────────────</tspan><tspan x="583.1" class="con">open</tspan><tspan x="623.6" class="faint">───┘</tspan></text>
+    <text class="m row" y="476" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">6</tspan><tspan x="64.7" class="fg"> line 6</tspan></text>
+    <text class="m row" y="496" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">7</tspan><tspan x="64.7" class="fg"> line 7</tspan></text>
+    <text class="m row" y="516" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">┌──────────────────────────────────────────────────────────────────────┐</tspan></text>
+    <text class="m row" y="536" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">│</tspan><tspan x="80.9" class="fg"> rename this                                                         </tspan><tspan x="647.9" class="faint">│</tspan></text>
+    <text class="m row" y="556" font-size="13.5" xml:space="preserve"><tspan x="72.8" class="faint">└──────────────────────────────────────────────────────────</tspan><tspan x="558.8" class="con">changed</tspan><tspan x="623.6" class="faint">───┘</tspan></text>
+    <text class="m row" y="576" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">8</tspan><tspan x="64.7" class="fg"> line 8</tspan></text>
+    <text class="m row" y="610" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="dim">  q quit · f follow · m config · ? keys                </tspan><tspan x="469.7" class="dim"> 4 notes </tspan><tspan x="542.6" class="dim"> follow </tspan><tspan x="607.4" class="cyn">▶</tspan><tspan x="615.5" class="dim">  1/1</tspan></text>
+  </g>
+  <rect x="8.5" y="8.5" width="664" height="611" rx="12" fill="none" stroke="#30363d"/>
+</svg>

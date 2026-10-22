@@ -455,3 +455,135 @@ fn the_opening_frames_never_compile_a_grammar_the_warmer_has_not_reached() {
          screen that never gains its colour rather than one that gains it late"
     );
 }
+
+/// I7 with a changed PNG first: the first frame draws its size line and the
+/// rows held for its pictures, and decodes nothing. `SPEC.md` §11.1.
+#[test]
+fn png_first_paint() {
+    picture_first_paint("a.png", support::screen_png(10), support::screen_png(200));
+}
+
+#[test]
+fn svg_first_paint() {
+    picture_first_paint(
+        "a.svg",
+        support::icon_svg(1).into_bytes(),
+        support::icon_svg(2).into_bytes(),
+    );
+}
+
+/// The same with a changed PDF first.
+#[cfg(feature = "pdf")]
+#[test]
+fn pdf_first_paint() {
+    picture_first_paint("a.pdf", support::icon_pdf(1), support::icon_pdf(200));
+}
+
+/// I7 with a changed picture first: `path` committed as `old` and rewritten
+/// as `new`, and the first frame decodes nothing.
+fn picture_first_paint(path: &str, old: Vec<u8>, new: Vec<u8>) {
+    let scratch = Scratch::new("first-paint-picture");
+    scratch.write(path, old);
+    scratch.write("b.txt", support::numbered_lines(50));
+    scratch.commit_all("baseline");
+    scratch.write(path, new);
+    scratch.write("b.txt", support::numbered_lines(60));
+    let pane = Rect::new(0, 0, 120, 40);
+
+    let _timed = exclusively_timed();
+    // Best of three cold starts, the idiom the other first-paint gates use.
+    let first = (0..3)
+        .map(|_| picture_cold_start(&scratch, path, pane))
+        .min()
+        .expect("three runs");
+    if !absolute_gates_apply("cargo test --release -p vigia --test first_paint") {
+        return;
+    }
+    assert!(
+        first < budget(I7_STARTUP),
+        "I7: first paint with a changed {path} took {first:?} at best of three, over {:?}",
+        budget(I7_STARTUP)
+    );
+}
+
+/// One cold start over `scratch` to its first painted frame, which decodes
+/// nothing; how long it took.
+fn picture_cold_start(scratch: &Scratch, path: &str, pane: Rect) -> Duration {
+    use vigia::pictures::{self, Inks, Pictures};
+
+    let began = Instant::now();
+    let worktree = Worktree::discover(scratch.root()).expect("discover");
+    let mut frame = worktree.frame();
+    let opened = began.elapsed();
+    frame.advance().expect("advance");
+    let advanced = began.elapsed();
+    let mut highlighter = Highlighter::eager();
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let history = History::new();
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        ratatui_image::picker::Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        vigia::Stood {
+            standing: &Standing::Current,
+            now: 0,
+        },
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
+    let made = began.elapsed();
+    let body = body_layout(pane, &chrome, frame.files().len(), frame.files().len());
+    let mut buf = Buffer::empty(pane);
+    let mut view = app
+        .view(&mut frame, &mut highlighter, &history, body)
+        .expect("view");
+    let viewed = began.elapsed();
+    pictures.attach(&mut view.rows, &frame);
+    let attached = began.elapsed();
+    render(
+        &mut buf,
+        pane,
+        &view,
+        &Theme::dark(),
+        Glyphs::default(),
+        &chrome,
+    );
+    let first = began.elapsed();
+    eprintln!(
+        "note: first paint with {path}: opened {opened:?}, advanced {advanced:?}, pictures made {made:?}, viewed {viewed:?}, attached {attached:?}, painted {first:?}"
+    );
+
+    assert_eq!(
+        pictures::decodes_off_worker(),
+        0,
+        "the first frame decoded a picture"
+    );
+    assert!(
+        view.rows
+            .iter()
+            .any(|row| matches!(row, Row::Sized { ready: None, .. })),
+        "the first frame did not draw the size line on its own"
+    );
+    assert!(
+        view.rows
+            .iter()
+            .any(|row| matches!(row, Row::Picture { ready: None, .. })),
+        "the first frame held no rows for the pictures"
+    );
+    // Its worker finishes here, not beside the next run.
+    pictures.attach(&mut [], &frame);
+    assert!(
+        pictures.settle(support::ceiling(Duration::from_secs(60))),
+        "a cold start's worker did not finish"
+    );
+    first
+}

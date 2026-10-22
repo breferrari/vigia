@@ -1,5 +1,6 @@
 //! What a view builds out of a real diff.
 
+use std::assert_matches;
 use std::time::Instant;
 
 #[path = "../../vigia-core/tests/support/mod.rs"]
@@ -13,7 +14,7 @@ use vigia::{
 };
 use vigia_core::{HISTORY_SAMPLE, Highlighter, History, LineKind, Standing};
 
-use support::Scratch;
+use support::{Scratch, png};
 
 /// Tall enough that nothing is scrolled off, so the whole diff is asserted.
 const ALL_ROWS: usize = 500;
@@ -177,8 +178,9 @@ fn a_file_is_its_heading_then_its_hunks() {
             Row::File(entry) => {
                 let churn = &entry.churn;
                 headings += 1;
-                assert!(
-                    matches!(view.rows.get(index + 1), Some(Row::Hunk { .. })),
+                assert_matches!(
+                    view.rows.get(index + 1),
+                    Some(Row::Hunk { .. }),
                     "the row after a heading is {:?}, not a hunk header",
                     view.rows.get(index + 1)
                 );
@@ -300,7 +302,11 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
         &mut highlighter,
         &history,
         Viewport {
-            position: Position { file: 0, row: 0 },
+            position: Position {
+                file: 0,
+                row: 0,
+                under: 0,
+            },
             // Unanchored, because this slides a window and compares it against slices
             // of the whole.
             anchored: false,
@@ -332,6 +338,7 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
                 position: Position {
                     file: 0,
                     row: offset,
+                    under: 0,
                 },
                 anchored: false,
                 wrap: false,
@@ -352,7 +359,8 @@ fn a_window_into_a_file_is_the_same_rows_the_whole_file_would_give() {
             window.top,
             Position {
                 file: 0,
-                row: offset
+                row: offset,
+                under: 0,
             },
             "the window at offset {offset} reported starting somewhere else"
         );
@@ -672,7 +680,11 @@ fn the_headers_total_is_the_rows_summed() {
     let history = History::new();
 
     let viewport = |diff_rows: usize| Viewport {
-        position: Position { file: 0, row: 0 },
+        position: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         anchored: false,
         wrap: false,
         width: 0,
@@ -726,7 +738,11 @@ fn a_run_still_being_written_holds_its_last_answer() {
     let mut highlighter = Highlighter::eager();
     let history = History::new();
     let viewport = Viewport {
-        position: Position { file: 0, row: 0 },
+        position: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         anchored: false,
         wrap: false,
         width: 0,
@@ -778,7 +794,11 @@ fn a_binary_file_adds_nothing_and_says_nothing() {
         &mut highlighter,
         &history,
         Viewport {
-            position: Position { file: 0, row: 0 },
+            position: Position {
+                file: 0,
+                row: 0,
+                under: 0,
+            },
             anchored: false,
             wrap: false,
             width: 0,
@@ -800,6 +820,46 @@ fn a_binary_file_adds_nothing_and_says_nothing() {
         view.churn.map(|run| run.binary),
         Some(1),
         "the binary file is not counted where the header would say so"
+    );
+}
+
+#[test]
+fn image_size_line() {
+    let scratch = Scratch::new("shell-rows-image");
+    scratch.write("assets/home.png", png(24, 40, 1));
+    scratch.commit_all("baseline");
+    scratch.write("assets/home.png", png(30, 50, 2));
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let view = app
+        .view(
+            &mut frame,
+            &mut highlighter,
+            &history,
+            Body::diff_only(ALL_ROWS),
+        )
+        .expect("view");
+
+    let Some(Row::Reason(line)) = view.rows.get(1) else {
+        panic!(
+            "an image drew {:?} where its size line should be",
+            view.rows.get(1)
+        );
+    };
+    assert!(
+        line.starts_with("PNG 24×40 → 30×50 · "),
+        "the size line reads {line:?}"
+    );
+    assert_eq!(view.rows.len(), 2, "an image drew extra rows");
+    let churn = frame.churn().expect("churn").expect("a churn");
+    assert_eq!(
+        churn.binary, 1,
+        "the header stopped counting an image as binary"
     );
 }
 
@@ -827,11 +887,9 @@ fn a_binary_file_gets_a_reason_instead_of_hunks() {
         )
         .expect("view");
 
-    assert!(
-        matches!(
-            view.rows.first(),
-            Some(Row::File(entry)) if entry.churn.is_none()
-        ),
+    assert_matches!(
+        view.rows.first(),
+        Some(Row::File(entry)) if entry.churn.is_none(),
         "a binary file's heading is {:?}, and a +/- count for it would be a lie",
         view.rows.first()
     );
@@ -859,7 +917,11 @@ fn a_files_block_ends_in_a_blank_row() {
         &mut highlighter,
         &history,
         Viewport {
-            position: Position { file: 0, row: 0 },
+            position: Position {
+                file: 0,
+                row: 0,
+                under: 0,
+            },
             anchored: false,
             wrap: false,
             width: 0,
@@ -938,7 +1000,11 @@ fn the_total_holds_when_the_reader_pins_one_file() {
     let history = History::new();
 
     let viewport = |single: bool| Viewport {
-        position: Position { file: 0, row: 0 },
+        position: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         anchored: false,
         wrap: false,
         width: 0,

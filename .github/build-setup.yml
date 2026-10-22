@@ -1,0 +1,5 @@
+# Steps dist runs in each release build job before `dist build`. The macOS
+# runner images can ship a stable older than `rust-version`, and dist installs
+# Rust only where none is present.
+- name: Update stable Rust
+  run: rustup update stable --no-self-update && rustup default stable

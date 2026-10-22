@@ -4,6 +4,7 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::assert_matches;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -1026,7 +1027,7 @@ impl Client {
     fn message(&self) -> Value {
         let line = self
             .lines
-            .recv_timeout(budget(Duration::from_secs(10)))
+            .recv_timeout(support::ceiling(budget(Duration::from_secs(10))))
             .expect("the server answered in time");
         serde_json::from_str(&line).unwrap_or_else(|e| {
             panic!("stdout carried something that is not a message: {line:?}: {e}")
@@ -1426,8 +1427,9 @@ fn a_session_start_payload_registers_and_a_session_end_clears() {
     // every event that is not the end records.
     for event in ["SessionStart", "SessionResume", "anything else"] {
         let payload = json!({"session_id": "bbbb-2222", "hook_event_name": event});
-        assert!(
-            matches!(hooked(&payload, env), Some(Hooked::Put(_))),
+        assert_matches!(
+            hooked(&payload, env),
+            Some(Hooked::Put(_)),
             "{event} did not record"
         );
     }

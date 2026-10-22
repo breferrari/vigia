@@ -1336,3 +1336,20 @@ fn derived_once_per_diff() {
         cost.derived
     );
 }
+
+#[test]
+fn svg_switch_disarms_settle() {
+    let scratch = Scratch::large_diff("frame-settle-svg", FILES, LINES);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle_spans(&mut frame);
+    arm_settle(&scratch, &mut frame, FILES, LINES * 2, |frame| {
+        total_height(frame);
+    });
+    frame.draw_svg(false);
+    assert_eq!(
+        frame.settles_in(SystemTime::now()),
+        None,
+        "the SVG switch dropped the spans and kept their deadline"
+    );
+}

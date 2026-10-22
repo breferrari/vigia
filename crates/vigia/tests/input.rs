@@ -3,6 +3,7 @@
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use std::assert_matches;
 use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
@@ -107,8 +108,9 @@ fn every_key_on_the_map_goes_to_the_open_box_and_means_itself_again_after() {
             action_for(event, Regions::default()).is_some(),
             "{event:?} is not on the map, so this gate is not sweeping the map"
         );
-        assert!(
-            matches!(box_route(event, over), BoxRoute::Edit(_)),
+        assert_matches!(
+            box_route(event, over),
+            BoxRoute::Edit(_),
             "{event:?} reached the pane while the box was open"
         );
     }
@@ -119,10 +121,10 @@ fn every_key_on_the_map_goes_to_the_open_box_and_means_itself_again_after() {
         BoxRoute::Send
     );
     assert_eq!(box_route(&press(KeyCode::Esc), over), BoxRoute::Cancel);
-    assert!(matches!(
+    assert_matches!(
         box_route(&with(KeyModifiers::ALT, KeyCode::Enter), over),
         BoxRoute::Edit(_)
-    ));
+    );
     // A release is not a key.
     let released = Event::Key(KeyEvent {
         kind: KeyEventKind::Release,
@@ -831,18 +833,14 @@ fn a_press_on_one_regions_bar_is_not_the_others() {
     // because on the stacked layout the two regions never share a row and on the
     // rail nothing was asking.
     let drag = MouseEventKind::Drag(MouseButton::Left);
-    assert!(
-        matches!(
-            action_for(&at(drag, 29, row), side_by_side),
-            Some(Action::ListTo(_))
-        ),
+    assert_matches!(
+        action_for(&at(drag, 29, row), side_by_side),
+        Some(Action::ListTo(_)),
         "a drag on the rail's bar did not seek the map"
     );
-    assert!(
-        matches!(
-            action_for(&at(drag, 99, row), side_by_side),
-            Some(Action::DiffTo(_))
-        ),
+    assert_matches!(
+        action_for(&at(drag, 99, row), side_by_side),
+        Some(Action::DiffTo(_)),
         "a drag on the diff's bar seeked the map, because the row is the rail's too"
     );
 }
@@ -997,8 +995,9 @@ fn a_stepped_list_bar_steps_the_map_and_not_the_diff() {
     // the map.
     for row in [8u16, 19] {
         let action = action_for(&at(press, 79, row), regions).expect("a step");
-        assert!(
-            matches!(action, Action::Scroll(_)),
+        assert_matches!(
+            action,
+            Action::Scroll(_),
             "a press on the diff's bar at row {row} produced {action:?}"
         );
     }
@@ -1883,6 +1882,18 @@ fn nothing_armed_means_no_deadline_at_all() {
         "a note on its way off the screen did not ask the loop to wake, so its \
          rows stay drawn after the departure until the next event"
     );
+    assert_eq!(
+        patience(
+            Deadlines {
+                held_back: Some(now + LEAVING),
+                ..Deadlines::default()
+            },
+            now
+        ),
+        Some(LEAVING),
+        "a screen held back for a slow terminal did not ask the loop to wake, so \
+         it is drawn only when some other event comes"
+    );
 
     // The nearest of them, whichever it is, because the loop has to wake for
     // the first thing due. Taking the wrong one lets the others run late.
@@ -2389,4 +2400,33 @@ fn the_note_edge_is_one_column_at_the_content_origin_and_the_sheet_swallows_it()
         ..regions
     };
     assert_eq!(covered.note_edge_at(origin, 9), None);
+}
+
+#[test]
+fn ctrl_l_maps_refresh() {
+    assert_eq!(
+        action_for(
+            &with(KeyModifiers::CONTROL, KeyCode::Char('l')),
+            Regions::default()
+        ),
+        Some(Action::Refresh)
+    );
+    assert_ne!(
+        action_for(&press(KeyCode::Char('l')), Regions::default()),
+        Some(Action::Refresh),
+        "plain `l` maps to the redraw"
+    );
+}
+
+#[test]
+fn ctrl_l_through_box() {
+    // The box takes every key but the redraw, which passes to the pane.
+    assert_eq!(
+        box_route(&with(KeyModifiers::CONTROL, KeyCode::Char('l')), None),
+        BoxRoute::Through
+    );
+    assert_matches!(
+        box_route(&press(KeyCode::Char('l')), None),
+        BoxRoute::Edit(_)
+    );
 }

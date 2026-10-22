@@ -2,7 +2,7 @@
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::change::{ChangeKind, FileChange, Origin, Side};
@@ -34,6 +34,14 @@ pub struct FrameStats {
     pub deferred: u64,
     /// Values [`Frame::diff_with`] derived from a diff, each once per diff.
     pub derived: u64,
+    /// Bytes read on the frame path to score binaries as renames.
+    pub paired_bytes: u64,
+    /// Rename pairs scored on the frame path.
+    pub pairs_scored: u64,
+    /// Rename sides read on the frame path, a header, a head or a whole side.
+    pub side_reads: u64,
+    /// Status walks: each [`Frame::advance`] that ran.
+    pub walks: u64,
 }
 
 /// A working-tree fingerprint that costs no read: size and modification time.
@@ -41,6 +49,18 @@ pub struct FrameStats {
 pub(crate) struct Fingerprint {
     len: u64,
     mtime: SystemTime,
+}
+
+impl Fingerprint {
+    /// The file's length.
+    pub(crate) fn len(self) -> u64 {
+        self.len
+    }
+
+    /// The file's modification time.
+    pub(crate) fn mtime(self) -> SystemTime {
+        self.mtime
+    }
 }
 
 /// Whether a config at `now` asks for a reload over the one loaded at `loaded`.
@@ -61,11 +81,11 @@ struct Observed {
 
 /// How far in the past a modification time has to sit before it identifies the
 /// bytes that were read.
-const SETTLE_MARGIN: Duration = Duration::from_secs(2);
+pub(crate) const SETTLE_MARGIN: Duration = Duration::from_secs(2);
 
 /// Whether a modification time observed by a read starting at `read_started`
 /// identifies the bytes that read returned.
-fn settled(mtime: SystemTime, read_started: SystemTime) -> bool {
+pub(crate) fn settled(mtime: SystemTime, read_started: SystemTime) -> bool {
     // Subtraction rather than addition on purpose: adding the margin to `mtime`
     // needs an overflow arm no filesystem can reach, where a future modification
     // time is an `Err` and reachable.
@@ -86,19 +106,51 @@ struct Taken {
     /// this artefact has no working-tree side, or when it could not be
     /// fingerprinted.
     worktree: Option<Observed>,
+    /// LFS objects a side was missing, any of which arriving changes the diff.
+    awaiting: Vec<PathBuf>,
 }
 
 impl Taken {
     /// The evidence a change carries, plus what a read observed of its
     /// working-tree side.
-    fn of(change: &FileChange, worktree: Option<Observed>) -> Self {
+    fn of(change: &FileChange, worktree: Option<Observed>, awaiting: Vec<PathBuf>) -> Self {
         Self {
             kind: change.kind.clone(),
             before: change.before,
             after: change.after,
             worktree,
+            awaiting,
         }
     }
+
+    /// Whether an object a side was missing is there now, counting each `stat`.
+    fn arrived(&self, probes: &mut u64) -> bool {
+        self.awaiting.iter().any(|object| {
+            *probes += 1;
+            object.is_file()
+        })
+    }
+}
+
+/// How many sizes the worker found the frame keeps, at most.
+const SIZES_KEPT: usize = 4096;
+
+/// Give each unsized side of `picture` the size `sizes` holds for its stamp,
+/// and say whether any was given.
+fn apply_sizes(sizes: &HashMap<u64, (u32, u32)>, picture: &mut crate::Picture) -> bool {
+    let mut given = false;
+    for side in [picture.before.as_mut(), picture.after.as_mut()]
+        .into_iter()
+        .flatten()
+    {
+        if !side.sized()
+            && let Some(&(width, height)) = sizes.get(&side.stamp)
+        {
+            (side.width, side.height) = (width, height);
+            given = true;
+        }
+    }
+    given
 }
 
 /// One cache, split by which run a change came from.
@@ -342,6 +394,11 @@ pub struct Frame<'w> {
     failure: Option<FileDiff>,
     /// Whether the staged run is drawn beside the unstaged one.
     staged: bool,
+    /// Whether a changed SVG is drawn as pictures rather than diffed as text.
+    svg: bool,
+    /// The sizes the worker found for sides the frame path left unsized, by
+    /// their stamp.
+    sizes: HashMap<u64, (u32, u32)>,
     /// Where in the history this frame is standing.
     standing: Standing,
     /// Paths the reader asked to keep out of the pane, and how many the last walk
@@ -384,6 +441,8 @@ impl<'w> Frame<'w> {
             reloads: worktree.reloads(),
             failure: None,
             staged: false,
+            svg: true,
+            sizes: HashMap::new(),
             standing: Standing::default(),
             hide: None,
             hidden: 0,
@@ -420,9 +479,20 @@ impl<'w> Frame<'w> {
         let mut files = Vec::with_capacity(self.files.len());
         // Bound rather than consumed in place: what a walk hid is only knowable
         // once it has been drained.
+        // The clean filter is rebuilt by the walk's first read rather than kept for
+        // the life of the process, so a walk and the draw after it share one.
+        self.worktree.invalidate_filter();
+        self.worktree.renew_pair_budget();
+        let paired_before = self.worktree.pair_bytes();
+        let pairs_before = self.worktree.pairs_scored();
+        let reads_before = self.worktree.side_reads();
         let mut walk = self.worktree.changes_at(&self.standing, options)?;
         for change in &mut walk {
             files.push(change?);
+        }
+        // An LFS file the walk could not decide yet is asked again when it can be.
+        if let Some(until) = self.worktree.lfs_wait() {
+            self.settles_at = Some(self.settles_at.map_or(until, |at| at.max(until)));
         }
         let mut hidden = walk.hidden();
         // Unstaged first, then staged, and the order is the product.
@@ -438,13 +508,20 @@ impl<'w> Frame<'w> {
             }
             hidden += walk.hidden();
         }
+        // A side the budget could not weigh, or a pair the record had no room
+        // for, is weighed by the next frame, with no event to bring it.
+        if self.worktree.sides_left() || self.worktree.room_coming() {
+            let now = SystemTime::now();
+            self.settles_at = Some(self.settles_at.map_or(now, |at| at.max(now)));
+        }
+
+        self.stats.paired_bytes += self.worktree.pair_bytes() - paired_before;
+        self.stats.pairs_scored += self.worktree.pairs_scored() - pairs_before;
+        self.stats.side_reads += self.worktree.side_reads() - reads_before;
+        self.stats.walks += 1;
 
         // Nothing above this line mutated the frame's picture of the worktree, which
         // is what makes a failed walk leave the previous frame intact.
-
-        // The clean filter is rebuilt by the next read rather than kept for the life of
-        // the process.
-        self.worktree.invalidate_filter();
 
         // And what was computed under the old rules goes with it.
         let taken_at = SystemTime::now();
@@ -564,6 +641,67 @@ impl<'w> Frame<'w> {
         self.settles_at = None;
     }
 
+    /// Give an unsized picture side the size the worker found for it, by its
+    /// stamp. What was derived from its diff goes, so its rows are laid out
+    /// again.
+    pub fn learn_size(&mut self, stamp: u64, width: u32, height: u32) {
+        // Kept bounded: an old version's stamp is never asked for again.
+        if self.sizes.len() >= SIZES_KEPT {
+            self.sizes.clear();
+        }
+        self.sizes.insert(stamp, (width, height));
+        for cached in self.cached.runs.iter_mut().flat_map(HashMap::values_mut) {
+            if let Some(picture) = cached.diff.picture.as_mut()
+                && apply_sizes(&self.sizes, picture)
+            {
+                cached.derived = None;
+            }
+        }
+    }
+
+    /// The pairs of a removal and an addition this frame could not afford to
+    /// score as a rename, for the picture worker.
+    pub fn unscored_pairs(&self) -> Vec<crate::Candidate> {
+        self.worktree.unscored_pairs()
+    }
+
+    /// Whether this frame had more pairs for the worker than it lists. The
+    /// next advance lists them.
+    pub fn pairs_unlisted(&self) -> bool {
+        self.worktree.pairs_unlisted()
+    }
+
+    /// How many times the rename record dropped scores, after which a pair
+    /// sent to the worker before is sent again.
+    pub fn pair_epoch(&self) -> u64 {
+        self.worktree.pair_epoch()
+    }
+
+    /// The most rename scores the record holds, and so the most pairs the
+    /// worker need remember as sent.
+    pub fn pairs_kept(&self) -> usize {
+        self.worktree.pairs_kept()
+    }
+
+    /// File a rename score the worker found, by its pair. The next advance
+    /// pairs by it.
+    pub fn learn_pair(&mut self, key: crate::PairKey, score: u64) {
+        self.worktree.learn_pair(key, score);
+    }
+
+    /// Draw a changed SVG as pictures, or diff it as text, as a pane that can
+    /// draw no picture needs.
+    pub fn draw_svg(&mut self, svg: bool) {
+        if self.svg == svg {
+            return;
+        }
+        self.svg = svg;
+        self.stats.evicted += self.cached.len() as u64;
+        self.cached.clear();
+        self.spans.clear();
+        self.settles_at = None;
+    }
+
     /// The changed files, in the order status reported them.
     pub fn files(&self) -> &[FileChange] {
         &self.files
@@ -585,7 +723,8 @@ impl<'w> Frame<'w> {
     }
 
     /// How long until the last height kept waiting inside the settle margin
-    /// settles, or `None` when none is waiting. No filesystem event marks a write
+    /// settles, or a rename side left unweighed can be weighed, or `None` when
+    /// none is waiting. No filesystem event marks a write
     /// ending, so a wake at that moment has nothing to be armed from but this.
     /// Decided by each tick's walk, so a diff taken between two ticks can leave it
     /// one wake early, and a wake that finds nothing waiting costs a walk and no read.
@@ -721,6 +860,8 @@ impl<'w> Frame<'w> {
         let what = if let Some(measured) = self.spans.get_mut(change)
             && let Some(taken) = measured.taken.as_ref()
         {
+            // An arriving object fills only an image side, whose span is `binary`
+            // either way; `diff` reads the picture again.
             let what = verdict(taken, change, now, &mut fresh);
             if what != Verdict::Remeasure {
                 measured.answered = true;
@@ -752,7 +893,7 @@ impl<'w> Frame<'w> {
         // folded into the same counter as the fingerprints. Added before the
         // `match`, so a failed read still reports the probe it took.
         let mut probes = 0;
-        let measured = self.worktree.measure_counted(change, &mut probes);
+        let measured = self.worktree.measure_counted(change, self.svg, &mut probes);
         self.stats.probes += probes;
         let (span, taken) = match measured {
             Ok(span) => {
@@ -767,7 +908,7 @@ impl<'w> Frame<'w> {
                 } else {
                     None
                 };
-                (span, Some(Taken::of(change, worktree)))
+                (span, Some(Taken::of(change, worktree, Vec::new())))
             }
             // A failed read describes nothing, so it is recorded with no evidence at
             // all and [`Measured::taken`] carries why that matters. The flag keeps
@@ -796,6 +937,24 @@ impl<'w> Frame<'w> {
         Ok(())
     }
 
+    /// Where both sides of the changed image at `index` can be read from, for a
+    /// reader on another thread. See [`Worktree::image_sources`].
+    ///
+    /// # Panics
+    ///
+    /// If `index` is out of range.
+    pub fn image_sources(&self, index: usize) -> crate::Sources {
+        self.worktree.image_sources(&self.files[index])
+    }
+
+    /// The diff of the file at `index` as the last read of it left it, or
+    /// `None` for one not read yet. Reads nothing and stats nothing, so it can
+    /// lag a write.
+    pub fn cached_diff(&self, index: usize) -> Option<(&FileChange, &FileDiff)> {
+        let change = self.files.get(index)?;
+        self.cached.get(change).map(|cached| (change, &cached.diff))
+    }
+
     /// The change at `index` and its diff, computed now or reused from an
     /// earlier frame.
     /// # Panics
@@ -817,15 +976,17 @@ impl<'w> Frame<'w> {
         // Lazily, for the reason [`reusable`] gives: a `stat` this answer will
         // not read is a syscall bought for nothing, and `probes` should count
         // the ones actually taken.
-        let mut probed = false;
+        let (mut probed, mut awaited) = (false, 0);
         let reuse = match self.cached.get(change) {
             None => false,
-            Some(cached) => reusable(&cached.taken, change, || {
-                probed = true;
-                fingerprint(&path)
-            }),
+            Some(cached) => {
+                reusable(&cached.taken, change, || {
+                    probed = true;
+                    fingerprint(&path)
+                }) && !cached.taken.arrived(&mut awaited)
+            }
         };
-        self.stats.probes += u64::from(probed);
+        self.stats.probes += u64::from(probed) + awaited;
 
         if reuse {
             self.stats.reused += 1;
@@ -847,10 +1008,15 @@ impl<'w> Frame<'w> {
         // Counted before the `?`, so a failed read still reports the probe it
         // took. See `Worktree::diff_counted`.
         let mut probes = 0;
-        let computed = self.worktree.diff_counted(change, &mut probes);
+        let computed = self.worktree.diff_counted(change, self.svg, &mut probes);
         self.stats.probes += probes;
         let diff = match computed {
-            Ok(diff) => diff,
+            Ok(mut diff) => {
+                if let Some(picture) = diff.picture.as_mut() {
+                    apply_sizes(&self.sizes, picture);
+                }
+                diff
+            }
             // One path's own failure costs that path a note and nothing else: held
             // as an error it would end the whole comparison, and a frame the shell
             // keeps because the next one failed is a pane that looks quiet and is
@@ -884,7 +1050,7 @@ impl<'w> Frame<'w> {
         // The height goes with the diff it was taken from: this read proved both, and
         // a walk that asked the file again would spend a second stat on every drawn
         // file every tick.
-        let taken = Taken::of(change, worktree);
+        let taken = Taken::of(change, worktree, self.worktree.take_lfs_missing());
         self.spans.put(
             change,
             Measured {
@@ -982,6 +1148,8 @@ mod tests {
             // These unit tests are over [`reusable`], which does not consult it:
             // the field decides how a file is *read*, and nothing here reads one.
             maybe_symlink: false,
+            regular: true,
+            mode_changed: false,
         }
     }
 
@@ -994,6 +1162,8 @@ mod tests {
             before,
             after: after.map(Side::Blob),
             maybe_symlink: true,
+            regular: true,
+            mode_changed: false,
         }
     }
 
@@ -1009,6 +1179,7 @@ mod tests {
             before: index_blob,
             after,
             worktree,
+            awaiting: Vec::new(),
         }
     }
 
@@ -1019,6 +1190,7 @@ mod tests {
             before,
             after: after.map(Side::Blob),
             worktree: None,
+            awaiting: Vec::new(),
         }
     }
 
@@ -1099,7 +1271,7 @@ mod tests {
         );
         assert!(settled(
             stamped,
-            stamped + SETTLE_MARGIN + Duration::from_secs(60)
+            stamped + SETTLE_MARGIN + Duration::from_mins(1)
         ));
     }
 
@@ -1122,7 +1294,7 @@ mod tests {
     fn a_modification_time_in_the_future_is_never_settled() {
         let read_started = epoch(1_000_000);
         assert!(!settled(
-            read_started + Duration::from_secs(3600),
+            read_started + Duration::from_hours(1),
             read_started
         ));
 

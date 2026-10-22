@@ -1,0 +1,146 @@
+name: mutants
+
+# Mutation testing of a branch's changes, on demand. Never on a push or a pull
+# request: eight shards on every Rust pull request cost about two hours of
+# runner time for a signal the curated local pass already gives.
+#
+#   gh workflow run mutants -f ref=<branch> [-f range=<tag or commit>] [-f shards=8]
+#
+# Dispatched from main and checking out `ref`, so the cache it saves is main's
+# and every later dispatch reads it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch to test
+        type: string
+        required: true
+      range:
+        description: Diff from this tag or commit (default, its merge-base with main)
+        type: string
+        default: ""
+      shards:
+        description: Parallel shards
+        type: string
+        default: "8"
+
+env:
+  CARGO_TERM_COLOR: always
+  # A mutant that leaves a variable unused is still a mutant to test.
+  RUSTFLAGS: ""
+
+permissions: {}
+
+jobs:
+  plan:
+    name: plan shards
+    runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - id: plan
+        shell: bash
+        env:
+          n: ${{ inputs.shards }}
+        run: |
+          case "$n" in ''|*[!0-9]*) echo "shards must be a positive integer, got '$n'" >&2; exit 1;; esac
+          [ "$n" -ge 1 ] && [ "$n" -le 16 ] || { echo "shards must be 1 to 16" >&2; exit 1; }
+          echo "shards=$(seq 0 $((n - 1)) | jq -Rsc 'split("\n")[:-1] | map(tonumber)')" >> "$GITHUB_OUTPUT"
+
+  # 11 to 20 minutes for a shard of 14 mutants with a cold build, measured
+  # 2026-10-20; a smaller shard count makes each shard longer.
+  mutants:
+    name: shard ${{ matrix.shard }}
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      NEXTEST_PROFILE: mutants
+      VIGIA_TEST_CEILING: "15"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: ubuntu-latest-mutants
+          save-if: ${{ matrix.shard == 0 && github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: nextest,cargo-mutants
+      # In place, so the tree keeps its `.git` (a test reads it) and the
+      # restored build is reused. Each shard has a runner of its own.
+      - name: mutants in the diff
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          JOB_TOTAL: ${{ strategy.job-total }}
+          range: ${{ inputs.range }}
+        run: |
+          base=${range:-$(git merge-base origin/main HEAD)}
+          git diff "$base" HEAD > pr.diff
+          [ -s pr.diff ] || { echo "nothing differs from $base" >&2; exit 1; }
+          set +e
+          cargo mutants --in-place --in-diff pr.diff --test-tool nextest --no-shuffle \
+            --shard "${SHARD}/${JOB_TOTAL}"
+          status=$?
+          # 2 is a missed mutant and 3 a timeout, which are reported, not
+          # failures. Anything else, such as a red baseline, fails the shard.
+          case "$status" in 0|2|3) exit 0 ;; *) exit "$status" ;; esac
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mutants-shard-${{ matrix.shard }}
+          path: mutants.out/
+          if-no-files-found: ignore
+
+  summary:
+    name: summary
+    needs: mutants
+    if: always()
+    runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mutants-shard-*
+          path: shards
+      - shell: bash
+        env:
+          ref: ${{ inputs.ref }}
+          shards: ${{ inputs.shards }}
+        run: |
+          total() { cat shards/*/"$1".txt 2>/dev/null | wc -l; }
+          {
+            echo "## mutants in $ref"
+            echo
+            echo "| caught | missed | timeout | unviable |"
+            echo "|---|---|---|---|"
+            echo "| $(total caught) | $(total missed) | $(total timeout) | $(total unviable) |"
+            echo
+            echo "Shards that reported: $(ls shards 2>/dev/null | wc -l) of $shards."
+            missed=$(cat shards/*/missed.txt 2>/dev/null)
+            if [ -n "$missed" ]; then
+              echo
+              echo '### missed'
+              echo
+              echo '```'
+              printf '%s\n' "$missed"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

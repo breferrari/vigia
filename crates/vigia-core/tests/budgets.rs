@@ -8,7 +8,7 @@ use std::time::Duration;
 use support::{
     COARSE_TICK, FLOOR_TICKS, Scratch, absolute_gates_apply, budget, delta, highlight_delta,
     highlight_window, holds_p99, holds_p99_rounds, holds_p99_ticked, materialise, settle, time,
-    time_cpu,
+    time_cpu, timed_cpu,
 };
 use vigia_core::{
     ChangeKind, ChangeOptions, FileChange, Frame, FrameStats, HighlightStats, Highlighter,
@@ -973,6 +973,44 @@ fn a_breach_with_no_cpu_clock_is_treated_as_ours() {
     );
 }
 
+/// Windows' cycle clock reads busy spins as at least nine tenths, and at most
+/// twice, the time `GetThreadTimes` charged the same spins, once a second has
+/// been charged. A rate calibrated
+/// too high reads low against the thread's own clock; a spin preempted by the
+/// rest of the suite does not.
+#[cfg(windows)]
+#[test]
+fn cycle_clock_direction() {
+    assert!(
+        support::cycle_rate().is_some(),
+        "the cycle rate was not measured"
+    );
+    // `GetThreadTimes` charges whole ticks, so the judgement waits for a second
+    // of them: two ticks of error are then 3% of it.
+    const JUDGED: Duration = Duration::from_secs(1);
+    let (mut wall, mut cpu, mut charged) = (Duration::ZERO, Duration::ZERO, Duration::ZERO);
+    for _ in 0..6 {
+        let before = support::thread_times().expect("GetThreadTimes failed");
+        let (one_wall, one_cpu) = time_cpu(|| support::spin_for(Duration::from_secs(1)));
+        charged += support::thread_times().expect("GetThreadTimes failed") - before;
+        wall += one_wall;
+        cpu += one_cpu;
+        if charged >= JUDGED {
+            break;
+        }
+    }
+    eprintln!("cycle clock: wall {wall:?}, cycles {cpu:?}, GetThreadTimes {charged:?}");
+    assert!(
+        charged >= JUDGED,
+        "busy spins of {wall:?} were charged only {charged:?}, too little to judge"
+    );
+    let ratio = cpu.as_secs_f64() / charged.as_secs_f64();
+    assert!(
+        (0.9..=2.0).contains(&ratio),
+        "busy spins charged {charged:?} read as {cpu:?} of cycles, outside nine tenths to twice"
+    );
+}
+
 #[test]
 fn the_cpu_clock_tells_waiting_from_working() {
     // Non-vacuity for the two gates above, and the only thing here that touches the
@@ -1201,5 +1239,473 @@ fn breach_over_pairs() {
         wall.breach_over(&cpu, Duration::from_millis(10)),
         (Duration::from_millis(60), Duration::from_millis(40)),
         "two breaching frames of 30ms wall and 10ms CPU are 60ms, 40ms of it off-CPU"
+    );
+}
+
+/// Frames sampled for the LFS compare gate, each on a fresh worktree.
+const LFS_FRAMES: usize = 40;
+
+/// A repository holding one 16 MiB file under `filter=lfs` whose stored blob
+/// is a pointer and whose object is fetched, rewritten after the index so the
+/// walk reads it again. With `content` the worktree holds the object's bytes,
+/// which the walk compares with the object; without, it holds the pointer,
+/// which needs no compare.
+fn lfs_compare_repo(name: &str, content: bool) -> Scratch {
+    let scratch = Scratch::new(name);
+    let object: Vec<u8> = (0..16 * 1024 * 1024)
+        .map(|i: u32| (i % 251) as u8)
+        .collect();
+    scratch.write(
+        ".gitattributes",
+        "*.bin filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let (oid, pointer) = support::lfs_pointer(&object, 0x5a);
+    scratch.write("big.bin", &pointer);
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    scratch.write(
+        &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
+        &object,
+    );
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    if content {
+        scratch.write("big.bin", &object);
+    } else {
+        scratch.write("big.bin", pointer.as_bytes());
+    }
+    scratch
+}
+
+/// I9 over a cold frame that compares one 16 MiB LFS file with its object,
+/// interleaved with the same frame where nothing has to be compared.
+#[test]
+fn lfs_compare_frame() {
+    let compared = lfs_compare_repo("budget-lfs-compare", true);
+    let plain = lfs_compare_repo("budget-lfs-plain", false);
+    let cold = |scratch: &Scratch, compares: u64| {
+        let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
+        let mut frame = worktree.frame();
+        let took = time_cpu(|| frame.advance().expect("advance"));
+        assert!(
+            frame.files().is_empty(),
+            "a 16 MiB LFS file equal to its object was listed"
+        );
+        assert_eq!(
+            worktree.lfs_compares(),
+            compares,
+            "the frame did not compare as the fixture intends"
+        );
+        took
+    };
+    // Every sample is checked, so the gate measures the compare it names.
+    cold(&compared, 1);
+    cold(&plain, 0);
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
+    for _ in 0..LFS_FRAMES {
+        with.push(cold(&compared, 1).0);
+        without.push(cold(&plain, 0).0);
+    }
+    let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
+    eprintln!(
+        "lfs compare: cold frame p50 {:?} p99 {:?}, without a compare p50 {:?} p99 {:?}",
+        at(&with, 0.5),
+        at(&with, 0.99),
+        at(&without, 0.5),
+        at(&without, 0.99)
+    );
+    holds_p99(
+        "I9: a cold frame comparing a 16 MiB LFS file with its object",
+        budget(I9_FRAME),
+        &with,
+        String::new,
+        || cold(&compared, 1),
+    );
+}
+
+/// A repository whose `a.bin` of 119 KiB is moved and edited, unstaged, so a
+/// cold frame reads its header, the new side's first bytes and both sides
+/// whole, and scores the pair: 255 KiB of the frame's 256. Without `moved`,
+/// the same addition beside the file left in place.
+fn rename_repo(name: &str, moved: bool) -> Scratch {
+    let old = support::noise(1, 119 * 1024);
+    let new = support::tail_changed(&old, 0.1);
+    let scratch = Scratch::new(name);
+    scratch.write("a.bin", &old);
+    scratch.commit_all("initial");
+    if moved {
+        std::fs::remove_file(scratch.path_of("a.bin")).expect("remove");
+    }
+    scratch.write("b.bin", &new);
+    scratch
+}
+
+/// I9 over a cold frame that scores a binary rename with the frame's whole
+/// budget, interleaved with the same frame where nothing is scored.
+#[test]
+fn rename_frame_score() {
+    let moved = rename_repo("budget-rename", true);
+    let plain = rename_repo("budget-rename-plain", false);
+    let cold = |scratch: &Scratch, scored: bool| {
+        let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
+        let mut frame = worktree.frame();
+        let took = time_cpu(|| frame.advance().expect("advance"));
+        assert_eq!(
+            frame.stats().pairs_scored,
+            u64::from(scored),
+            "the frame did not score as the fixture intends"
+        );
+        took
+    };
+    cold(&moved, true);
+    cold(&plain, false);
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
+    for _ in 0..LFS_FRAMES {
+        with.push(cold(&moved, true).0);
+        without.push(cold(&plain, false).0);
+    }
+    let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
+    eprintln!(
+        "rename score: cold frame p50 {:?} p99 {:?}, without one p50 {:?} p99 {:?}",
+        at(&with, 0.5),
+        at(&with, 0.99),
+        at(&without, 0.5),
+        at(&without, 0.99)
+    );
+    holds_p99(
+        "I9: a cold frame scoring a binary rename of 256 KiB",
+        budget(I9_FRAME),
+        &with,
+        String::new,
+        || cold(&moved, true),
+    );
+}
+
+/// A repository whose forty small binaries are each moved and edited,
+/// unstaged: every removal weighed against every addition, 1,600 pairs, and
+/// all their sides inside one frame's budget. Without `moved`, the same
+/// additions beside the files left in place.
+fn many_small_repo(name: &str, moved: bool) -> Scratch {
+    let scratch = Scratch::new(name);
+    let olds: Vec<Vec<u8>> = (0..40).map(|n| support::noise(100 + n, 2_000)).collect();
+    for (n, old) in olds.iter().enumerate() {
+        scratch.write(&format!("old/{n:02}.bin"), old);
+    }
+    scratch.commit_all("initial");
+    for (n, old) in olds.iter().enumerate() {
+        if moved {
+            std::fs::remove_file(scratch.path_of(&format!("old/{n:02}.bin"))).expect("remove");
+        }
+        scratch.write(&format!("new/{n:02}.bin"), support::tail_changed(old, 0.1));
+    }
+    scratch
+}
+
+/// I9 over each frame a burst of 1,600 small pairs brings, from a cold
+/// worktree until no side is left to weigh, timed by its slowest frame and
+/// interleaved with the same burst where nothing is weighed.
+#[test]
+fn rename_frame_many_small() {
+    let moved = many_small_repo("budget-rename-many", true);
+    let plain = many_small_repo("budget-rename-many-plain", false);
+    let cold = |scratch: &Scratch, scored: bool| {
+        let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
+        let mut frame = worktree.frame();
+        let mut slowest = (Duration::ZERO, Duration::ZERO);
+        for frames in 1.. {
+            let before = frame.stats();
+            let took = time_cpu(|| frame.advance().expect("advance"));
+            if took.0 > slowest.0 {
+                slowest = took;
+            }
+            let one = support::delta(before, frame.stats());
+            assert!(
+                one.pairs_scored <= 256,
+                "a frame scored {} pairs",
+                one.pairs_scored
+            );
+            assert!(
+                one.side_reads <= 32,
+                "a frame read {} sides",
+                one.side_reads
+            );
+            assert!(
+                frame.unscored_pairs().len() <= 256,
+                "a frame listed {} pairs",
+                frame.unscored_pairs().len()
+            );
+            if frame.settles_in(std::time::SystemTime::now()).is_none() {
+                break;
+            }
+            assert!(frames < 20, "the burst still wakes after {frames} frames");
+        }
+        assert_eq!(
+            frame.stats().paired_bytes > 0,
+            scored,
+            "the burst did not score as the fixture intends"
+        );
+        slowest
+    };
+    cold(&moved, true);
+    cold(&plain, false);
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
+    for _ in 0..LFS_FRAMES {
+        with.push(cold(&moved, true).0);
+        without.push(cold(&plain, false).0);
+    }
+    let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
+    eprintln!(
+        "rename many small: slowest frame p50 {:?} p99 {:?}, without p50 {:?} p99 {:?}",
+        at(&with, 0.5),
+        at(&with, 0.99),
+        at(&without, 0.5),
+        at(&without, 0.99)
+    );
+    holds_p99(
+        "I9: each frame of a burst weighing 1,600 small binary renames",
+        budget(I9_FRAME),
+        &with,
+        String::new,
+        || cold(&moved, true),
+    );
+}
+
+/// A hundred-file refactor, the old files removed only when `moved`.
+fn refactor_repo(name: &str, moved: bool) -> Scratch {
+    let (files, written) = support::refactor_files(100);
+    let scratch = Scratch::new(name);
+    for (path, bytes) in &files {
+        scratch.write(path, bytes);
+    }
+    scratch.commit_all("initial");
+    for (path, _) in &files {
+        if moved {
+            std::fs::remove_file(scratch.path_of(path)).expect("remove");
+        }
+    }
+    for (path, bytes) in &written {
+        scratch.write(path, bytes);
+    }
+    scratch
+}
+
+/// I9 over each frame of a hundred-file move until every pair is scored, by
+/// its slowest frame, against the same files where nothing moved.
+#[test]
+#[ignore = "scheduled budget"]
+fn rename_frame_refactor() {
+    let moved = refactor_repo("budget-rename-refactor", true);
+    let plain = refactor_repo("budget-rename-refactor-plain", false);
+    let cold = |scratch: &Scratch| {
+        let worktree = Worktree::discover(scratch.path_of(".")).expect("discover");
+        let mut frame = worktree.frame();
+        let mut slowest = (Duration::ZERO, Duration::ZERO);
+        for frames in 1.. {
+            let took = time_cpu(|| frame.advance().expect("advance"));
+            if took.0 > slowest.0 {
+                slowest = took;
+            }
+            let listed = frame.unscored_pairs();
+            if listed.is_empty() && frame.settles_in(std::time::SystemTime::now()).is_none() {
+                break;
+            }
+            for candidate in listed {
+                frame.learn_pair(candidate.key, vigia_core::candidate_score(&candidate));
+            }
+            assert!(frames < 80, "the move still wakes after {frames} frames");
+        }
+        slowest
+    };
+    cold(&moved);
+    cold(&plain);
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut with, mut without) = (Samples::new(LFS_FRAMES), Samples::new(LFS_FRAMES));
+    for _ in 0..LFS_FRAMES {
+        with.push(cold(&moved).0);
+        without.push(cold(&plain).0);
+    }
+    let at = |samples: &Samples, q| samples.percentile(q).expect("samples");
+    eprintln!(
+        "rename refactor: slowest frame p50 {:?} p99 {:?}, without p50 {:?} p99 {:?}",
+        at(&with, 0.5),
+        at(&with, 0.99),
+        at(&without, 0.5),
+        at(&without, 0.99)
+    );
+    holds_p99(
+        "I9: each frame of a hundred similar files moved",
+        budget(I9_FRAME),
+        &with,
+        String::new,
+        || cold(&moved),
+    );
+}
+
+/// Code lines in the fenced block.
+const FENCE_LINES: usize = 24;
+/// Frames sampled for the fence gate.
+const FENCE_FRAMES: usize = 60;
+
+/// A Markdown file with one fenced Rust block, `edit` written into its middle
+/// line. A pattern that closes on a backreference is searched at every
+/// position inside the block.
+fn fenced(edit: usize) -> String {
+    let mut text = String::from("# Notes\n\nSome prose before the block.\n\n```rust\n");
+    for i in 0..FENCE_LINES {
+        if i == FENCE_LINES / 2 {
+            text.push_str(&format!("    let edited = {edit};\n"));
+        } else {
+            text.push_str(&format!(
+                "    let value_{i} = compute(&input, {i}).map(|x| x | 1).unwrap_or_default();\n"
+            ));
+        }
+    }
+    text.push_str("```\n\nSome prose after it.\n");
+    text
+}
+
+#[test]
+fn fenced_markdown_budget() {
+    // I9 for the parse a fenced block costs, beside the same bytes in a file no
+    // grammar claims, so the gap is the grammar's and not the fixture's.
+    let scratch = Scratch::new("i9-fence");
+    for path in ["notes.md", "notes.txt"] {
+        scratch.write(path, "");
+    }
+    scratch.commit_all("empty");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    let mut highlighter = Highlighter::eager();
+    let mut edits = 0usize;
+    let mut redraw = |frame: &mut Frame, highlighter: &mut Highlighter, path: &str| {
+        edits += 1;
+        scratch.write(path, fenced(edits));
+        frame.advance().expect("advance");
+        let before = highlighter.stats();
+        let (drawn, wall, cpu) =
+            timed_cpu(|| highlight_window(frame, highlighter, path, 0, 1).rows);
+        let parsed = highlight_delta(before, highlighter.stats()).parsed;
+        assert!(drawn > FENCE_LINES, "the block's lines were not drawn");
+        assert_eq!(parsed, 1, "the edited hunk was not parsed again");
+        (wall, cpu)
+    };
+    redraw(&mut frame, &mut highlighter, "notes.md");
+    redraw(&mut frame, &mut highlighter, "notes.txt");
+
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    let (mut fence, mut control) = (Samples::new(FENCE_FRAMES), Samples::new(FENCE_FRAMES));
+    for _ in 0..FENCE_FRAMES {
+        fence.push(redraw(&mut frame, &mut highlighter, "notes.md").0);
+        control.push(redraw(&mut frame, &mut highlighter, "notes.txt").0);
+    }
+    let at = |samples: &Samples| samples.percentile(0.99).expect("samples");
+    eprintln!(
+        "fenced markdown: p99 {:?}, the same bytes without a grammar {:?}",
+        at(&fence),
+        at(&control)
+    );
+    let median = |samples: &Samples| samples.percentile(0.5).expect("samples");
+    assert!(
+        median(&control) < median(&fence),
+        "the control costs as much as the block, so the gate is not timing the grammar"
+    );
+    holds_p99(
+        &format!("I9: re-highlighting a {FENCE_LINES}-line fenced block"),
+        budget(I9_FRAME),
+        &fence,
+        String::new,
+        || redraw(&mut frame, &mut highlighter, "notes.md"),
+    );
+}
+
+/// Removals and additions with nothing in common, as many as git's rename
+/// limit allows on each side.
+const UNPAIRED: usize = 1_000;
+/// Frames timed on each side of the ratchet.
+const UNPAIRED_FRAMES: usize = 15;
+
+/// A frame after `UNPAIRED` removals and additions of nothing in common, as
+/// text or as binary.
+fn unpaired_frame(scratch: &Scratch, binary: bool) {
+    let body = |seed: usize| -> Vec<u8> {
+        let text: String = (0..40)
+            .map(|line| format!("{seed:05} {line:02} {}\n", "x".repeat(seed % 7 + line % 5)))
+            .collect();
+        let mut bytes = text.into_bytes();
+        if binary {
+            bytes.push(0);
+        }
+        bytes
+    };
+    for i in 0..UNPAIRED {
+        scratch.write(&format!("old/{i:04}.dat"), body(i));
+    }
+    scratch.commit_all("initial");
+    for i in 0..UNPAIRED {
+        scratch.remove(&format!("old/{i:04}.dat"));
+        scratch.write(&format!("new/{i:04}.dat"), body(UNPAIRED + i * 13));
+    }
+}
+
+/// A ratchet, not I9: weighing unpaired text costs no more than weighing the
+/// same number of binary files, which every release has weighed. At this size
+/// neither holds I9; that absolute gate is the open issue on weighing rename
+/// candidates without the full matrix every walk.
+#[test]
+fn unpaired_text_ratchet() {
+    let (text, binary) = (
+        Scratch::new("budget-unpaired-text"),
+        Scratch::new("budget-unpaired-binary"),
+    );
+    unpaired_frame(&text, false);
+    unpaired_frame(&binary, true);
+    let (text_tree, binary_tree) = (text.worktree(), binary.worktree());
+    let (mut text_frame, mut binary_frame) = (text_tree.frame(), binary_tree.frame());
+    text_frame.advance().expect("advance");
+    binary_frame.advance().expect("advance");
+    assert_eq!(
+        text_frame.files().len(),
+        2 * UNPAIRED,
+        "the text fixture paired something"
+    );
+    assert_eq!(
+        binary_frame.files().len(),
+        2 * UNPAIRED,
+        "the binary fixture paired something"
+    );
+
+    if !absolute_gates_apply("cargo test --release -p vigia-core --test budgets") {
+        return;
+    }
+    // Interleaved, so a machine that slows down slows both.
+    let (mut on_text, mut on_binary) =
+        (Samples::new(UNPAIRED_FRAMES), Samples::new(UNPAIRED_FRAMES));
+    for _ in 0..UNPAIRED_FRAMES {
+        on_text.push(time(|| text_frame.advance().expect("advance")));
+        on_binary.push(time(|| binary_frame.advance().expect("advance")));
+    }
+    let median = |samples: &Samples| samples.percentile(0.5).expect("samples");
+    eprintln!(
+        "unpaired at {UNPAIRED} x {UNPAIRED}: text p50 {:?}, binary p50 {:?}",
+        median(&on_text),
+        median(&on_binary)
+    );
+    assert!(
+        median(&on_text).as_secs_f64() <= median(&on_binary).as_secs_f64() * 1.25,
+        "a frame over unpaired text took {:?} at p50 where binary took {:?}",
+        median(&on_text),
+        median(&on_binary)
     );
 }

@@ -28,6 +28,13 @@ gix.workspace = true
 notify.workspace = true
 syntect.workspace = true
 fancy-regex.workspace = true
+image.workspace = true
+svgtypes.workspace = true
+hayro-syntax = { workspace = true, optional = true }
+
+[features]
+# See `vigia`'s `pdf` feature.
+pdf = ["dep:hayro-syntax"]
 
 # Test fixtures are built by shelling out to `git` (see tests/support) rather
 # than through a fixture crate. That keeps the dependency list exactly what
@@ -42,6 +49,13 @@ fancy-regex.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 syntect = { workspace = true, features = ["yaml-load"] }
+# Upstream syntect at the fork's base, for `tests/fork.rs` to compare their
+# parses. Pinned to that base by `package.rs`.
+syntect-upstream = { package = "syntect", version = "=5.3.0", default-features = false, features = [
+    "parsing",
+    "dump-load",
+    "regex-fancy",
+] }
 
 [[bench]]
 name = "engine"
@@ -58,7 +72,9 @@ harness = false
 libc.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
-windows-sys.workspace = true
+# WindowsProgramming is QueryThreadCycleTime, the budgets' thread clock, kept
+# to tests so the shipped binary does not take it.
+windows-sys = { workspace = true, features = ["Win32_System_WindowsProgramming"] }
 
 [lints]
 workspace = true

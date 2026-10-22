@@ -318,7 +318,7 @@ fn a_fifo_in_the_worktree_does_not_hang_the_frame() {
     // unbounded, so any bound tells it from a pass. Detached on purpose, since a
     // thread parked in `open` never returns and the harness exits over it.
     let drawn = rx
-        .recv_timeout(Duration::from_secs(10))
+        .recv_timeout(support::ceiling(Duration::from_secs(10)))
         .expect("the frame is still inside a read of the pipe");
     assert!(
         drawn.iter().all(|ok| *ok),

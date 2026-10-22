@@ -1,0 +1,47 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 5b3bd3f..460a753 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,10 +9,11 @@
+ # will likely look very different (and much more reasonable).
+ # See Cargo.toml.orig for the original contents.
+ 
++# Changed for vigia-hayro: the package name, description and links, the excluded files, and the dependency below it. See PATCHES.md.
+ [package]
+ edition = "2024"
+ rust-version = "1.92"
+-name = "hayro"
++name = "vigia-hayro"
+ version = "0.8.0"
+ authors = ["Laurenz Stampfl <laurenz.stampfl@gmail.com>"]
+ build = false
+@@ -21,10 +22,16 @@ autobins = false
+ autoexamples = false
+ autotests = false
+ autobenches = false
+-description = "A rasterizer for PDF files."
++description = "hayro 0.8.0 with the patches vigia ships, until upstream releases them. Use hayro instead."
++documentation = "https://docs.rs/vigia-hayro"
+ readme = "README.md"
++exclude = [
++    "/Cargo.toml.orig",
++    "/PATCHES.md",
++    "/patches/*",
++]
+ license = "Apache-2.0 OR MIT"
+-repository = "https://github.com/LaurenzV/hayro"
++repository = "https://github.com/breferrari/vigia"
+ resolver = "2"
+ 
+ [features]
+@@ -59,7 +66,9 @@ features = ["bytemuck_derive"]
+ version = "1.0.0"
+ 
+ [dependencies.hayro-interpret]
+-version = "0.8.0"
++version = "=0.8.0"
++path = "../hayro-interpret"
++package = "vigia-hayro-interpret"
+ default-features = false
+ 
+ [dependencies.image]

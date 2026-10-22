@@ -1,0 +1,28 @@
+---
+source: crates/vigia/tests/menu.rs
+expression: "text_of(&buf, area())"
+---
+  fixture · main · current ▾ · 3 changed                            +120  -120  
+                                                                                
+▸ M src/mod_0.┌─ config menu ───────────────────────────────── ✕ ┐   +40   -40  
+  M src/mod_1.│                                                  │   +40   -40  
+  M src/mod_2.│  ▸ Follow changes                          on    │   +40   -40  
+──────────────│    Left rail                              off    │──────────────
+  M src/mod_0.│    Single file                            off    │   +40   -40 ▲
+  @@ -1,40 +1,│    File list only                         off    │             █
+   1 - fn befo│    Staged changes                         off    │             │
+   2 - fn befo│    Wrap lines                             off    │             │
+   3 - fn befo│    Notes                                   on    │             │
+   4 - fn befo│    File icons                             off    │             │
+   5 - fn befo│    Path links                              on    │             │
+   6 - fn befo│                                                  │             │
+   7 - fn befo│    ──────────────────────────────────────────    │             │
+   8 - fn befo│                                                  │             │
+   9 - fn befo│    Save settings                          off    │             │
+  10 - fn befo│    Reset to defaults                             │             │
+  11 - fn befo│                                                  │             │
+  12 - fn befo└ ↑↓ move · Space toggles · Esc closes ────────────┘             │
+  13 - fn before_13() { let value = 91; }                                      │
+  14 - fn before_14() { let value = 98; }                                      ▼
+────────────────────────────────────────────────────────────────────────────────
+  q quit · f follow · m config · ? keys                          follow ▶  1/3

@@ -545,3 +545,31 @@ Two failures acquitted a short tail of real work. Credit transfer let the off-CP
 **Rejected: per-sample deficit everywhere, with a one-tick allowance per frame.** On Windows the tick is about the 16ms budget, so a genuine stall frame with a few milliseconds of work sits within one tick of its excess, and nearly every real stall would fail. The whole-round sum is what cancels the rounding there, because consecutive readings telescope and the error totals about two ticks, not one per frame.
 
 **What remains.** On Windows a short real stall, under twenty ticks of breaching wall time, still fails closed. That is the one case the coarse clock cannot resolve.
+
+## #645 — decoder panic
+
+Ruled 2026-10-19, reader, relayed by the coordinator session. A picture whose decoder panics used to abort the process, because the release profile set `panic = "abort"` and the picture worker decodes whatever bytes an agent writes. The rust-fuzz trophy case lists past `image` panics found by fuzzing, and a truncated write in the middle of an edit is ordinary input here. The ruling is to unwind, catch a panic in a picture's work (the header read on the frame's thread and the build on the worker), and abort on every other (SPEC §11.1).
+
+**Decoding in a child process was not taken.** It keeps `panic = "abort"` and the binary size. It costs a process per session, its lifecycle and respawn, an IPC that carries about 23MB of decoded pixels for a 1170x2532 pair, a hidden CLI mode for SPEC to name, and parity on Windows: several hundred lines against about thirty.
+
+**Accepting the risk was not taken.** It is free, and it leaves a pane meant to run for days with nothing pressed able to close on ordinary agent output.
+
+**What unwinding costs, measured 2026-10-19 on cbece20, release, macOS aarch64:** 14,553,056 bytes against 16,976,000, +2,422,944 (+16.6%). User-facing: a malformed image that crashes its decoder no longer closes the pane.
+
+## #667 — a rebase that changed only the roadmap or the changelog
+
+Ruled 2026-10-19, reader, relayed by the coordinator session. A pull request that was green, then rebased with only `ROADMAP.md` or `CHANGELOG.md` changed and `git range-diff` showing its own commits unchanged, gets no re-review and no local suites, and merges as soon as `ci complete` is green on the new head (take-next step 7).
+
+**Merging past the required check with `gh pr merge --admin` was not taken.** It is what "merge without fresh CI" needs, because `main` requires `ci complete` on the head and a rebase makes a new head. It bypasses a protection the reader configured, and a session holds his token.
+
+**Changing the branch protection was not taken.** Making `ci complete` optional, or required only for a code class, would let a docs-only rebase merge at once, and it would also let any pull request merge before its run. User-facing: none.
+
+## #638 — a decode limit in hayro-syntax
+
+Ruled 2026-10-19, reader, relayed by the coordinator session. `hayro` holds every stream it decodes whole, and a stream can decode to a thousand times its size: 1019 KiB of object stream decoded to 1 GiB inside `Pdf::new`, measured 2026-10-19, release, macOS aarch64. The ruling is a vendored `hayro-syntax` 0.8.0 with a thread-local decode limit, published with the rest of the `hayro` chain as the `vigia-hayro*` forks (ruled 2026-10-21, reader), and PDFs behind a `pdf` feature (SPEC §6).
+
+**A parallel scanner was not kept.** The first build measured each stream before `hayro` parsed the file, with a tokenizer and `flate2`. Review found it failed open: it had to guess which streams `hayro` would decode, and an encrypted stream, the raw-deflate fallback, a comment inside a dictionary, an object stream decoded whatever its `/Type`, an inherited resource and an inline image each went past it. Every one is a decode it did not predict. The limit inside `hayro-syntax` sees every decode, because every decode goes through `Stream`.
+
+**Accepting the gap was not taken.** A PDF an agent writes would be able to take a gigabyte of memory from a pane meant to run for days.
+
+The patch is offered upstream: a comment on [LaurenzV/hayro#1301](https://github.com/LaurenzV/hayro/pull/1301), which proposes limits, asks for them to be off by default. When `hayro` ships a limit, the forks go and the workspace takes that release.

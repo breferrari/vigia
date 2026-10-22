@@ -1,17 +1,22 @@
 [workspace]
 resolver = "3"
 members = ["crates/vigia-core", "crates/vigia", "xtask"]
+# Forks, not members: each `vendor/*/PATCHES.md` says what changed.
+exclude = [
+    "vendor/hayro",
+    "vendor/hayro-interpret",
+    "vendor/hayro-syntax",
+    "vendor/syntect",
+]
 
 [workspace.package]
 # Both crates move together, because both are published together and a registry
 # will not take `vigia` until `vigia-core` resolves on it (SPEC.md section 9).
 # Independent versions would buy nothing and cost a second tag format.
-version = "1.1.0"
+version = "1.2.2"
 edition = "2024"
-# 1.89 rather than 1.85 because `graviola` declares it, and no release of it
-# satisfies `rustls-graviola` 0.4 at anything lower. Nothing else here needs
-# it; leaving 1.85 written down would be a claim that does not build.
-rust-version = "1.89"
+# The latest stable, which is what CI builds with. See SPEC.md §6.
+rust-version = "1.99"
 license = "MIT"
 repository = "https://github.com/breferrari/vigia"
 # The same URL as `repository`, which is a duplicate and is kept deliberately.
@@ -45,7 +50,7 @@ authors = ["Brenno Ferrari"]
 # so the duplication cannot be removed, only moved and then gated. Moved: the
 # two strings are now fifteen lines apart in one file rather than in two.
 # Gated: `crates/vigia/tests/package.rs::the_internal_dependency_tracks_the_workspace_version`.
-vigia-core = { path = "crates/vigia-core", version = "1.1.0" }
+vigia-core = { path = "crates/vigia-core", version = "1.2.2" }
 # Pure Rust throughout. Adding a dependency with a C build script is a spec
 # change, not an implementation detail; see CLAUDE.md.
 #
@@ -61,6 +66,28 @@ gix = { version = "0.88", default-features = false, features = [
     # so this adds nothing to the graph. Measured at 213 crates either way.
     "revision",
 ] }
+# Header reads and decoding for a changed image. The defaults add rayon and an
+# AVIF encoder that builds C, so only the nine formats SPEC.md §11.1 draws.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "qoi", "tga"] }
+# Encodes and draws a picture as half-blocks or a terminal image protocol. The
+# defaults pull libchafa through pkg-config and turn image's defaults back on.
+# Pinned to the release candidate whose terminal query fits; see SPEC.md §6.
+ratatui-image = { version = "=12.0.0-rc.3", default-features = false, features = ["crossterm"] }
+# The Kitty transmit vigia encodes itself: ratatui-image's base64 encoder, and
+# miniz_oxide called directly rather than through flate2, whose backend the
+# whole build shares. SPEC.md section 6.
+base64-simd = "0.8"
+miniz_oxide = "0.8"
+# A changed SVG's pictures, labels included. `memmap-fonts` maps the system's
+# fonts instead of reading every face into memory.
+resvg = { version = "0.48.1", default-features = false, features = ["raster-images", "text", "system-fonts", "memmap-fonts"] }
+# An SVG root's size for the size line, without parsing the document.
+svgtypes = "0.16.1"
+# Forks: see `vendor/hayro-syntax/PATCHES.md`.
+hayro = { package = "vigia-hayro", version = "=0.8.0", path = "vendor/hayro" }
+hayro-syntax = { package = "vigia-hayro-syntax", version = "=0.8.0", path = "vendor/hayro-syntax" }
+# The requirement `usvg` declares, so the two resolve to one copy.
+skrifa = { version = "0.44", default-features = false, features = ["std"] }
 # Effects over the drawn buffer, for §5.3's *a change may be drawn arriving*.
 # Under the `ratatui` organisation, and it schedules nothing: the host passes the
 # elapsed duration in, so I1's clock stays this program's. The `dsl` feature is
@@ -99,7 +126,8 @@ notify = { version = "8.2", default-features = false, features = [
 # are off because the engine emits classes rather than colours (SPEC.md section
 # 11.1): a theme is the shell's business, so loading one in the core would be
 # paying for a decision made somewhere else.
-syntect = { version = "5.3", default-features = false, features = [
+# `vigia-syntect`: syntect 5.3.0 with the patches in `vendor/syntect/PATCHES.md`.
+syntect = { package = "vigia-syntect", version = "=5.3.0", path = "vendor/syntect", default-features = false, features = [
     "parsing",
     "dump-load",
     "regex-fancy",
@@ -137,7 +165,8 @@ ureq = { version = "3.4", default-features = false, features = [
 # `rustls`, in the same repository as `graviola` itself.
 #
 # It only compiles on x86_64 and aarch64, and it asserts on CPU features that
-# `panic = "abort"` turns into a dead process rather than a failed request. Both
+# a panic outside the picture worker turns into a dead process rather than a
+# failed request, because the panic hook aborts. Both
 # are handled where it is used: the dependency is target-conditional in
 # `crates/vigia`, and `update.rs` tests the same features before touching it.
 rustls-graviola = "0.4"
@@ -254,7 +283,9 @@ lto = "thin"
 # construction, since neither moves, and the Windows gates that would notice run
 # on a shared runner with slack. Stated rather than papered over.
 codegen-units = 2
-panic = "abort"
+# Unwinds so a picture's catch can take a decoder's panic. Every other panic
+# reaches the base hook, which ends the process.
+panic = "unwind"
 
 # Benchmarks and the soak test need symbols without giving up optimisation.
 # `panic` is deliberately absent: cargo ignores it for the bench profile.
@@ -309,6 +340,14 @@ ci = ["github"]
 # way in, and `release.yml`'s own dispatch form is the way to rehearse, since it
 # defaults to the tag `dry-run`, meaning build everything and publish nothing.
 dispatch-releases = true
+github-attestations = true
+# Attested in the host job, which runs only on a real release and installs
+# nothing from an unpinned script.
+github-attestations-phase = "host"
+cargo-auditable = true
+# The release workflow's actions, pinned to the commits every other workflow
+# uses, so a moved tag cannot change what the release runs.
+github-action-commits = { "actions/checkout" = "d23441a48e516b6c34aea4fa41551a30e30af803", "actions/upload-artifact" = "cf430e030ddbb5b0abf93d22962f4752f3646cd9", "actions/download-artifact" = "9000827ccba6bdab643e8b6fd33ac0654aef8333", "actions/attest" = "1e69f48acb82d1966a394da916b4c1698aa569d6" }
 # The release workflow does not run on pull requests. dist's default runs
 # its plan job on every PR and lists the other six jobs as skipped; the
 # config is checked by `bump and release` with `rehearse=true` instead.
@@ -321,6 +360,9 @@ include = ["crates/vigia-core/assets/NOTICE.md"]
 installers = ["shell", "powershell", "homebrew"]
 tap = "breferrari/homebrew-tap"
 publish-jobs = ["homebrew", "./publish-crates-io"]
+github-build-setup = "../build-setup.yml"
+# The crates.io job reads the checkout; a called job gets no more than this.
+github-custom-job-permissions = { "publish-crates-io" = { contents = "read", id-token = "write", packages = "write" } }
 targets = [
     "x86_64-unknown-linux-musl",
     "x86_64-apple-darwin",
@@ -330,18 +372,18 @@ targets = [
 
 # The documentation lints from the Rust API guidelines, plus the two clippy
 # offers as measurable stand-ins for complexity. They land as `warn` rather than
-# `deny` for one reason: CI runs `RUSTFLAGS: -D warnings` on a floating stable
-# toolchain, so a lint that fires on a future release would redden `main` on a
-# day nobody changed the code. `warn` here and `-D warnings` there means the
-# gate is real in CI and does not block a local build while the count comes
-# down.
+# `deny` for one reason: CI denies warnings (`CARGO_BUILD_WARNINGS: deny`) on a
+# floating stable toolchain, so a lint that fires on a future release would
+# redden `main` on a day nobody changed the code. `warn` here and `deny` there
+# means the gate is real in CI and does not block a local build while the
+# count comes down.
 #
 # `too_many_lines` and `excessive_nesting` are measured rather than gated, and
 # `cognitive_complexity` is absent because clippy moved it to `restriction` and
 # warns against using it as a measurement at all. Measured 2026-08-28: 22 sites
 # over 100 lines, 15 of them test functions, where length is the idiom and
-# splitting one costs the reader the case it sets up. Under `-D warnings` a
-# `warn` here is a `deny` in CI, so gating on it would forbid a shape that is
+# splitting one costs the reader the case it sets up. In CI a `warn` here
+# is a `deny`, so gating on it would forbid a shape that is
 # not a defect. The count belongs in a commit, not in the build.
 [workspace.lints.clippy]
 missing_errors_doc = "warn"

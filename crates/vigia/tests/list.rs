@@ -6,6 +6,7 @@ mod support;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use std::assert_matches;
 use vigia::{
     Action, App, Body, Glyphs, LIST_SETTLED, Pointing, Position, Row, Theme, View, Viewport,
     body_layout, regions, render,
@@ -123,10 +124,11 @@ fn each_region_reports_its_own_bar_column() {
     // bar at all, so the two assertions above are about a drawn bar rather than
     // about a field that is always `Some`. The one row it claims is drawn, because
     // a bar is decided from the rows on screen against the total.
-    let bare = View {
-        rows: vec![Row::Gap],
-        total_rows: 1,
-        ..View::default()
+    let bare = {
+        let mut view = View::default();
+        view.rows = vec![Row::Gap];
+        view.total_rows = 1;
+        view
     };
     let none = regions(area, &chrome, &bare);
     assert_eq!(
@@ -746,7 +748,11 @@ fn collect_resolves_every_degenerate_viewport() {
                             &mut highlighter,
                             &history,
                             Viewport {
-                                position: Position { file, row: 0 },
+                                position: Position {
+                                    file,
+                                    row: 0,
+                                    under: 0,
+                                },
                                 anchored: false,
                                 diff_rows,
                                 width: 0,
@@ -761,6 +767,8 @@ fn collect_resolves_every_degenerate_viewport() {
                                 landing,
                                 // Not a sweep dimension, unlike `landing` above.
                                 single: false,
+                                pictures: None,
+                                rise: None,
                                 // This sweep is about where the two regions land, which
                                 // is decided before anything is coloured.
                                 highlight: true,
@@ -1025,7 +1033,8 @@ fn clicking_a_listed_file_sends_the_diff_to_it() {
                 view.top,
                 Position {
                     file: usize::from(offset),
-                    row: 0
+                    row: 0,
+                    under: 0,
                 },
                 "at {WIDE}x{height}, a click on row {offset} did not put the diff \
                  at the top of that file"
@@ -1087,7 +1096,11 @@ fn a_digit_jumps_to_the_file_on_that_row_of_the_window() {
         app.view(&mut frame, &mut highlighter, &history, body)
             .expect("view")
             .top,
-        Position { file: 2, row: 0 },
+        Position {
+            file: 2,
+            row: 0,
+            under: 0
+        },
         "`3` did not put the diff at the third listed file"
     );
 
@@ -1113,7 +1126,8 @@ fn a_digit_jumps_to_the_file_on_that_row_of_the_window() {
             .top,
         Position {
             file: browsed.list_top + 2,
-            row: 0
+            row: 0,
+            under: 0,
         },
         "`3` resolved against the changed set rather than against the window the \
          reader can see"
@@ -1330,8 +1344,9 @@ fn a_separator_is_not_drawn_with_no_room_for_a_file_beneath_it() {
     // the fifth, so it does not appear.
     let plan = vigia::list_plan(frame.files(), 0, 4);
     assert_eq!(plan.len(), 4);
-    assert!(
-        matches!(plan[3], vigia::Slot::File(_)),
+    assert_matches!(
+        plan[3],
+        vigia::Slot::File(_),
         "the window ends on a label naming a run it cannot show: {plan:?}"
     );
 }
@@ -1684,8 +1699,9 @@ fn a_one_row_list_draws_its_runs_label() {
             "a one-row list from top {top} drew {} rows",
             plan.len()
         );
-        assert!(
-            matches!(plan[0], vigia::Slot::Group { .. }),
+        assert_matches!(
+            plan[0],
+            vigia::Slot::Group { .. },
             "a one-row list from top {top} drew a file with no run label above \
              it, which files the change under whatever heading happens to be \
              on screen: {plan:?}"

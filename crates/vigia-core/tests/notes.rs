@@ -3,6 +3,7 @@
 
 mod support;
 
+use std::assert_matches;
 use std::fs;
 use std::sync::mpsc;
 use std::time::{Duration, UNIX_EPOCH};
@@ -51,7 +52,7 @@ fn a_workdir_that_does_not_exist_has_no_key() {
     let holder = TempDir::new("missing");
     let missing = holder.path().join("never-made");
     let err = key(&missing).expect_err("no key for a path that is not there");
-    assert!(matches!(err, Error::Canonicalise { .. }), "{err:?}");
+    assert_matches!(err, Error::Canonicalise { .. }, "{err:?}");
     assert!(err.to_string().contains("never-made"), "{err}");
     assert!(
         Store::open(holder.path(), &missing).is_err(),
@@ -208,7 +209,7 @@ fn an_id_that_could_name_a_file_outside_the_store_is_refused() {
         let err = store
             .put(&note(bad, 1, "x", "y"))
             .expect_err("an id that is not a note id");
-        assert!(matches!(err, Error::Store { .. }), "{bad:?}: {err:?}");
+        assert_matches!(err, Error::Store { .. }, "{bad:?}: {err:?}");
         assert!(err.to_string().contains("not a note id"), "{bad:?}: {err}");
         assert!(store.remove(bad).is_err(), "{bad:?} was accepted by remove");
     }
@@ -525,7 +526,7 @@ fn an_unwritable_root_is_an_error_the_caller_can_show() {
     let err = store
         .put(&note("a1", 1, "x", "y"))
         .expect_err("a file is not a root");
-    assert!(matches!(err, Error::Store { .. }), "{err:?}");
+    assert_matches!(err, Error::Store { .. }, "{err:?}");
     assert!(!err.to_string().is_empty());
     assert!(!store.dir().exists());
 }
@@ -543,7 +544,7 @@ fn a_failed_rename_leaves_no_temporary_behind() {
     let err = store
         .put(&note("blocked", 1, "x", "y"))
         .expect_err("a rename onto a directory fails");
-    assert!(matches!(err, Error::Store { .. }), "{err:?}");
+    assert_matches!(err, Error::Store { .. }, "{err:?}");
     assert_eq!(
         files_in(store.dir()),
         vec!["blocked.note".to_owned(), "other.note".to_owned()],
@@ -713,6 +714,7 @@ fn rows_on_numbers_each_side_the_way_the_gutter_does() {
         lines: 60,
         first_line: None,
         bytes: 0,
+        picture: None,
     };
 
     assert_eq!(
@@ -795,7 +797,7 @@ fn a_write_from_another_handle_wakes_the_store_watch() {
         .expect("arm on the root")
         .expect("the root exists, so there is something to watch");
     other.put(&note("w-1", 5, "x", "first")).expect("put");
-    rx.recv_timeout(budget(Duration::from_secs(5)))
+    rx.recv_timeout(support::ceiling(budget(Duration::from_secs(5))))
         .expect("the first write, which also created the directory, was reported");
     drop(watch);
 
@@ -809,11 +811,11 @@ fn a_write_from_another_handle_wakes_the_store_watch() {
     other
         .put(&note("w-1", 5, "x", "rewritten"))
         .expect("rewrite");
-    rx.recv_timeout(budget(Duration::from_secs(5)))
+    rx.recv_timeout(support::ceiling(budget(Duration::from_secs(5))))
         .expect("a rewrite was reported");
     while rx.try_recv().is_ok() {}
     other.remove("w-1").expect("remove");
-    rx.recv_timeout(budget(Duration::from_secs(5)))
+    rx.recv_timeout(support::ceiling(budget(Duration::from_secs(5))))
         .expect("a removal was reported");
     drop(watch);
 }
@@ -864,7 +866,7 @@ fn a_note_is_read_by_id_and_an_id_the_store_would_not_name_is_none() {
     let err = store
         .get("torn-1")
         .expect_err("a file cut short is not a note");
-    assert!(matches!(err, Error::Store { .. }), "{err:?}");
+    assert_matches!(err, Error::Store { .. }, "{err:?}");
 }
 
 /// The server reads a note, changes it and writes it back; the reader can
@@ -929,7 +931,7 @@ fn a_store_watched_through_a_symlinked_root_still_reports_writes() {
     direct
         .put(&note("s-1", 5, "x", "first"))
         .expect("put by the resolved path");
-    rx.recv_timeout(budget(Duration::from_secs(5)))
+    rx.recv_timeout(support::ceiling(budget(Duration::from_secs(5))))
         .expect("a write under the resolved spelling was reported");
     drop(watch);
 }

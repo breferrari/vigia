@@ -12,6 +12,7 @@ use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use std::assert_matches;
 use support::Scratch;
 use vigia::{
     Action, App, Asked, Chrome, Glyphs, Pointing, Position, Regions, Theme, View, Viewport,
@@ -57,7 +58,11 @@ fn last_line(text: &str) -> String {
 
 fn viewport() -> Viewport {
     Viewport {
-        position: Position { file: 0, row: 0 },
+        position: Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        },
         anchored: false,
         diff_rows: 20,
         width: 120,
@@ -68,6 +73,8 @@ fn viewport() -> Viewport {
         measured: true,
         landing: false,
         single: false,
+        pictures: None,
+        rise: None,
         highlight: false,
     }
 }
@@ -1943,11 +1950,9 @@ fn the_list_under_only_draws_commits_alone() {
          explanation the box gives instead of a line of text",
         live - parked
     );
-    assert!(
-        matches!(
-            places.row_at(0, Reading::Only),
-            Some(vigia::positions::Row::Commit(0))
-        ),
+    assert_matches!(
+        places.row_at(0, Reading::Only),
+        Some(vigia::positions::Row::Commit(0)),
         "the first row under `only` is not the newest commit"
     );
     assert_eq!(

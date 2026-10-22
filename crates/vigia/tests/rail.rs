@@ -11,6 +11,7 @@ mod repo;
 use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
+use std::assert_matches;
 use vigia::{
     Action, App, Chrome, FileEntry, FileNotes, Glyphs, HEAT_BUCKETS, HeatBucket, ListRow, Pointing,
     Position, Regions, Row, Theme, View, action_for, body_layout, regions, render,
@@ -120,39 +121,49 @@ const LONG: &str = "crates/vigia-core/src/engine/incremental/watch.rs";
 /// A screen with both regions carrying a file heading, which is the only screen
 /// this file is about.
 fn beside() -> View {
-    View {
-        list_span: 3,
-        grouped: false,
-        list: vec![
+    {
+        let mut view = View::default();
+        view.list_span = 3;
+        view.grouped = false;
+        view.list = vec![
             entry(LONG).into(),
             entry("Cargo.toml").into(),
             entry("src/main.rs").into(),
-        ],
-        list_top: 0,
-        files: 3,
-        top: Position { file: 0, row: 0 },
-        rows: vec![
+        ];
+        view.list_top = 0;
+        view.files = 3;
+        view.top = Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        };
+        view.rows = vec![
             Row::file(entry(LONG)),
             Row::file(entry("Cargo.toml")),
             Row::file(entry("src/main.rs")),
-        ],
-        total_rows: 3,
-        rows_above: 0,
-        current_span: 3,
-        ..View::default()
+        ];
+        view.total_rows = 3;
+        view.rows_above = 0;
+        view.current_span = 3;
+        view
     }
 }
 
 /// The same screen with no pinned entries, so no rail can be drawn whatever the
 /// pane is wide enough for.
 fn streamed() -> View {
-    View {
-        list_span: 0,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        top: Position { file: 0, row: 0 },
-        ..beside()
+    {
+        let mut view = beside();
+        view.list_span = 0;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.top = Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        };
+        view
     }
 }
 
@@ -919,19 +930,15 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
     // The last column of the rail and the first of the diff, which is the one
     // pair a row cannot tell apart in this layout and the only pair that could
     // ever have been got wrong.
-    assert!(
-        matches!(
-            action_for(&event(boundary - 1, row), told),
-            Some(Action::ScrollList(_))
-        ),
+    assert_matches!(
+        action_for(&event(boundary - 1, row), told),
+        Some(Action::ScrollList(_)),
         "a wheel on the rail's last column did not reach the map: {:?}",
         action_for(&event(boundary - 1, row), told)
     );
-    assert!(
-        matches!(
-            action_for(&event(boundary, row), told),
-            Some(Action::Scroll(_))
-        ),
+    assert_matches!(
+        action_for(&event(boundary, row), told),
+        Some(Action::Scroll(_)),
         "a wheel on the diff's first column did not reach the diff: {:?}",
         action_for(&event(boundary, row), told)
     );
@@ -952,11 +959,9 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         Some(Action::ListRow(1)),
         "clicking the rail's second row did not jump the diff to its second file"
     );
-    assert!(
-        matches!(
-            action_for(&click(boundary + 2, told.list.top + 1), told),
-            None | Some(Action::DiffTo(_))
-        ),
+    assert_matches!(
+        action_for(&click(boundary + 2, told.list.top + 1), told),
+        None | Some(Action::DiffTo(_)),
         "clicking inside the diff was routed to the map: {:?}",
         action_for(&click(boundary + 2, told.list.top + 1), told)
     );
@@ -969,8 +974,9 @@ fn a_pointer_at_the_rails_own_columns_reaches_the_region_it_is_over() {
         "the fixture's rail is as tall as its column, so the row below it is not \
          reachable and this half asserts nothing"
     );
-    assert!(
-        matches!(action_for(&event(2, empty), told), Some(Action::Scroll(_))),
+    assert_matches!(
+        action_for(&event(2, empty), told),
+        Some(Action::Scroll(_)),
         "a wheel below the rail's last file did not fall through to the diff: {:?}",
         action_for(&event(2, empty), told)
     );

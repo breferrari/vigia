@@ -1,0 +1,25 @@
+diff --git a/Readme.md b/Readme.md
+index 93179ea..56d398a 100644
+--- a/Readme.md
++++ b/Readme.md
+@@ -1,10 +1,14 @@
+-# syntect
++# vigia-syntect
++
++**This is a fork. Use [syntect](https://crates.io/crates/syntect) instead.**
++
++`vigia-syntect` is [syntect](https://github.com/trishume/syntect) 5.3.0 with the patches listed in [`PATCHES.md`](https://github.com/breferrari/vigia/blob/vigia-syntect-5.3.0/vendor/syntect/PATCHES.md), published so that [vigia](https://github.com/breferrari/vigia) can ship them until a syntect release carries them. It is kept by vigia's maintainer, and it is not affiliated with or endorsed by syntect or its author. Report problems with this fork at <https://github.com/breferrari/vigia/issues>, not to syntect.
+ 
+-[![Crates.io](https://img.shields.io/crates/v/syntect.svg?maxAge=2591000)](https://crates.io/crates/syntect)
+-[![Documentation](https://docs.rs/syntect/badge.svg)](https://docs.rs/syntect)
+-[![Crates.io](https://img.shields.io/crates/l/syntect.svg?maxAge=2591000)]()
+-[![Build Status](https://github.com/trishume/syntect/actions/workflows/CI.yml/badge.svg)](https://github.com/trishume/syntect/actions)
+-[![codecov](https://codecov.io/gh/trishume/syntect/branch/master/graph/badge.svg)](https://codecov.io/gh/trishume/syntect)
++syntect is MIT licensed, and so is this fork. Upstream's README follows, without its badges, which describe upstream's crate.
++
++---
++
++# syntect
+ 
+ `syntect` is a syntax highlighting library for Rust that uses [Sublime Text syntax definitions](http://www.sublimetext.com/docs/3/syntax.html#include-syntax).
+ It aims to be a good solution for any Rust project that needs syntax highlighting, including deep integration with text editors written in Rust.

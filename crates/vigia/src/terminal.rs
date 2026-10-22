@@ -1,6 +1,6 @@
 //! Taking the terminal, and giving it back.
 
-use std::io::{self, IsTerminal, Stdout, Write, stdout};
+use std::io::{self, IsTerminal, Write, stdout};
 use std::sync::Once;
 
 use ratatui::Terminal;
@@ -14,8 +14,8 @@ use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-/// The terminal the shell draws on.
-pub type Screen = Terminal<CrosstermBackend<Stdout>>;
+/// The terminal the shell draws on, through the terminal writer.
+pub type Screen = Terminal<CrosstermBackend<crate::writer::Sink>>;
 
 static HOOK: Once = Once::new();
 
@@ -51,21 +51,76 @@ trait Console {
 
     /// Give one step back.
     fn give_back(&mut self, step: Step);
+
+    /// Before the steps are given back: end whatever a frame left half written.
+    fn ready(&mut self) {}
+
+    /// After [`Console::ready`], where no delete of the pane's may have gone
+    /// out: delete the Kitty images it last sent.
+    fn forget(&mut self) {}
 }
 
 /// The real console, over `crossterm`.
-struct Crossterm<W: Write> {
+struct Crossterm<W: Rearm> {
     out: W,
 }
 
-impl Crossterm<Stdout> {
-    /// The console the shell actually runs on.
-    fn on_stdout() -> Self {
-        Self { out: stdout() }
+impl Crossterm<crate::writer::Restore> {
+    /// The console the shell actually runs on: the terminal opened again for
+    /// this process, every write given up after a deadline.
+    fn on_terminal() -> Self {
+        Self {
+            out: crate::writer::Restore::open(RESTORE_WAIT),
+        }
     }
 }
 
-impl<W: Write> Console for Crossterm<W> {
+/// How long a restore waits for a terminal that is not reading.
+const RESTORE_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// A console's output that can be given a fresh deadline before a restore.
+trait Rearm: Write {
+    fn rearm(&mut self) {}
+}
+
+impl Rearm for crate::writer::Restore {
+    fn rearm(&mut self) {
+        self.arm(RESTORE_WAIT);
+    }
+}
+
+impl Rearm for Vec<u8> {}
+
+impl Rearm for std::fs::File {}
+
+impl<W: Rearm> Console for Crossterm<W> {
+    fn ready(&mut self) {
+        self.out.rearm();
+        let _ = self.out.write_all(crate::writer::STRING_END);
+        // Closed and deleted before the alternate screen goes, in whose own
+        // store kitty holds it.
+        if let Some((id, tmux)) = crate::writer::open_image() {
+            // tmux holds a passthrough until it ends, then forwards it whole:
+            // the terminator above ends ours, and this one reaches the escape it
+            // left open in the outer terminal (tmux 3.8 `input.c`, read).
+            let ended = if tmux {
+                crate::kitty::string_end(true)
+            } else {
+                String::new()
+            };
+            let closed = ended + &crate::kitty::cancel(tmux) + &crate::kitty::delete(id, tmux);
+            let _ = self.out.write_all(closed.as_bytes());
+        }
+    }
+
+    fn forget(&mut self) {
+        let deletes: String = crate::writer::sent_images()
+            .into_iter()
+            .map(|(id, tmux)| crate::kitty::delete(id, tmux))
+            .collect();
+        let _ = self.out.write_all(deletes.as_bytes());
+    }
+
     fn take(&mut self, step: Step) -> io::Result<()> {
         match step {
             Step::RawMode => enable_raw_mode(),
@@ -110,12 +165,16 @@ impl<C: Console> Takeover<C> {
 
 impl<C: Console> Drop for Takeover<C> {
     fn drop(&mut self) {
-        give_back_all(&mut self.console, self.taken);
+        give_back_all(&mut self.console, self.taken, false);
     }
 }
 
 /// Give the first `taken` steps of [`TAKEOVER`] back, in reverse.
-fn give_back_all<C: Console>(console: &mut C, taken: usize) {
+fn give_back_all<C: Console>(console: &mut C, taken: usize, forget: bool) {
+    console.ready();
+    if forget {
+        console.forget();
+    }
     for step in TAKEOVER[..taken].iter().rev() {
         console.give_back(*step);
     }
@@ -126,9 +185,15 @@ pub struct Session {
     /// Declared first, so it drops first and no live `Terminal` outlives the
     /// screen it draws on, even for the length of a drop.
     screen: Screen,
-    /// Second, so the terminal goes back after the screen is gone. Never read;
-    /// its whole job is its `Drop`.
-    _takeover: Takeover<Crossterm<Stdout>>,
+    /// Escapes outside a frame, on the writer's queue after the frames before.
+    /// Before the writer, so its end of the queue is closed when the writer stops.
+    sends: crate::writer::Sink,
+    /// Then the writer: stopped, within its limit, before the terminal is given
+    /// back, so the restore is never written in the middle of a frame.
+    writer: crate::writer::Writer,
+    /// Last, so the terminal goes back after the screen is gone and the
+    /// writer has stopped. Never read; its whole job is its `Drop`.
+    _takeover: Takeover<Crossterm<crate::writer::Restore>>,
 }
 
 impl Session {
@@ -138,21 +203,24 @@ impl Session {
     ///
     /// A step of the takeover fails. Any step that already succeeded is undone first, so the
     /// terminal is never left half taken.
-    pub fn enter() -> io::Result<Self> {
+    pub fn enter(wakes: crate::writer::Wakes) -> io::Result<Self> {
         check_drawable(stdout().is_terminal())?;
 
         // Before anything is changed, so a panic between here and the first
         // frame still restores.
         install_hook();
 
-        let takeover = Takeover::take(Crossterm::on_stdout())?;
+        let takeover = Takeover::take(Crossterm::on_terminal())?;
         // On the `?`, `takeover` drops and gives the terminal back. That is the
         // whole reason the guard is built before the screen rather than beside
         // it.
-        let screen = Terminal::new(CrosstermBackend::new(stdout()))?;
+        let writer = crate::writer::Writer::start(crate::writer::Tty::open()?, wakes);
+        let screen = Terminal::new(CrosstermBackend::new(writer.sink()))?;
 
         Ok(Self {
             screen,
+            sends: writer.sink(),
+            writer,
             _takeover: takeover,
         })
     }
@@ -162,21 +230,42 @@ impl Session {
         &mut self.screen
     }
 
+    /// The writer the screen's bytes go through.
+    pub fn writer(&self) -> &crate::writer::Writer {
+        &self.writer
+    }
+
     /// Put `sequence` on the wire, outside the buffer.
     ///
     /// For an escape that draws nothing and so owns no cell. It could not go
     /// through the painter in any case: `ratatui`'s `set_stringn` drops a
     /// grapheme containing a control character, which is `SPEC.md` §11.2 B8's
-    /// finding. Written through the backend rather than a second handle on
-    /// stdout, so it cannot interleave with a frame mid-flush.
+    /// finding. Queued on the writer after the frames before it, so it cannot
+    /// interleave with one.
     ///
     /// # Errors
     ///
-    /// The write or the flush fails.
+    /// The writer has stopped.
     pub fn send(&mut self, sequence: &str) -> io::Result<()> {
-        let out = self.screen.backend_mut();
-        out.write_all(sequence.as_bytes())?;
-        out.flush()
+        self.sends.send(sequence.as_bytes())
+    }
+
+    /// Queue a Kitty image's chunks on the writer's graphics lane.
+    ///
+    /// # Errors
+    ///
+    /// The writer has stopped.
+    pub fn upload(&mut self, upload: crate::writer::Upload) -> io::Result<()> {
+        self.sends.upload(upload)
+    }
+
+    /// Delete Kitty image `id` with `bytes`, after stopping its upload.
+    ///
+    /// # Errors
+    ///
+    /// The writer has stopped.
+    pub fn delete(&mut self, id: u32, bytes: String) -> io::Result<()> {
+        self.sends.delete(id, bytes.into_bytes())
     }
 }
 
@@ -191,22 +280,129 @@ fn check_drawable(is_terminal: bool) -> io::Result<()> {
     }
 }
 
+/// For a test in a child process: take the terminal, hand the writer a frame
+/// that opens a Kitty image and never ends it, and panic while it is written.
+#[doc(hidden)]
+pub fn panic_mid_frame() {
+    install_panic_hook();
+    let mut session = Session::enter(crate::writer::Wakes::none()).expect("take the terminal");
+    let mut frame = b"\x1b_Ga=t,f=32,s=400,v=400,i=77,q=2,m=1;".to_vec();
+    frame.extend(std::iter::repeat_n(b'A', 300_000));
+    let out = session.screen().backend_mut();
+    out.write_all(&frame).expect("hand over the frame");
+    out.flush().expect("hand over the frame");
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    panic!("mid-frame on purpose");
+}
+
+/// For a test in a child process: take the terminal, start an upload of
+/// Kitty image 4242 too large to go out at once, and panic while it is part sent.
+#[doc(hidden)]
+pub fn panic_mid_upload() {
+    let rgba: Vec<u8> = (0..400u32 * 400 * 4)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8)
+        .collect();
+    let _held = upload_and_wait(&rgba, (400, 400), 4242);
+    panic!("mid-upload on purpose");
+}
+
+/// For a test in a child process: send Kitty image 4343 whole, then panic.
+#[doc(hidden)]
+pub fn panic_after_upload() {
+    let session = upload_and_wait(&[7; 16 * 16 * 4], (16, 16), 4343);
+    let _ = session.writer().drain(std::time::Duration::from_secs(2));
+    panic!("after an upload on purpose");
+}
+
+/// Take the terminal with the panic hook in place, hand the writer `rgba` as
+/// Kitty image `id`, and give it a moment.
+fn upload_and_wait(rgba: &[u8], pixels: (u32, u32), id: u32) -> Session {
+    install_panic_hook();
+    let mut session = Session::enter(crate::writer::Wakes::none()).expect("take the terminal");
+    let image = crate::kitty::Image::new(
+        rgba,
+        pixels,
+        ratatui::layout::Size::new(40, 20),
+        id,
+        false,
+        false,
+    );
+    session
+        .upload(image.upload().expect("an upload"))
+        .expect("hand over the upload");
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    session
+}
+
+/// For a test: whether standard output is nonblocking before the writer opens
+/// its own descriptor, and while it holds it.
+///
+/// # Panics
+///
+/// Standard output is not a terminal.
+#[doc(hidden)]
+#[cfg(unix)]
+pub fn output_flags() -> (bool, bool) {
+    let blocking = || {
+        rustix::fs::fcntl_getfl(std::io::stdout())
+            .expect("read stdout's flags")
+            .contains(rustix::fs::OFlags::NONBLOCK)
+    };
+    let before = blocking();
+    let session = Session::enter(crate::writer::Wakes::none()).expect("take the terminal");
+    let during = blocking();
+    drop(session);
+    (before, during)
+}
+
 /// Chain a restore onto the panic hook, once per process.
 fn install_hook() {
-    install_hook_in(&HOOK, || restore_everything(&mut Crossterm::on_stdout()));
+    // Under the pane's own, so the pane ends the process whoever started it.
+    install_abort_hook();
+    install_hook_in(&HOOK, || {
+        crate::writer::poison();
+        // A panic skips the drop that would have deleted the pane's images.
+        give_back_all(&mut Crossterm::on_terminal(), TAKEOVER.len(), true);
+    });
 }
 
-/// Give back the whole of [`TAKEOVER`], whatever was actually taken.
-fn restore_everything<C: Console>(console: &mut C) {
-    give_back_all(console, TAKEOVER.len());
-}
-
-/// Chain `restore` onto the panic hook, at most once per `once`.
+/// Chain `restore` onto the panic hook, at most once per `once`. A panic a
+/// picture's catch is waiting for is left to it.
 fn install_hook_in(once: &Once, restore: impl Fn() + Send + Sync + 'static) {
     once.call_once(|| {
         let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| on_panic(&restore, &previous, info)));
+        std::panic::set_hook(Box::new(move |info| {
+            if vigia_core::catching() {
+                return;
+            }
+            on_panic(&restore, &previous, info);
+        }));
     });
+}
+
+/// The panic hook every mode starts with: report the panic, then end the
+/// process, unless a picture's catch is waiting for it. The release build
+/// unwinds only for those catches; a thread that died quietly would leave a
+/// process that looks alive. It writes nothing to stdout, which `vigia mcp`
+/// speaks JSON on.
+pub fn install_abort_hook() {
+    static BASE: Once = Once::new();
+    BASE.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if vigia_core::catching() {
+                return;
+            }
+            previous(info);
+            std::process::abort();
+        }));
+    });
+}
+
+/// The panic hook `run` installs, for a test that needs it in a child.
+#[doc(hidden)]
+pub fn install_panic_hook() {
+    install_hook();
 }
 
 /// The order the panic path runs in: restore, then whatever hook was there.
@@ -291,7 +487,7 @@ pub fn colours_of(reply: &[u8]) -> Option<Colours> {
 #[cfg(any(unix, test))]
 fn attributes_in(reply: &[u8]) -> bool {
     reply
-        .windows(3)
+        .array_windows()
         .position(|w| w == b"\x1b[?")
         .is_some_and(|at| reply[at..].contains(&b'c'))
 }
@@ -319,13 +515,21 @@ fn answered(reply: &[u8], palette: bool) -> bool {
         // that ignored the colour queries costs one round trip, not the timeout.
         attributes_in(reply)
     } else {
-        reply.contains(&0x07) || reply.windows(2).any(|w| w == b"\x1b\\")
+        reply.contains(&0x07) || reply.array_windows().any(|w| w == b"\x1b\\")
     }
 }
 
+/// How long the background query waits for a first answer.
+#[doc(hidden)]
+pub const BACKGROUND_WAIT: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Between reads of a terminal that `poll` cannot see.
+#[cfg(unix)]
+const UNPOLLED: std::time::Duration = std::time::Duration::from_millis(5);
+
 /// How long a terminal that has begun answering the palette is given to finish.
-#[cfg(any(unix, test))]
-const ANSWERING: std::time::Duration = std::time::Duration::from_secs(1);
+#[doc(hidden)]
+pub const ANSWERING: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// How long [`ask`] waits in all. A terminal that has begun answering the
 /// palette is waited on to the end: an answer left unread reaches the event
@@ -339,16 +543,10 @@ fn wait_limit(palette: bool, begun: bool, timeout: std::time::Duration) -> std::
 /// and sixteen entries too, waiting at most `timeout` for a first answer. The
 /// raw reply.
 #[cfg(unix)]
+#[doc(hidden)]
 pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
-    use std::io::{Read, Write};
-    use std::os::fd::AsFd;
-
     let mut reply = Vec::with_capacity(if palette { 512 } else { 64 });
-    let Ok(mut tty) = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-    else {
+    let Some((input, output)) = query_stdio() else {
         return reply;
     };
     let raw = ratatui::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false);
@@ -356,8 +554,16 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
         return reply;
     }
     let _ = (|| {
-        tty.write_all(&query(palette)).ok()?;
-        tty.flush().ok()?;
+        let query = query(palette);
+        let mut sent = 0;
+        while sent < query.len() {
+            match rustix::io::retry_on_intr(|| rustix::io::write(&output, &query[sent..])) {
+                Ok(0) | Err(_) => return None,
+                Ok(wrote) => sent += wrote,
+            }
+        }
+        // Cleared once `poll` cannot see the descriptor.
+        let mut polling = true;
         let start = std::time::Instant::now();
         loop {
             let deadline = start + wait_limit(palette, !reply.is_empty(), timeout);
@@ -365,27 +571,47 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
             if now >= deadline {
                 return Some(());
             }
-            let fd = tty.as_fd();
-            let mut fds = [rustix::event::PollFd::new(
-                &fd,
-                rustix::event::PollFlags::IN,
-            )];
-            let waited =
-                rustix::event::poll(&mut fds, Some(&(deadline - now).try_into().ok()?)).ok()?;
-            if waited == 0 {
-                continue;
+            if polling {
+                let mut fds = [rustix::event::PollFd::new(
+                    &input,
+                    rustix::event::PollFlags::IN,
+                )];
+                let wait = (deadline - now).try_into().ok()?;
+                let waited =
+                    rustix::io::retry_on_intr(|| rustix::event::poll(&mut fds, Some(&wait)))
+                        .ok()?;
+                if waited == 0 {
+                    continue;
+                }
+                let revents = fds[0].revents();
+                if revents.contains(rustix::event::PollFlags::NVAL) {
+                    // macOS on `/dev/tty`: read without blocking instead. The
+                    // flag is cleared again below, since stdin can share it.
+                    rustix::io::ioctl_fionbio(&input, true).ok()?;
+                    polling = false;
+                    continue;
+                }
+                if !revents.contains(rustix::event::PollFlags::IN) {
+                    return Some(());
+                }
             }
             let mut buffer = [0u8; 256];
-            let read = tty.read(&mut buffer).ok()?;
-            if read == 0 {
-                return Some(());
-            }
+            let read = match rustix::io::retry_on_intr(|| rustix::io::read(&input, &mut buffer)) {
+                Ok(0) => return Some(()),
+                Ok(read) => read,
+                Err(rustix::io::Errno::AGAIN) => {
+                    std::thread::sleep(UNPOLLED.min(deadline - now));
+                    continue;
+                }
+                Err(_) => return Some(()),
+            };
             reply.extend_from_slice(&buffer[..read]);
             if answered(&reply, palette) {
                 return Some(());
             }
         }
     })();
+    let _ = rustix::io::ioctl_fionbio(&input, false);
     if !raw {
         let _ = ratatui::crossterm::terminal::disable_raw_mode();
     }
@@ -394,8 +620,85 @@ pub fn ask(timeout: std::time::Duration, palette: bool) -> Vec<u8> {
 
 /// The Windows half: no query, no answer, today's posture.
 #[cfg(not(unix))]
+#[doc(hidden)]
 pub fn ask(_timeout: std::time::Duration, _palette: bool) -> Vec<u8> {
     Vec::new()
+}
+
+/// How long the picture query waits for the terminal's status answer, which
+/// ends it. On Unix it asks only a terminal that answered the background query,
+/// so it gives it `ANSWERING`, the wait a palette answer that has begun gets.
+/// Windows asks blind, so it waits the background query's first wait.
+pub const PICTURES_WAIT: std::time::Duration = if cfg!(unix) {
+    ANSWERING
+} else {
+    BACKGROUND_WAIT
+};
+
+/// Ask the terminal which image protocol it draws and its cell size in pixels,
+/// through `ratatui-image`'s own query, or with `ask` false give the half-blocks
+/// answer without asking. Called in raw mode: the crate leaves its own on when
+/// its query times out, and only the session's exit undoes it.
+#[doc(hidden)]
+pub fn picker(ask: bool) -> (ratatui_image::picker::Picker, crate::pictures::Answer) {
+    use ratatui_image::picker::{Capability, Picker, cap_parser::QueryStdioOptions};
+    let unknown = || (Picker::halfblocks(), crate::pictures::Answer::default());
+    // On macOS the crate's query cannot read `/dev/tty`, so its answer would
+    // be left for the event reader.
+    let terminal = io::stdin().is_terminal() && stdout().is_terminal();
+    if !ask || (cfg!(target_os = "macos") && !terminal) {
+        return unknown();
+    }
+    debug_assert!(
+        ratatui::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false),
+        "the picture query ran outside raw mode"
+    );
+    let options = QueryStdioOptions {
+        timeout_ms: PICTURES_WAIT.as_millis() as i32,
+        #[cfg(unix)]
+        stdio: query_stdio(),
+        // The terminal's parse of a transmit is what a scroll waits on, and the
+        // deflate runs on the picture worker.
+        kitty_compression: true,
+        ..QueryStdioOptions::default()
+    };
+    let Ok(picker) = Picker::from_query_stdio_with_options(options) else {
+        return unknown();
+    };
+    let font = picker.font_size();
+    if font.width == 0 || font.height == 0 {
+        return unknown();
+    }
+    let caps = picker.capabilities();
+    // The terminal's own size in pixels, which the crate's fallback reads too.
+    let sized = ratatui::crossterm::terminal::window_size()
+        .is_ok_and(|size| size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0);
+    let heard = caps
+        .iter()
+        .any(|cap| matches!(cap, Capability::CellSize(Some(_))));
+    let answer = crate::pictures::Answer {
+        kitty: caps.contains(&Capability::Kitty),
+        sixel: caps.contains(&Capability::Sixel),
+        cell: sized || heard,
+        heard,
+    };
+    (picker, answer)
+}
+
+/// The descriptors the startup queries read and write: the terminal's own when
+/// both ends are one, else `/dev/tty`. macOS answers `poll` on `/dev/tty` with
+/// `POLLNVAL`, which [`ask`] reads around and the picture query cannot.
+#[cfg(unix)]
+fn query_stdio() -> Option<(std::os::fd::OwnedFd, std::os::fd::OwnedFd)> {
+    use std::os::fd::AsFd;
+    let (stdin, stdout) = (io::stdin(), stdout());
+    if stdin.is_terminal() && stdout.is_terminal() {
+        return Some((
+            stdin.as_fd().try_clone_to_owned().ok()?,
+            stdout.as_fd().try_clone_to_owned().ok()?,
+        ));
+    }
+    ratatui_image::picker::cap_parser::QueryStdioOptions::stdio_dev_tty().ok()
 }
 
 #[cfg(test)]
@@ -751,7 +1054,7 @@ mod tests {
     fn the_panic_hook_gives_back_everything_in_reverse() {
         // What the hook does, minus which console it writes to.
         let mut recorder = Recorder::new();
-        restore_everything(&mut recorder);
+        give_back_all(&mut recorder, TAKEOVER.len(), false);
 
         let mut expected = TAKEOVER.to_vec();
         expected.reverse();
@@ -922,6 +1225,38 @@ mod tests {
     }
 
     #[test]
+    fn restore_order() {
+        // On every platform, Windows included: the restore's first bytes end
+        // an escape string a frame may have left open, and the modes follow.
+        struct Modes(Crossterm<Vec<u8>>);
+        impl Console for Modes {
+            fn take(&mut self, step: Step) -> io::Result<()> {
+                self.0.take(step)
+            }
+            fn give_back(&mut self, step: Step) {
+                // Raw mode is the real terminal's, not the recorded bytes'.
+                if step != Step::RawMode {
+                    self.0.give_back(step);
+                }
+            }
+            fn ready(&mut self) {
+                self.0.ready();
+            }
+        }
+        let mut console = Modes(Crossterm { out: Vec::new() });
+        give_back_all(&mut console, TAKEOVER.len(), false);
+        let out = String::from_utf8(console.0.out).expect("utf8");
+        assert!(
+            out.starts_with("\x1b\\"),
+            "the restore did not begin with the string terminator: {out:?}"
+        );
+        assert!(
+            out.len() > crate::writer::STRING_END.len(),
+            "no mode was given back after the terminator, so this proves nothing: {out:?}"
+        );
+    }
+
+    #[test]
     fn the_real_console_gives_back_every_mode_it_set() {
         // What layers 1 and 2 cannot see. A recorder is blind to which crossterm
         // command a step is wired to, so `Step::AlternateScreen` giving back
@@ -984,36 +1319,78 @@ mod tests {
         check_drawable(true).expect("a terminal is drawable");
     }
 
+    /// Every source file the crate ships, for the scans below.
+    const SOURCES: [(&str, &str); 27] = [
+        ("lib.rs", include_str!("lib.rs")),
+        ("main.rs", include_str!("main.rs")),
+        ("app.rs", include_str!("app.rs")),
+        ("clipboard.rs", include_str!("clipboard.rs")),
+        ("colour.rs", include_str!("colour.rs")),
+        ("config.rs", include_str!("config.rs")),
+        ("glyphs.rs", include_str!("glyphs.rs")),
+        ("icons.rs", include_str!("icons.rs")),
+        ("input.rs", include_str!("input.rs")),
+        ("kitty.rs", include_str!("kitty.rs")),
+        ("mcp.rs", include_str!("mcp.rs")),
+        ("memory.rs", include_str!("memory.rs")),
+        ("menu.rs", include_str!("menu.rs")),
+        ("motion.rs", include_str!("motion.rs")),
+        ("notes.rs", include_str!("notes.rs")),
+        ("pictures.rs", include_str!("pictures.rs")),
+        ("positions.rs", include_str!("positions.rs")),
+        ("post.rs", include_str!("post.rs")),
+        ("quote.rs", include_str!("quote.rs")),
+        ("render.rs", include_str!("render.rs")),
+        ("signal.rs", include_str!("signal.rs")),
+        ("state.rs", include_str!("state.rs")),
+        ("terminal.rs", include_str!("terminal.rs")),
+        ("theme.rs", include_str!("theme.rs")),
+        ("update.rs", include_str!("update.rs")),
+        ("view.rs", include_str!("view.rs")),
+        ("writer.rs", include_str!("writer.rs")),
+    ];
+
+    #[test]
+    fn no_stray_writes() {
+        // Every byte after the takeover goes through the writer. These may touch
+        // standard output themselves: `main.rs` before any takeover, `mcp.rs`,
+        // which speaks JSON there and draws nothing, this file's takeover and
+        // queries, and the writer.
+        const ALLOWED: [&str; 4] = ["main.rs", "mcp.rs", "terminal.rs", "writer.rs"];
+        let mut found = Vec::new();
+        for (name, source) in SOURCES.iter().filter(|(name, _)| !ALLOWED.contains(name)) {
+            // Tests may print: their output is the test runner's, not the pane's.
+            let shipped = source
+                .split("#[cfg(test)]\nmod tests")
+                .next()
+                .unwrap_or(source);
+            for (n, line) in shipped.lines().enumerate() {
+                let code = line.split("//").next().unwrap_or_default();
+                for banned in [
+                    "stdout()",
+                    "execute!(",
+                    "print!(",
+                    "println!(",
+                    "eprint!(",
+                    "eprintln!(",
+                ] {
+                    if code.contains(banned) {
+                        found.push(format!("{name}:{}: {banned}", n + 1));
+                    }
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "these write the terminal outside the writer, which can land inside a frame:\n{}",
+            found.join("\n")
+        );
+    }
+
     #[test]
     fn no_exit_path_in_the_shell_skips_the_destructors() {
         // The structural half of "the terminal is restored on every exit". What makes
         // that true is that every exit drops `Shell`, which owns the `Session`.
-        const SOURCES: [(&str, &str); 24] = [
-            ("lib.rs", include_str!("lib.rs")),
-            ("main.rs", include_str!("main.rs")),
-            ("app.rs", include_str!("app.rs")),
-            ("clipboard.rs", include_str!("clipboard.rs")),
-            ("colour.rs", include_str!("colour.rs")),
-            ("config.rs", include_str!("config.rs")),
-            ("glyphs.rs", include_str!("glyphs.rs")),
-            ("icons.rs", include_str!("icons.rs")),
-            ("input.rs", include_str!("input.rs")),
-            ("mcp.rs", include_str!("mcp.rs")),
-            ("memory.rs", include_str!("memory.rs")),
-            ("menu.rs", include_str!("menu.rs")),
-            ("motion.rs", include_str!("motion.rs")),
-            ("notes.rs", include_str!("notes.rs")),
-            ("positions.rs", include_str!("positions.rs")),
-            ("post.rs", include_str!("post.rs")),
-            ("quote.rs", include_str!("quote.rs")),
-            ("render.rs", include_str!("render.rs")),
-            ("signal.rs", include_str!("signal.rs")),
-            ("state.rs", include_str!("state.rs")),
-            ("terminal.rs", include_str!("terminal.rs")),
-            ("theme.rs", include_str!("theme.rs")),
-            ("update.rs", include_str!("update.rs")),
-            ("view.rs", include_str!("view.rs")),
-        ];
 
         // The list above is checked against `lib.rs` rather than trusted, so a
         // module added later cannot be quietly exempt from the scan.
@@ -1058,9 +1435,24 @@ mod tests {
             );
 
             for skips in ["process::exit", "process::abort", "mem::forget"] {
-                assert!(
-                    !shipped.contains(skips),
+                // One abort is the base panic hook's, which the pane's hook runs
+                // only after it has restored the terminal.
+                let allowed = usize::from(name == "terminal.rs" && skips == "process::abort");
+                assert_eq!(
+                    shipped.matches(skips).count(),
+                    allowed,
                     "{name} calls {skips}, which skips the Drop that restores the terminal"
+                );
+            }
+            if name == "terminal.rs" {
+                let hook = shipped
+                    .split("pub fn install_abort_hook()")
+                    .nth(1)
+                    .and_then(|rest| rest.split("\n}\n").next())
+                    .expect("install_abort_hook");
+                assert!(
+                    hook.contains("process::abort"),
+                    "the one abort is not in the base panic hook"
                 );
             }
         }
@@ -1103,7 +1495,7 @@ mod tests {
         // The expectation is derived here, in the child, and that placement is the
         // whole of it.
         let mut owed = Crossterm { out: Vec::new() };
-        give_back_all(&mut owed, TAKEOVER.len());
+        give_back_all(&mut owed, TAKEOVER.len(), false);
 
         // Non-vacuity, asserted where the fact lives rather than inferred across a
         // process boundary.

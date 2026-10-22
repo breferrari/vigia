@@ -1,0 +1,22 @@
+diff --git a/README.md b/README.md
+index e09af35..545588f 100644
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,14 @@
+-# hayro
++# vigia-hayro
++
++**This is a fork. Use [hayro](https://crates.io/crates/hayro) instead.**
++
++`vigia-hayro` is [hayro](https://github.com/LaurenzV/hayro) 0.8.0 with no change to its code. It exists so that it builds on `vigia-hayro-interpret`, which builds on `vigia-hayro-syntax`, which carries the patches listed in [`PATCHES.md`](https://github.com/breferrari/vigia/blob/vigia-hayro-0.8.0/vendor/hayro-syntax/PATCHES.md), for [vigia](https://github.com/breferrari/vigia), until a hayro release carries them. It is kept by vigia's maintainer, and it is not affiliated with or endorsed by hayro or its author. Report problems with this fork at <https://github.com/breferrari/vigia/issues>, not to hayro.
+ 
+-[![Crates.io](https://img.shields.io/crates/v/hayro.svg)](https://crates.io/crates/hayro)
+-[![Documentation](https://docs.rs/hayro/badge.svg)](https://docs.rs/hayro)
++hayro is licensed under Apache-2.0 or MIT, and so is this fork. Upstream's README follows, without its badges, which describe upstream's crate.
++
++---
++
++# hayro
+ 
+ <!-- cargo-rdme start -->
+ 

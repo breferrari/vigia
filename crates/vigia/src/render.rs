@@ -2049,7 +2049,12 @@ impl Areas {
             scroll(self.list, view.list_top, view.list_span, view.files),
             // In rows of the diff: the screenful stops being the region's height
             // when a line wraps.
-            scroll(self.diff, view.rows_above, view.shown(), view.total_rows),
+            scroll(
+                self.diff,
+                view.bar_above(),
+                view.bar_shown(),
+                view.bar_total(),
+            ),
         )
     }
 }
@@ -2570,9 +2575,10 @@ const KEYBOARD: [Gesture; 19] = [
         keys: ["m  Esc", "m  Esc"],
         verb: ["the config menu", "config menu"],
     },
+    // `Ctrl+L` shares this row to keep 80 by 24 one page; tight drops it.
     Gesture {
-        keys: ["?  Esc", "?  Esc"],
-        verb: ["this sheet", "this sheet"],
+        keys: ["?  Esc  Ctrl+L", "?  Esc"],
+        verb: ["this sheet · redraw the pane", "this sheet"],
     },
     // `Esc` sits a row up, where it leaves the frontmost thing rather than quitting
     // outright.
@@ -2789,7 +2795,7 @@ const ROOMY_GAP: usize = 8;
 
 /// The keyboard rows the width ladder never drops, by their first key. The
 /// last entries of [`DROP_ORDER`] are these, in this order.
-const SHEET_KEEP: [&str; 3] = ["a", "f", "?  Esc"];
+const SHEET_KEEP: [&str; 3] = ["a", "f", "?  Esc  Ctrl+L"];
 
 /// The fewest body rows a sheet page is worth drawing.
 const SHEET_FLOOR: usize = 3;
@@ -4746,6 +4752,43 @@ impl Painter<'_> {
         );
     }
 
+    /// A built picture's panels in `area`, `part` rows of them above its top, and
+    /// the bar of an added or deleted image in its first column.
+    fn picture(
+        &mut self,
+        area: Rect,
+        key: &crate::pictures::Key,
+        part: u16,
+        built: &crate::pictures::Built,
+    ) {
+        for (slot, panel) in &built.panels {
+            let x = area.x.saturating_add(slot.x);
+            let width = slot.width.min(area.right().saturating_sub(x));
+            if width == 0 {
+                continue;
+            }
+            let room = Rect { x, width, ..area };
+            // An image the terminal paints is not cells, so an overlay drawn over it
+            // would not hide it.
+            if panel.drawn_by_terminal() && self.covered.is_some_and(|over| over.intersects(room)) {
+                continue;
+            }
+            panel.render(room, self.buf, part);
+        }
+        let bar = built.bar.or(key.shape.kind.bar()).map(|bar| match bar {
+            crate::pictures::Bar::Added => self.theme.added_bar,
+            crate::pictures::Bar::Removed => self.theme.removed_bar,
+        });
+        if let (Some(bar), Some(slot)) = (bar, built.panels.first().map(|(slot, _)| slot)) {
+            let rows = slot.rows.saturating_sub(part).min(area.height);
+            for y in area.y..area.y + rows {
+                if let Some(cell) = self.buf.cell_mut((area.x, y)) {
+                    cell.set_symbol(" ").set_style(bar);
+                }
+            }
+        }
+    }
+
     /// Draw the body: the pinned list, the rule and the diff.
     fn body(&mut self, area: Rect, view: &View, pane: Rect, empty: &str) {
         // `line_row` paints the left bar in `self.inset` and `content_span` insets
@@ -4905,6 +4948,43 @@ impl Painter<'_> {
                         usize::from(glyphs.width),
                         self.theme.note,
                     );
+                }
+                Row::Sized { line, ready, .. } => {
+                    let drawn = match ready.as_ref().and_then(|ready| ready.0.suffix()) {
+                        Some(found) => format!("  {line} · {found}"),
+                        None => format!("  {line}"),
+                    };
+                    self.put_marked(
+                        glyphs.x,
+                        y,
+                        &drawn,
+                        usize::from(glyphs.width),
+                        self.theme.note,
+                    );
+                }
+                // Drawn whole from the first of its rows on screen; the rest are
+                // the cells that drawing covers.
+                Row::Picture {
+                    key, part, ready, ..
+                } => {
+                    let first = offset == 0 || !view.rows[offset - 1].pictures(key);
+                    if first && let Some(ready) = ready {
+                        let rows = view.rows[offset..shown.min(view.rows.len())]
+                            .iter()
+                            .take_while(|row| row.pictures(key))
+                            .count();
+                        self.picture(
+                            Rect {
+                                x: glyphs.x + 2,
+                                y,
+                                width: glyphs.width.saturating_sub(2),
+                                height: u16::try_from(rows).unwrap_or(u16::MAX),
+                            },
+                            key,
+                            *part,
+                            &ready.0,
+                        );
+                    }
                 }
                 Row::Note {
                     lead,

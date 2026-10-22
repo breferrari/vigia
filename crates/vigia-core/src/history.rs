@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// How far back a churn sparkline reaches.
-pub const HISTORY_WINDOW: Duration = Duration::from_secs(120);
+pub const HISTORY_WINDOW: Duration = Duration::from_mins(2);
 
 /// The resolution a sparkline is projected from, oldest bucket first.
 pub const HISTORY_BUCKETS: usize = 24;

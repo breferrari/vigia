@@ -4,6 +4,10 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+#[path = "pty/ceiling.rs"]
+mod ceiling;
+use ceiling::ceiling;
+
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use vigia::update::{UPDATE_VAR, newer, version_in, wanted, watch};
@@ -18,7 +22,7 @@ use vigia_core::Standing;
 /// four and a half seconds finds them looking.
 #[test]
 fn the_notice_stays_a_minute() {
-    assert_eq!(ARRIVED_LINGER, Duration::from_secs(60));
+    assert_eq!(ARRIVED_LINGER, Duration::from_mins(1));
     assert_eq!(linger_for(Voice::Arrived), ARRIVED_LINGER);
     assert_ne!(linger_for(Voice::Arrived), linger_for(Voice::Said));
     // The whole of the time, both transitions included, with most of it settled.
@@ -190,7 +194,7 @@ fn the_check_never_delays_the_caller() {
     // The answer first, so what follows cannot be satisfied by a check that
     // never ran: an absence is free until the work is counted.
     let answered = rx
-        .recv_timeout(Duration::from_secs(10))
+        .recv_timeout(ceiling(Duration::from_secs(10)))
         .expect("the check never answered, so this proves nothing about its cost");
     assert_eq!(answered, "9.9.9");
     assert!(
@@ -217,7 +221,7 @@ fn a_check_that_answers_nothing_says_nothing() {
     // sender only drops once the thread has finished, so this says the check ran
     // and stayed quiet rather than that it is merely slow.
     assert_eq!(
-        rx.recv_timeout(Duration::from_secs(10)),
+        rx.recv_timeout(ceiling(Duration::from_secs(10))),
         Err(mpsc::RecvTimeoutError::Disconnected),
         "a check with no answer still told the footer something"
     );
@@ -311,6 +315,42 @@ fn the_shell_still_arms_the_check() {
         assert!(
             code.contains(seam),
             "`{seam}` is gone from the shell, so nothing asks and nothing draws"
+        );
+    }
+}
+
+/// The store watch's notice reaches the footer and never stderr, which would
+/// draw over the pane.
+#[test]
+fn store_notice_footer() {
+    let shell: String = include_str!("../src/lib.rs")
+        .split("#[cfg(test)]")
+        .next()
+        .expect("split")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for seam in [
+        ".take_store_notice()",
+        "tx.send(Wake::Notice(message))",
+        "Wake::Notice(message) => shell.say(",
+    ] {
+        assert!(shell.contains(seam), "`{seam}` is gone from the shell");
+    }
+    let forwarder = shell
+        .split("fn spawn_watch(")
+        .nth(1)
+        .and_then(|rest| rest.split("\n}\n").next())
+        .expect("the watch thread");
+    let watch = include_str!("../../vigia-core/src/watch.rs")
+        .split("#[cfg(test)]")
+        .next()
+        .expect("split");
+    for (name, code) in [("spawn_watch", forwarder), ("watch.rs", watch)] {
+        assert!(
+            !code.contains("eprint") && !code.contains("stderr"),
+            "{name} writes to stderr, over the pane"
         );
     }
 }

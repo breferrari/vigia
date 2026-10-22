@@ -2,6 +2,7 @@
 //! becomes when it can show less than the palette was written in.
 
 use ratatui::style::{Color, Modifier, Style};
+use std::assert_matches;
 use vigia::{DEPTH_VAR, Depth, Theme};
 
 /// An environment built from pairs, so a case reads as the thing it is testing.
@@ -510,22 +511,20 @@ fn a_green_stays_green_and_a_red_stays_red_at_sixteen() {
     // weighted rather than plain Euclidean: plain RGB distance treats a blue error as
     // costing what a green one does, and sends a mid-green to cyan.
     let green = Depth::Ansi16.resolve(Style::new().fg(Color::Rgb(0x3f, 0xb9, 0x50)));
-    assert!(
-        matches!(green.fg, Some(Color::Green | Color::LightGreen)),
+    assert_matches!(
+        green.fg,
+        Some(Color::Green | Color::LightGreen),
         "{:?}",
         green.fg
     );
 
     let red = Depth::Ansi16.resolve(Style::new().fg(Color::Rgb(0xf8, 0x51, 0x49)));
-    assert!(
-        matches!(red.fg, Some(Color::Red | Color::LightRed)),
-        "{:?}",
-        red.fg
-    );
+    assert_matches!(red.fg, Some(Color::Red | Color::LightRed), "{:?}", red.fg);
 
     let yellow = Depth::Ansi16.resolve(Style::new().fg(Color::Rgb(0xe3, 0xb3, 0x41)));
-    assert!(
-        matches!(yellow.fg, Some(Color::Yellow | Color::LightYellow)),
+    assert_matches!(
+        yellow.fg,
+        Some(Color::Yellow | Color::LightYellow),
         "{:?}",
         yellow.fg
     );

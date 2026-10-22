@@ -22,7 +22,7 @@ fn tick_within(watcher: &mut Watcher<'_>, timeout: Duration) -> Option<Tick> {
     let guard = std::thread::spawn(move || {
         // Wakes early once the tick arrives, so a passing test does not pay the
         // whole timeout.
-        if finished.recv_timeout(timeout).is_err() {
+        if finished.recv_timeout(support::ceiling(timeout)).is_err() {
             stop.stop();
         }
     });

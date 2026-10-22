@@ -576,6 +576,7 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::PositionsRow(_)
         | Action::Escape
         | Action::Redraw
+        | Action::Refresh
         | Action::Quit => return None,
     };
     (way != 0 && whose.region(regions).rows > 0).then_some((whose, way))
@@ -606,6 +607,8 @@ pub struct Deadlines {
     pub departing: Option<Instant>,
     /// When the note box Esc sent away has its rows dropped.
     pub closing: Option<Instant>,
+    /// When a screen held back for a slow terminal is drawn anyway.
+    pub held_back: Option<Instant>,
 }
 
 /// How long the loop may block before some clock here has to act.
@@ -621,6 +624,7 @@ pub fn patience(due: Deadlines, now: Instant) -> Option<Duration> {
         due.arriving.map(since),
         due.departing.map(since),
         due.closing.map(since),
+        due.held_back.map(since),
     ]
     .into_iter()
     .flatten()
@@ -787,6 +791,9 @@ pub enum Action {
     DiffTo(u32),
     /// Draw again with no state change, which is what a resize needs.
     Redraw,
+    /// Clear the terminal and draw everything again, Kitty images sent anew.
+    /// `Ctrl-L`.
+    Refresh,
 }
 
 impl Action {
@@ -833,6 +840,7 @@ impl Action {
             | Self::PositionsRow(_)
             | Self::Escape
             | Self::Redraw
+            | Self::Refresh
             | Self::Quit => self,
             // A caret steps, so `n` steps is one action with `n` in it.
             Self::MenuMove(by) => Self::MenuMove(by.saturating_mul(times)),
@@ -860,6 +868,7 @@ impl Action {
             Self::Quit
             | Self::Escape
             | Self::Redraw
+            | Self::Refresh
             | Self::ToggleFollow
             // Moving the list beside the diff resizes the diff's region and does not
             // move the reader inside it, which is a resize by another name and the same
@@ -926,6 +935,7 @@ impl Action {
             Self::Quit
             | Self::Escape
             | Self::Redraw
+            | Self::Refresh
             | Self::ToggleFollow
             | Self::ToggleRail
             | Self::ToggleSingle
@@ -981,7 +991,8 @@ pub fn action_for(event: &Event, regions: Regions) -> Option<Action> {
 }
 
 /// It takes the key and nothing else, which is what makes "not a mode" structural
-/// rather than a claim. The box is the exception, and only because its keys never reach it.
+/// rather than a claim. The box is the exception, and only because its keys, `Ctrl+L`
+/// aside, never reach it.
 fn key_action(key: &KeyEvent) -> Option<Action> {
     // Windows reports press *and* release; Unix terminals report press only.
     // Acting on both would double every keystroke on one platform and not the
@@ -994,6 +1005,7 @@ fn key_action(key: &KeyEvent) -> Option<Action> {
         return match key.code {
             // Ctrl-C is handled here rather than by a signal handler.
             KeyCode::Char('c') | KeyCode::Char('d') => Some(Action::Quit),
+            KeyCode::Char('l') => Some(Action::Refresh),
             _ => None,
         };
     }

@@ -12,11 +12,11 @@ authors.workspace = true
 keywords = ["git", "diff", "tui", "monitor", "terminal"]
 categories = ["command-line-utilities", "development-tools"]
 
-# `SPEC.md` section 9 counts thirty *files* here that read outside this
-# package: twenty-six reach `vigia-core/tests/support` by `#[path]`, and five read
+# `SPEC.md` section 9 counts thirty-six *files* here that read outside this
+# package: thirty-three reach `vigia-core/tests/support` by `#[path]`, and five read
 # repository documents through `CARGO_MANIFEST_DIR`, of which `soak.rs` and
-# `sheet.rs` are in both groups, which is what makes the total thirty rather
-# than thirty-one. No destination is inside this directory, so a packaged copy
+# `sheet.rs` are in both groups, which is what makes the total thirty-six rather
+# than thirty-eight. No destination is inside this directory, so a packaged copy
 # carries a test suite that cannot compile.
 #
 # Excluding the tests is section 9's own resolution, and the direction is the
@@ -31,8 +31,20 @@ categories = ["command-line-utilities", "development-tools"]
 # somebody's `cargo install`.
 exclude = ["tests/**"]
 
+# On by default, through the published `vigia-hayro*` forks.
+[features]
+default = ["pdf"]
+pdf = ["dep:hayro", "vigia-core/pdf"]
+
 [dependencies]
+image.workspace = true
 ratatui.workspace = true
+ratatui-image.workspace = true
+base64-simd.workspace = true
+miniz_oxide.workspace = true
+resvg.workspace = true
+hayro = { workspace = true, optional = true }
+skrifa.workspace = true
 ratatui-textarea.workspace = true
 serde_json.workspace = true
 tachyonfx.workspace = true
@@ -71,10 +83,11 @@ windows-sys.workspace = true
 # nobody typed is too, and SPEC.md section 6 puts terminal I/O outside
 # `vigia-core` entirely.
 [target.'cfg(unix)'.dependencies]
-# SPEC.md section 6 names rustix for one act: polling the tty for the OSC 11
-# background reply at startup (#325). Already in the graph beneath crossterm
-# and notify; declaring it makes the direct use deliberate.
-rustix = { version = "1", default-features = false, features = ["event", "std"] }
+# SPEC.md section 6 names rustix for two acts: polling the tty for the OSC 11
+# background reply at startup (#325), and the terminal writer's own descriptor,
+# opened by `ttyname` and polled for room. Already in the graph beneath
+# crossterm and notify; declaring it makes the direct use deliberate.
+rustix = { version = "1", default-features = false, features = ["alloc", "event", "fs", "std", "termios"] }
 signal-hook.workspace = true
 
 # The tests reach `vigia-core/tests/support` by `#[path]`, the way
@@ -103,7 +116,9 @@ insta.workspace = true
 libc.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]
-windows-sys.workspace = true
+# WindowsProgramming is QueryThreadCycleTime, the budgets' thread clock, kept
+# to tests so the shipped binary does not take it.
+windows-sys = { workspace = true, features = ["Win32_System_WindowsProgramming"] }
 
 # Not `workspace = true`: the workspace turns on the C-FAILURE lints, and this
 # crate is the binary. Those guidelines exist for callers you do not control, and

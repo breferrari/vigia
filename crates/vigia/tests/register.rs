@@ -143,8 +143,8 @@ fn is_comment(line: &str) -> bool {
 /// `# Errors`, `# Panics` and `# Safety` sections are excluded, capped at
 /// [`COMPELLED_LINES`] each. They are not discretionary: `clippy`'s
 /// `missing_errors_doc`, `missing_panics_doc`, `missing_safety_doc` and
-/// `undocumented_unsafe_blocks` fail the build without them, and CI runs
-/// `-D warnings`. Counting them here put two gates in opposition, and the only
+/// `undocumented_unsafe_blocks` fail the build without them, and CI denies
+/// warnings. Counting them here put two gates in opposition, and the only
 /// way a session could satisfy both was to delete an ordinary comment that
 /// explained something real in order to pay for a section a lint demanded. That
 /// is the ratchet buying worse code, which is the opposite of its job — it
@@ -474,7 +474,11 @@ fn markdown() -> Vec<(String, String)> {
             }
             if path.is_dir() {
                 walk(&path, out);
-            } else if path.extension().is_some_and(|e| e == "md") && !name.contains("NOTICE") {
+            } else if path.extension().is_some_and(|e| e == "md")
+                && !name.contains("NOTICE")
+                // A vendored crate's own documents are its authors' text.
+                && !(path.components().any(|c| c.as_os_str() == "vendor") && name != "PATCHES.md")
+            {
                 out.push(path);
             }
         }
@@ -843,6 +847,23 @@ fn public_prose_denylist() {
             read(".github/PULL_REQUEST_TEMPLATE.md"),
         ),
     ];
+    // A release summary opens the published notes, so it is held to them first.
+    match std::fs::read_to_string(root.join(".github/release-summary.md")) {
+        Ok(summary) => files.push((".github/release-summary.md".to_owned(), summary)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => panic!("read .github/release-summary.md: {e}"),
+    }
+    // Every page under docs/, so a new one is covered without an edit here.
+    for entry in std::fs::read_dir(root.join("docs"))
+        .expect("read docs/")
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".md") {
+            let name = format!("docs/{name}");
+            files.push((name.clone(), read(&name)));
+        }
+    }
     let templates = root.join(".github/ISSUE_TEMPLATE");
     for entry in std::fs::read_dir(&templates)
         .unwrap_or_else(|e| panic!("read {}: {e}", templates.display()))

@@ -4,6 +4,63 @@ Every released version of `vigia`, newest first. The date is the day the release
 
 Each version lists the pull requests labelled `release`, one line each: what the pane shows or does, a key or gesture, a theme, installation, or the MCP tools. Internal work such as CI, tests and documentation is not listed.
 
+## [1.2.2] - 2026-10-21
+
+- The scrollbar's thumb keeps one length while you scroll over pictures.
+
+## [1.2.1] - 2026-10-21
+
+- Pictures draw at their true size, shrink to fit a narrow pane instead of disappearing, and are sharp on a Retina Mac whose terminal does not report its cell size.
+
+## [1.2.0] - 2026-10-21
+
+vigia 1.2.0 shows pictures. A changed image appears as its old and new versions side by side, with the changed pixels marked: PNG, JPEG, GIF, WebP, SVG, and the first changed page of a PDF. It uses the terminal's image protocol where there is one (Kitty graphics, Sixel, iTerm2) and coloured half blocks where there isn't. Every build draws them, `cargo install vigia` included.
+
+Pictures stay out of the way. They go to the terminal between frames, so scrolling and typing stay responsive while a large one is still arriving. Ctrl+L redraws the pane and sends its pictures again, and a font zoom redraws them at the new size. The mask colour has its own theme key, `picture_changed`.
+
+Moved files read the way git reads them. A file that was moved and edited shows as a rename when git would call it one, text included, and a move of a few hundred similar files keeps every rename. An image moved and changed shows as a rename with both pictures, and a Git LFS file moved without an edit shows as a rename too. An LFS image redraws when its object arrives.
+
+Markdown files with fenced code blocks highlight up to twelve times faster. The release archives are attested, and each binary carries its crate list. Building from source needs Rust 1.99 or newer.
+
+Known limits: inside herdr, scrolling over pictures can still stutter briefly, because herdr redraws every picture on each frame. Ghostty 1.3 receives pictures uncompressed, because its decoder crashes on some compressed streams; this lifts when a Ghostty release ships its new decoder.
+
+- A changed PDF now shows the first page that changed, old and new side by side with the changed pixels marked, in every build, `cargo install vigia` included.
+- Pictures in a terminal with Kitty graphics keep arriving while a key is held, without holding the key back.
+- vigia no longer crashes Ghostty 1.3.1 when it shows pictures.
+- Ghostty 1.3 and earlier is sent pictures uncompressed.
+- vigia no longer crashes Ghostty 1.3.1 when it shows pictures.
+- Ghostty 1.3 and earlier is sent pictures uncompressed.
+- A move of up to a few hundred similar files now shows every file as a rename.
+- An LFS file moved without an edit now shows as a rename.
+- An LFS image's first object arriving in a repository now redraws it, where on Linux it could wait for the next change.
+- A text file that was moved and partly reordered now shows as a rename, as git shows it.
+- Scrolling over pictures in a terminal with Kitty graphics no longer waits for a picture's upload, which goes out between frames.
+- A renamed image or binary file now keeps showing as a rename however long the pane has been open.
+- Photographs sent to a terminal with Kitty graphics skip a compression pass that saved little.
+- Markdown files with fenced code blocks highlight up to twelve times faster.
+- The pane keeps answering keys while the terminal is slow to draw, and quitting no longer waits for a terminal that has stopped reading.
+- Updates the TLS certificate checks behind the update check, dropping certificate authorities that are no longer trusted.
+- Scrolling back over pictures in kitty, Ghostty and other Kitty-graphics terminals no longer sends them again, and they are sent compressed where the terminal supports it, so scrolling over pictures no longer stalls.
+- Themes can set the colour of a picture's changed pixels with `picture_changed`; by default it is unchanged.
+- Each release archive now carries a GitHub build attestation, and each binary embeds the list of crates it was built from.
+- Updates a cache library the screen uses, past a reported memory-safety bug (RUSTSEC-2026-0253).
+- With a picture on screen, the scrollbar's thumb is the right length.
+- Updates the TLS library behind the update check to a version without known security advisories.
+- An image stored with Git LFS redraws when `git lfs fetch` brings its content, with no edit to the file.
+- After a font zoom or a move to another screen, pictures are drawn again at the new size.
+- Ctrl+L redraws the pane, and after a tmux reattach it sends the pictures again.
+- An image renamed and edited now shows as a rename, with its old and new pictures, where it showed as a deletion and an addition.
+- A repository using Git LFS lists its changes even when git-lfs is not installed, and the pane never starts git-lfs.
+- Scrolling moves through a picture or a long note one row at a time.
+- A changed SVG now shows its old and new pictures side by side, with the changed pixels marked, in place of its text diff.
+- A malformed image that crashes its decoder no longer closes the pane; its line says the image could not be decoded.
+- On macOS, vigia no longer waits for a keypress at startup in a terminal that does not report its background colour.
+- In terminals with Kitty graphics, Sixel or iTerm2 images, a changed image now draws at full resolution, at any colour depth.
+- A changed image now shows its old and new pictures side by side, with the changed pixels marked, in terminals with 24-bit colour.
+- A changed PNG, JPEG, GIF or WebP now shows its format, dimensions and file size instead of the word binary, including images stored with Git LFS.
+- A changed BMP, ICO, TIFF, QOI or TGA image also shows its format, dimensions and file size instead of the word binary.
+- Building vigia from source now needs Rust 1.99 or newer.
+
 ## [1.1.0] - 2026-10-01
 
 - An answer the agent quotes as code no longer freezes the pane for the length of the block when it arrives.

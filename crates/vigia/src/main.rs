@@ -7,6 +7,8 @@ use std::process::ExitCode;
 use vigia::{Request, VERSION};
 
 fn main() -> ExitCode {
+    // Before any thread exists, in every mode.
+    vigia::install_abort_hook();
     // Everything after the program name, so the classifier can see how *many*
     // there are. Passing it one argument is what let `vigia . --colour=never`
     // run: a function handed a single argument cannot notice a second.

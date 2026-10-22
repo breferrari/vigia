@@ -62,3 +62,20 @@ fn the_reference_reads_keys_from_rows_at_all() {
          if the document's table style changed, change documented() with it"
     );
 }
+
+/// The theme file the README shows parses as written.
+#[test]
+fn readme_theme_parses() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md");
+    let readme = fs::read_to_string(&path).expect("README.md is readable");
+    let (_, rest) = readme
+        .split_once("```ini\n")
+        .expect("the README shows a theme file");
+    let (example, _) = rest.split_once("```").expect("the block closes");
+    assert!(
+        example.contains("base"),
+        "the first ini block in the README is not the theme example:\n{example}"
+    );
+    vigia::theme::parse(example)
+        .unwrap_or_else(|err| panic!("the README's theme file does not parse: {err}\n{example}"));
+}

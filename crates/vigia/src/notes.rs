@@ -315,14 +315,14 @@ pub enum BoxRoute {
     Paste(String),
     /// A press inside the box, or a key's release: nothing.
     Inert,
-    /// Not the box's to answer: the wheel, a resize, focus and the pointer
-    /// moving, which the pane takes as it always does.
+    /// Not the box's to answer: `Ctrl+L`, the wheel, a resize, focus and the
+    /// pointer moving, which the pane takes as it always does.
     Through,
 }
 
 /// Where `event` goes while the box is open over `over`, the cells it drew on
-/// the last paint. Every key is the box's, which is the mode; the pointer's
-/// buttons close it from anywhere else; the rest passes through.
+/// the last paint. Every key but `Ctrl+L` is the box's, which is the mode; the
+/// pointer's buttons close it from anywhere else; the rest passes through.
 #[must_use]
 pub fn box_route(event: &Event, over: Option<Rect>) -> BoxRoute {
     match event {
@@ -330,6 +330,10 @@ pub fn box_route(event: &Event, over: Option<Rect>) -> BoxRoute {
         Event::Key(key) => match key.code {
             KeyCode::Enter if !key.modifiers.contains(KeyModifiers::ALT) => BoxRoute::Send,
             KeyCode::Esc => BoxRoute::Cancel,
+            // The redraw, which keeps the box and what it holds.
+            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                BoxRoute::Through
+            }
             _ => BoxRoute::Edit(Input::from(*key)),
         },
         Event::Paste(text) => BoxRoute::Paste(text.clone()),

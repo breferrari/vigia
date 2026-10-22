@@ -36,7 +36,7 @@ which is what makes a push by an admin legal at all. `bump.yml` does not check t
 ## 1. The artifact, not the checkout
 
 - [ ] `cargo package --list -p vigia`: no `.github/`, no `tests/`, and
-`README.md` present. SPEC.md §9 counts thirty test files that read outside the package, and `exclude = ["tests/**"]` keeps them out of the tarball. `crates/vigia/tests/package.rs::the_packaged_artifact_carries_no_tests` gates this. Check it here again, because that gate skips when the registry index is unreachable.
+`README.md` present. SPEC.md §9 counts thirty-six test files that read outside the package, and `exclude = ["tests/**"]` keeps them out of the tarball. `crates/vigia/tests/package.rs::the_packaged_artifact_carries_no_tests` gates this. Check it here again, because that gate skips when the registry index is unreachable.
 - [ ] Unpack the built `.crate` into a clean directory. `cargo build --release`
 there succeeds with no path that leaks back into the checkout.
 - [ ] `dist plan` names all four targets (`x86_64-unknown-linux-musl`,
@@ -52,6 +52,8 @@ macOS, Linux: the binary lands on PATH, and `vigia --version` prints the release
 with 217 syntaxes). A surprise here is a packaging change, not drift.
 - [ ] musl artifact: `ldd` reports no shared libraries. CI enforces the static claim,
 and you check it here again because this is the artifact, not the build.
+- [ ] `cargo audit bin` on the unpacked macOS and Linux binaries reports `cargo auditable` data, not a fallback scan.
+- [ ] Before announcing the release: `gh attestation verify <archive> --repo breferrari/vigia` passes on one downloaded release archive. A rehearsal attests nothing, so this is the first place the attestation can be seen.
 
 ## 3. Run it against a real repository, not a fixture
 
@@ -81,6 +83,16 @@ two cases, and a local run cannot reach either. Inside tmux at the machine where
 
 Three kills are deliberately **not** boxes here. `kill -9` and `taskkill /F` are outside I8 on both platforms, because neither runs any code that the process owns. The release notes say that and imply nothing more. A *second* kill is inside I8 as an exclusion by choice (SPEC.md section 11.1: it takes the default disposition and restores nothing). `a_second_external_signal_kills_a_shell_that_ignored_the_first` covers it, and no box covers it, because a working build can never tick such a box.
 
+### Pictures and notes
+
+These run on the release build: `cargo build --release -p vigia`, then `target/release/vigia`. The scene bed is described in [CONTRIBUTING.md, under Running things](CONTRIBUTING.md#running-things).
+
+- [ ] **Every picture state.** `cargo run -p xtask --bin scene -- static` prints a `vigia <path>` line and one line per file. Run the release binary on that path in another pane and check each file against the printed list: images side by side with the changed pixels marked, an SVG as pictures, a PDF's first changed page, a renamed and edited image as a rename with both pictures, and an LFS image with no object as a size line. On kitty or Ghostty the pixels are sharp; if they are half-blocks, rerun with `VIGIA_PICTURES=kitty` and record which you got.
+- [ ] **The scrollbar with pictures.** With pictures on screen, the thumb's length matches how much of the content is visible, and at the bottom of the scroll the thumb reaches the bottom.
+- [ ] **A font zoom.** Zoom the terminal font in and out. The pictures redraw at the new size and stay inside their slot.
+- [ ] **`Ctrl+L`.** It redraws the pane with its pictures. Under tmux, detach, reattach from another terminal window at the same size, press `Ctrl+L`: the pictures come back.
+- [ ] **The note loop, end to end.** In a real repository with Claude Code and the notes setup from [docs/NOTES.md](docs/NOTES.md), click a line number, type a sentence, press `Enter`. The footer says `sent`, the agent gets the file, the line and the words, fixes it and resolves it, and its line appears under the note. Record the Claude Code version.
+
 ## 4. The claims the README makes are the claims the evidence holds
 
 - [ ] "Flat resources over days" appears only if the 24-hour window has
@@ -99,7 +111,7 @@ The publish is a CI job now, so these steps make sure that the publish is correc
 - [ ] The `Release` workflow is green end to end, including
 `custom-publish-crates-io`. **Read that job specifically and not the overall tick.** The GitHub release is created in `host`, before the registry job runs and with no `--draft`, so public binaries prove nothing about crates.io. A green `announce` does not prove it either: that job is a checkout.
 - [ ] `cargo install vigia` from crates.io, on one machine that has never built
-this repo. This is the true cold path.
+this repo, and a changed PDF draws pictures in it. This is the true cold path.
 - [ ] If the registry job failed while the release went public, that is the
 documented half-failure. **The recovery depends on how far the job got, and a re-run of the job is right for only one of the two cases**, because publishing a version that is already published is an error and not a silent no-op:
       - Nothing was accepted: re-run the job.

@@ -1,0 +1,187 @@
+name: nightly
+
+# The slow suites, on main, once a day. None of them gates a pull request.
+# Dispatch it on a branch to run them before merging.
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_WARNINGS: deny
+
+permissions: {}
+
+jobs:
+  # In release, because that is what the budgets were set against. Slack
+  # applies to the absolute wall-clock gates only: hosted runners are shared.
+  # `first_paint` runs on its own so cargo cannot order it between the two
+  # budgets binaries, where its cold starts slow the next timed gate.
+  budgets:
+    name: budgets (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: budgets
+        run: cargo test --release --test budgets -- --nocapture
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+      # Ignored on pull requests because they take minutes even untimed.
+      - name: the long budgets
+        run: cargo test --release --test budgets -- --ignored --exact rename_frame_refactor pictures_settled_large --nocapture
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+      - name: first paint
+        run: cargo test --release --test first_paint -- --nocapture
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+
+  benches:
+    name: benches compile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo bench --no-run
+
+  # Builds without the default `pdf` feature.
+  no-pdf:
+    name: without PDFs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        with:
+          tool: nextest
+      - run: cargo clippy -p vigia -p vigia-core --all-targets --no-default-features
+      - run: cargo build -p vigia --no-default-features
+      - run: cargo nextest run --profile ci -p vigia-core --test pdf_off
+
+  # No crate with a C build script on any release target. The targets come
+  # from `[workspace.metadata.dist]`.
+  pure-rust:
+    name: no C toolchain
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - name: no cc, cmake or bindgen on any release target
+        run: |
+          set -euo pipefail
+          targets=$(cargo metadata --no-deps --format-version 1 | jq -r '.metadata.dist.targets[]')
+          [ -n "$targets" ] || { echo "::error::no targets in [workspace.metadata.dist]"; exit 1; }
+          status=0
+          for target in $targets; do
+            found=$(cargo tree --target "$target" -e normal,build \
+              | grep -oiE '\bcc v[0-9.]+|\bcmake v[0-9.]+|\bbindgen v[0-9.]+' | sort -u || true)
+            if [ -n "$found" ]; then
+              echo "::error::a C build dependency entered the graph for $target: $found"
+              status=1
+            else
+              echo "$target: clean"
+            fi
+          done
+          exit $status
+
+  # The binary Linux ships: static, installable with no flags, and within
+  # budget. `-p vigia`, because vigia-core's dev graph needs a C compiler for
+  # this target.
+  musl:
+    name: static musl binary
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo build --release --target x86_64-unknown-linux-musl
+      - name: cargo install with no flags
+        run: |
+          set -euo pipefail
+          cargo install --path crates/vigia --locked --target x86_64-unknown-linux-musl \
+            --target-dir target --root "$RUNNER_TEMP/install"
+          cargo tree -p vigia -e normal --target x86_64-unknown-linux-musl --prefix none \
+            | grep -q '^vigia-hayro v.*/vendor/hayro)'
+      - name: the binary is static
+        run: |
+          set -euo pipefail
+          binary=target/x86_64-unknown-linux-musl/release/vigia
+          file "$binary"
+          if ldd "$binary" 2>&1 | grep -q '=>'; then
+            echo "::error::the musl binary links shared libraries"
+            ldd "$binary" || true
+            exit 1
+          fi
+      - name: budgets
+        run: cargo test -p vigia --release --target x86_64-unknown-linux-musl --test budgets -- --nocapture
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+      - name: first paint
+        run: cargo test -p vigia --release --target x86_64-unknown-linux-musl --test first_paint -- --nocapture
+        env:
+          VIGIA_BUDGET_SLACK: "3"
+
+  # Each fork under `vendor/` is its published crate plus its patches, and the
+  # original's own suite passes with them.
+  forks:
+    name: forks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - run: sh .github/scripts/forks.sh
+      - run: sh .github/scripts/forks-suite.sh

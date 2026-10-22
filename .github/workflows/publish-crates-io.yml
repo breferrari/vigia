@@ -44,16 +44,25 @@ on:
         required: true
         type: string
 
+permissions: {}
+
 jobs:
   publish-crates-io:
     name: publish to crates.io
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
     env:
       PLAN: ${{ inputs.plan }}
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
 
       # A missing secret otherwise surfaces as `cargo publish` failing after it
       # has already packaged both crates, several minutes in and one screen down

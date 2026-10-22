@@ -26,6 +26,7 @@
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+mod catch;
 mod change;
 mod emphasis;
 mod error;
@@ -36,12 +37,15 @@ mod highlight;
 mod history;
 mod hunk;
 mod notes;
+mod picture;
+mod rename;
 mod session;
 mod standing;
 mod timing;
 mod watch;
 mod worktree;
 
+pub use catch::{Stage, armed, catching, caught, panic_next};
 pub use change::{ChangeKind, FileChange, Origin};
 pub use emphasis::{Emphasis, mark};
 pub use error::{Error, Result};
@@ -60,11 +64,13 @@ pub use notes::{
     First, LineRef, Listing, NEAR, Note, Placement, Side, Status, Store, StoreWatch, first_of, key,
     names_a_record, resolve, run_of,
 };
+pub use picture::{Format, ImageSide, Picture, Source, Sources};
+pub use rename::{Candidate, PairKey, candidate_score, pair_score, pairs};
 pub use session::{Registration, Registry};
 pub use standing::{Reading, Standing};
 pub use timing::{FrameTiming, Samples};
 pub use watch::{Stop, Tick, WatchOptions, WatchStats, Watcher};
 pub use worktree::{
     ChangeOptions, Changes, Counted, INDEXED_EXTENSION, INDEXED_EXTENSIONS, INDEXED_PATH, Indexed,
-    Landmark, Page, SHORT_ID, Worktree, indexed_extensions,
+    Landmark, Page, SHORT_ID, Worktree, indexed_extensions, listing_walks,
 };

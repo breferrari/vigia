@@ -15,22 +15,17 @@
 # `assets/syntaxes` are code: the grammar dump is what the coverage suite reads.
 # A markdown file under `crates/` is code too: `NOTICE.md` ships in the archive
 # and a test reads it. `.claude/scripts` are the guards that run on every
-# commit and publish, and they are code.
+# commit and publish, and they are code. `.claude/take-next` holds the
+# take-next rules, which only the skill reads. `docs/research` holds notes and
+# their images, and a script kept beside them is code.
 #
-# `CI_FULL=true` in the environment answers full whatever the paths, for a
-# pull request that carries the `full-ci` label. A partial run that turns out
-# wrong needs a way to be overridden without a code change.
+# The caller lists a renamed file under both names, so moving code into a
+# docs path is still code.
 #
-# Usage: [CI_FULL=true] change-class.sh < paths
+# Usage: change-class.sh < paths
 set -eu
 
 paths=$(grep -v '^$' || true)
-
-if [ "${CI_FULL:-}" = "true" ]; then
-    echo "::notice::the full-ci label is set, so the class is full"
-    echo full
-    exit 0
-fi
 
 if [ -z "$paths" ]; then
     echo "::notice::no changed paths were listed, so the class is full"
@@ -38,11 +33,19 @@ if [ -z "$paths" ]; then
     exit 0
 fi
 
+img='(jpg|jpeg|png|svg|gif)'
+
+# Exit 1 is grep matching nothing, which means every path is prose. Anything
+# above it is grep failing, and that must not read as docs.
+set +e
 code=$(printf '%s\n' "$paths" | grep -Ev \
     -e '^[^/]+\.md$' \
     -e '^docs/[^/]+\.md$' \
+    -e '^docs/research/.*\.md$' \
+    -e "^docs/research/.*\\.$img\$" \
     -e '^\.github/PULL_REQUEST_TEMPLATE\.md$' \
     -e '^\.claude/skills/' \
+    -e '^\.claude/take-next/.*\.md$' \
     -e '^\.claude/settings\.json$' \
     -e '^LICENSE$' \
     -e '^\.github/ISSUE_TEMPLATE/' \
@@ -50,8 +53,15 @@ code=$(printf '%s\n' "$paths" | grep -Ev \
     -e '^\.github/release\.yml$' \
     -e '^\.github/FUNDING\.yml$' \
     -e '^\.gitignore$' \
-    -e '^assets/[^/]+\.(jpg|jpeg|png|svg|gif)$' \
-    || true)
+    -e "^assets/[^/]+\\.$img\$" \
+    -e "^assets/proposals/[^/]+\\.$img\$" \
+    -e '^\.techpack/templates/[^/]+\.md$')
+status=$?
+set -e
+if [ "$status" -gt 1 ]; then
+    echo "::error::grep failed with status $status, so the class cannot be decided" >&2
+    exit "$status"
+fi
 
 if [ -n "$code" ]; then
     printf '%s\n' "$code" | sed 's/^/::notice::full, because of: /'

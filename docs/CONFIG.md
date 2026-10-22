@@ -2,13 +2,14 @@
 
 Everything `vigia` reads to decide how the pane is drawn and what it opens as. Nothing here is required: the defaults are what the pane ships with, and the [README](../README.md) covers the two settings most people ever touch.
 
-Three independent settings decide how the pane is **drawn**, and most confusion here comes from reading any two as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three must allow a thing before it appears. A fourth decides what the pane **starts as**, and a fifth is not about drawing at all.
+Three independent settings decide how the pane is **drawn**, and most confusion here comes from reading any two as one. A **palette** is which colours `vigia` means. A **depth** is how many your terminal can show. **Glyphs** is which drawing characters its font carries. All three must allow a thing before it appears. A fourth, **pictures**, is how a changed image is drawn. A fifth decides what the pane **starts as**, and a sixth is not about drawing at all.
 
 | | First answer wins |
 |---|---|
 | 🎨 **Palette** | `VIGIA_THEME` (a name, or a path) → `~/.config/vigia/theme` → **your terminal's own background** → `ansi` |
 | 🔦 **Depth** | `VIGIA_COLOR` → `NO_COLOR` → `TERM=dumb` → `COLORTERM` → `TERM_PROGRAM` → `TERM` → 16 |
 | ✏️ **Glyphs** | `VIGIA_GLYPHS` → `TERM=dumb`/`linux` → **an engine that draws octants and names its version** → `TERM_PROGRAM` → `WT_SESSION` → `TERM` → braille, or blocks on a bare Windows console |
+| 🖼️ **Pictures** | `VIGIA_PICTURES` → **your terminal's answer** (Kitty graphics, then Sixel) → `TERM_PROGRAM`/`TERM`/`WT_SESSION`, when the cell size is known → half-blocks, at 24-bit colour only |
 | 🪟 **View** | `~/.config/vigia/config` → everything off, except `links` and `notes`, and nothing hidden |
 | 🔔 **Updates** | one look at crates.io when the pane opens, and a footer line only if there is a newer release. `VIGIA_UPDATE=off` declines it |
 
@@ -78,6 +79,23 @@ VIGIA_GLYPHS=auto            # decide for me, which is the default
 </details>
 
 <details>
+<summary><b>🖼️ Pictures</b></summary>
+
+<br>
+
+A changed image draws its old and new pictures and where they differ. When the pane opens, it asks your terminal whether it draws Kitty graphics or Sixel, and how big a cell is in pixels. kitty, Ghostty, iTerm2 and Rio answer Kitty; Windows Terminal 1.22 and later, foot, and xterm with its Sixel support on answer Sixel. Inside tmux the question and the image pass through to the terminal outside it, and the pane turns tmux's `allow-passthrough` on to make that work. When the terminal does not answer, WezTerm and iTerm2 draw iTerm2 images, and kitty, Ghostty, foot and Windows Terminal draw as they would have answered. Everything else draws half-blocks, which need 24-bit colour. Warp draws half-blocks too: its iTerm2 images leave old pictures behind while you scroll ([warpdotdev/Warp#16586](https://github.com/warpdotdev/Warp/issues/16586)), and it does not draw Kitty's placeholders ([warpdotdev/Warp#6210](https://github.com/warpdotdev/Warp/issues/6210)), checked on the latest Warp on 2026-10-21. `VIGIA_PICTURES=iterm2` draws sharp pictures there anyway, with those leftovers. In iTerm2, and in any terminal drawing iTerm2 or Sixel images, scrolling over pictures is less smooth than in kitty or Ghostty: those images have no way to be placed again, so each scroll sends the visible part of a picture again. After you reattach tmux from another terminal, press `Ctrl+L`: the terminal you are on now never received the pictures, and `Ctrl+L` sends them again.
+
+```sh
+VIGIA_PICTURES=kitty        # kitty graphics, through Unicode placeholders
+VIGIA_PICTURES=sixel
+VIGIA_PICTURES=iterm2
+VIGIA_PICTURES=halfblocks   # two pixels a cell, in any terminal with 24-bit colour
+VIGIA_PICTURES=auto         # decide for me, which is the default
+```
+
+</details>
+
+<details>
 <summary><b>🔦 Colour depth, and why your rows might be unwashed</b></summary>
 
 <br>
@@ -135,7 +153,11 @@ set -ga terminal-features ",*:clipboard"
 
 ### 🪟 The pane you want, every time
 
-`f`, `r`, `s`, `o`, `a`, `w` and `c` change what the body is made of. Press `m` and flip them there, or say so once by hand:
+`f`, `r`, `s`, `o`, `a`, `w` and `c` change what the body is made of. Press `m` and flip them there:
+
+![The vigia pane with the config menu open over it: every on and off setting with where it stands, a row to save the settings and a row to reset them.](../assets/frame-menu.svg)
+
+Or say so once by hand:
 
 ```sh
 # ~/.config/vigia/config
@@ -158,6 +180,6 @@ Same shape as the theme file: one key per line, `#` for a comment, and a key it 
 
 **`links` and `notes` are the two keys that start on**, so both are written above as the off switches they are. Every listed path is an OSC 8 hyperlink to its file, so a Ctrl+click (or however your terminal opens links) lands in your editor. A terminal that does not speak OSC 8 shows the same text and swallows the link, which is why nothing has to be detected. And a note you left for the agent draws its own rows under the line it is on, which `notes = off` turns down to the mark alone, the way `c` does for a session.
 
-**`follow` is deliberately not a key.** Following the newest change is what makes the pane correct without being touched, so it is not something to turn off in a file. `f` turns it off for a session, which is where that choice belongs.
+**`follow = off` starts the pane without following.** Following the newest change is what makes the pane correct without being touched, so it is on unless the file says otherwise, and `f` turns it on or off for a session.
 
 ---

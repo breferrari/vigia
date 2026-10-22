@@ -2,6 +2,7 @@
 
 mod support;
 
+use std::assert_matches;
 use support::Scratch;
 use vigia_core::{ChangeKind, Frame, Hidden, Standing, Worktree};
 
@@ -1009,8 +1010,9 @@ fn only_at_something_that_is_not_a_commit_cannot_be_stood_at() {
             "{what} was accepted as a commit to stand at, so the pane would draw \
              whatever the peel happened to produce"
         ));
-        assert!(
-            matches!(failed, vigia_core::Error::Standing(_)),
+        assert_matches!(
+            failed,
+            vigia_core::Error::Standing(_),
             "{what} failed as {failed:?} rather than as a position that will not \
              resolve, so the shell would leave the pane parked on it forever"
         );
@@ -1047,8 +1049,9 @@ fn a_commit_whose_parent_is_gone_is_a_failed_walk_rather_than_a_lost_position() 
     let failed = frame
         .advance()
         .expect_err("the walk found a parent tree the object database no longer has");
-    assert!(
-        matches!(failed, vigia_core::Error::Comparison(_)),
+    assert_matches!(
+        failed,
+        vigia_core::Error::Comparison(_),
         "a lost parent reads as {failed:?} rather than as the comparison failing, \
          so the shell takes a reader off a commit that is still there or the \
          footer names something that is at neither end of it"

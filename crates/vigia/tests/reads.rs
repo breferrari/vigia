@@ -827,7 +827,11 @@ fn resolving_the_scroll_position_is_paid_once_and_not_every_frame() {
         .expect("view");
     assert_eq!(
         crossing.top,
-        Position { file: 40, row: 0 },
+        Position {
+            file: 40,
+            row: 0,
+            under: 0
+        },
         "the scroll did not land where the fixture says it should"
     );
     assert!(

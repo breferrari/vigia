@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 843 348" width="843" height="348" role="img"
+     aria-label="The vigia pane listing a renamed and edited file as its new path, an arrow and its old path, above its diff.">
+  <!-- source: crates/vigia/tests/snapshots/render__rename_frame.snap rows=1-14, rendered at 100x14. Drawn by the xtask frames binary; package.rs::frame_svgs_match holds it to the snapshot. -->
+  <defs>
+    <clipPath id="win"><rect x="8" y="8" width="827" height="332" rx="12"/></clipPath>
+    <style>
+      .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", monospace; white-space: pre; }
+      .fg { fill: #e6edf3 } .dim { fill: #7d8590 } .faint { fill: #6e7681 }
+      .grn { fill: #3fb950 } .red { fill: #f85149 } .cyn { fill: #39c5cf }
+      .con { fill: #e3b341 }
+    </style>
+  </defs>
+  <rect x="8" y="8" width="827" height="332" rx="12" fill="#0d1117"/>
+  <g clip-path="url(#win)">
+    <rect x="8" y="8" width="827" height="46" fill="#161b22"/>
+    <circle cx="34" cy="31" r="6" fill="#f85149"/>
+    <circle cx="54" cy="31" r="6" fill="#e3b341"/>
+    <circle cx="74" cy="31" r="6" fill="#3fb950"/>
+    <rect x="8" y="310" width="827" height="30" fill="#161b22"/>
+    <line x1="8" y1="310" x2="835" y2="310" stroke="#21262d" stroke-width="1"/>
+    <text class="m row" y="36" font-size="13.5" xml:space="preserve"><tspan x="102.0" class="fg">vigia · current </tspan><tspan x="231.6" class="cyn">▾</tspan><tspan x="239.7" class="fg"> · 1 changed</tspan> <tspan x="753.2" class="fg">watching</tspan></text>
+    <text class="m row" y="76" font-size="13.5" xml:space="preserve"></text>
+    <text class="m row" y="96" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="cyn">▸</tspan><tspan x="40.4" class="dim">R</tspan><tspan x="48.5" class="fg"> crates/vigia/src/shell.rs </tspan><tspan x="267.2" class="cyn">←</tspan><tspan x="275.3" class="fg"> crates/vigia/src/main.rs                 </tspan><tspan x="623.6" class="faint">____________</tspan><tspan x="753.2" class="grn">+3</tspan><tspan x="801.8" class="red">-1</tspan></text>
+    <line class="rule" x1="24.2" y1="111" x2="818.0" y2="111" stroke="#30363d" stroke-width="1"/>
+    <text class="m row" y="136" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">R</tspan><tspan x="48.5" class="fg"> crates/vigia/src/shell.rs </tspan><tspan x="267.2" class="cyn">←</tspan><tspan x="275.3" class="fg"> crates/vigia/src/main.rs                 </tspan><tspan x="623.6" class="faint">____________</tspan><tspan x="753.2" class="grn">+3</tspan><tspan x="801.8" class="red">-1</tspan></text>
+    <text class="m row" y="156" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="cyn">  @@ -258,7 +258,9 @@</tspan></text>
+    <text class="m row" y="176" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">258</tspan><tspan x="113.3" class="fg"> pub fn advance(&amp;mut self) {</tspan></text>
+    <text class="m row" y="196" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">259</tspan><tspan x="145.7" class="fg"> let mut files = Vec::new();</tspan></text>
+    <text class="m row" y="216" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">260</tspan><tspan x="64.7" class="red"> -        </tspan><tspan x="145.7" class="red"> for change in self.changes() {</tspan></text>
+    <text class="m row" y="236" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">260</tspan><tspan x="64.7" class="grn"> +        </tspan><tspan x="145.7" class="grn"> for change in self.walk() {</tspan></text>
+    <text class="m row" y="256" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">261</tspan><tspan x="64.7" class="grn"> +            </tspan><tspan x="178.1" class="grn"> // one per path</tspan></text>
+    <text class="m row" y="276" font-size="13.5" xml:space="preserve"><tspan x="40.4" class="dim">262</tspan><tspan x="64.7" class="grn"> +            </tspan><tspan x="178.1" class="grn"> files.push(change?);</tspan></text>
+    <line class="rule" x1="24.2" y1="291" x2="818.0" y2="291" stroke="#30363d" stroke-width="1"/>
+    <text class="m row" y="330" font-size="13.5" xml:space="preserve"><tspan x="24.2" class="dim">  q quit · f follow · m config · ? keys                                                       </tspan><tspan x="785.6" class="dim"> 1/1</tspan></text>
+  </g>
+  <rect x="8.5" y="8.5" width="826" height="331" rx="12" fill="none" stroke="#30363d"/>
+</svg>

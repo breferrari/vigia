@@ -15,13 +15,13 @@
 # reading and never counted.
 #
 # Test seams (test-only, never set in a real run): PREFLIGHT_SPEC_FILE,
-# PREFLIGHT_ROADMAP_FILE and PREFLIGHT_ISSUES_FILE substitute local files for
-# the ref's copies and for the tracker fetch, so a mutation ("delete an
-# invariant row", "flip a row's mark", "hand it a board at the cap") can prove
-# each comparison fires. A drift check that cannot report "no drift" has not
-# been tested, and neither has one that cannot report drift. Comparison 8 has
-# two more: PREFLIGHT_REFS_FILE for the worktrees and branches, and
-# PREFLIGHT_COMMENTS_FILE for the issue's comments.
+# PREFLIGHT_ROADMAP_FILE, PREFLIGHT_ISSUES_FILE and PREFLIGHT_MILESTONES_FILE
+# substitute local files for the ref's copies and for the tracker fetch, so a
+# mutation ("delete an invariant row", "flip a row's mark", "hand it a board at
+# the cap") can prove each comparison fires. A drift check that cannot report
+# "no drift" has not been tested, and neither has one that cannot report drift.
+# Comparison 8 has two more: PREFLIGHT_REFS_FILE for the worktrees and
+# branches, and PREFLIGHT_COMMENTS_FILE for the issue's comments.
 #
 # Usage: preflight.sh [issue]. Comparison 8 runs only when given the issue.
 set -u
@@ -91,7 +91,7 @@ fi
 
 # The board every comparison below reads, and whether all of it arrived. A short
 # fetch is invisible from inside a comparison: 1 reports drift that is not there,
-# and 2, 4 and 7 under-report in silence. This is a precondition rather than an
+# and 2, 4, 6 and 7 under-report in silence. This is a precondition rather than an
 # eighth comparison, which is why it carries no number: the seven compare two
 # records against each other, and this one asks whether one of the records is
 # all here. Counted from the JSON rather than from the TSV's line count, because
@@ -148,42 +148,42 @@ awk -F'\t' '
   }' "$tmp/issues.tsv" - > "$tmp/state.out"
 if [ -s "$tmp/state.out" ]; then cat "$tmp/state.out"; findings=$((findings + $(wc -l < "$tmp/state.out"))); else ok "every roadmap mark agrees with its issue"; fi
 
-say "4. unfiled — open issues with no milestone (invisible to step 1 forever):"
+say "4. unfiled — open issues with no milestone:"
 awk -F'\t' '$2 == "OPEN" && $3 == "NONE" { printf "  DRIFT #%s has no milestone: %s\n", $1, $4 }' "$tmp/issues.tsv" > "$tmp/unfiled.out"
 if [ -s "$tmp/unfiled.out" ]; then cat "$tmp/unfiled.out"; findings=$((findings + $(wc -l < "$tmp/unfiled.out"))); else ok "every open issue has a milestone"; fi
 
 say "5. judgment — open SPEC.md §10 bullets (read these; ordering language means a blocker):"
 sed -n '/^## 10\./,/^## 11\./p' "$tmp/spec.md" | grep -E '^- \[ \]' | cut -c1-160 | sed 's/^/  /'
 
-say "6. milestone drift — step 1's answer vs the roadmap's section order:"
-if [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
+say "6. milestone drift — the roadmap's phases vs the tracker's milestones:"
+if [ -n "${PREFLIGHT_MILESTONES_FILE:-}" ]; then cp "$PREFLIGHT_MILESTONES_FILE" "$tmp/ms.json"
+elif [ -z "${PREFLIGHT_SPEC_FILE:-}${PREFLIGHT_ROADMAP_FILE:-}" ]; then
   gh api "repos/{owner}/{repo}/milestones?state=open&per_page=100" > "$tmp/ms.json"
-  step1=$(NEXT_MILESTONES_FILE="$tmp/ms.json" sh "$(dirname "$0")/next.sh" | sed -n 's/^milestone: //p' | tr -d '\r')
-  grep -oE '^## Phase [0-9]+.*' "$tmp/roadmap.md" | sed 's/^## //' | tr -d '\r' > "$tmp/order.txt"
-  jq -r '.[] | select(.open_issues > 0) | .title' "$tmp/ms.json" | tr -d '\r' > "$tmp/withwork.txt"
-  jq -r '.[] | select(.open_issues > 0) | select((.description // "") | startswith("Shelf:")) | .title' "$tmp/ms.json" | tr -d '\r' > "$tmp/shelved.txt"
-  roadmap_says=""
-  while IFS= read -r s; do
-    grep -qxF "$s" "$tmp/withwork.txt" || continue
-    grep -qxF "$s" "$tmp/shelved.txt" && continue
-    roadmap_says="$s"; break
-  done < "$tmp/order.txt"
-  if [ "$step1" = "$roadmap_says" ]; then ok "step 1 and the roadmap agree: ${step1:-<no eligible work>}"
-  else hit "step 1 says '${step1:-<empty>}', roadmap section order says '${roadmap_says:-<empty>}'"; fi
-  # Shelved milestones are exempt from the section check: a shelf holds no
-  # place in the take-order, so it owes the file no `## Phase <n>` section —
-  # the Shelf milestone (titled "Phase 5" until 2026-08-06) is the standing case.
-  LC_ALL=C sort "$tmp/withwork.txt" > "$tmp/ww.all"
-  LC_ALL=C sort "$tmp/shelved.txt" > "$tmp/sh.s"
-  LC_ALL=C comm -23 "$tmp/ww.all" "$tmp/sh.s" > "$tmp/ww.s"
-  LC_ALL=C sort "$tmp/order.txt" > "$tmp/or.s"
-  LC_ALL=C comm -23 "$tmp/ww.s" "$tmp/or.s" > "$tmp/ms-orphans.out"
-  if [ -s "$tmp/ms-orphans.out" ]; then
-    sed 's/^/  DRIFT milestone with work and no roadmap section: /' "$tmp/ms-orphans.out"
-    findings=$((findings + $(wc -l < "$tmp/ms-orphans.out")))
-  else ok "every open milestone with work has a roadmap section"; fi
+fi
+if [ -f "$tmp/ms.json" ]; then
+  jq '[.[] | select(.state == "OPEN") | {number, title}]' "$tmp/issues.json" > "$tmp/open.json"
+  # The phases with open rows, by the rule step 1 itself reads.
+  if ! NEXT_ROADMAP_FILE="$tmp/roadmap.md" NEXT_ISSUES_FILE="$tmp/open.json" sh "$(dirname "$0")/next.sh" --rows > "$tmp/rows.raw"; then
+    hit "next.sh failed, so this comparison read nothing"
+  fi
+  tr -d '\r' < "$tmp/rows.raw" > "$tmp/rows.tsv"
+  say "  step 1: $(NEXT_ROADMAP_FILE="$tmp/roadmap.md" NEXT_ISSUES_FILE="$tmp/open.json" sh "$(dirname "$0")/next.sh" 2>/dev/null | head -n 1)"
+  cut -f1 "$tmp/rows.tsv" | grep '^Phase [0-9]' | LC_ALL=C sort -u > "$tmp/phases-open.s"
+  awk '/^## Shelf/ { exit } /^## Phase [0-9]/ { print substr($0, 4) }' "$tmp/roadmap.md" | tr -d '\r' | LC_ALL=C sort > "$tmp/phases.s"
+  jq -r '.[].title' "$tmp/ms.json" | tr -d '\r' | LC_ALL=C sort > "$tmp/ms-all.s"
+  jq -r '.[] | select(.open_issues > 0) | .title' "$tmp/ms.json" | tr -d '\r' | LC_ALL=C sort > "$tmp/ww.s"
+  LC_ALL=C comm -23 "$tmp/ww.s" "$tmp/phases.s" | sed 's/^/  DRIFT milestone with work and no roadmap section: /' > "$tmp/ms-drift.out"
+  LC_ALL=C comm -23 "$tmp/phases-open.s" "$tmp/ms-all.s" | sed 's/^/  DRIFT roadmap phase with open rows and no open milestone: /' >> "$tmp/ms-drift.out"
+  # An open issue no eligible row names is one step 1 can never offer.
+  cut -f2 "$tmp/rows.tsv" | LC_ALL=C sort -u > "$tmp/offered.s"
+  jq -r '.[].number' "$tmp/open.json" | tr -d '\r' | LC_ALL=C sort -u > "$tmp/open-n.s"
+  LC_ALL=C comm -23 "$tmp/open-n.s" "$tmp/offered.s" | sed 's/^/  DRIFT open issue no section offers: #/' >> "$tmp/ms-drift.out"
+  if [ -s "$tmp/ms-drift.out" ]; then
+    cat "$tmp/ms-drift.out"
+    findings=$((findings + $(wc -l < "$tmp/ms-drift.out")))
+  else ok "milestones and phases agree, and every open issue has a section that offers it"; fi
 else
-  say "  (skipped under test seams — needs the live tracker)"
+  say "  (skipped under test seams without PREFLIGHT_MILESTONES_FILE)"
 fi
 
 say "7. missing row — issues the roadmap never mentions (the direction the 2026-08-03 sweep found four gaps in):"
@@ -219,39 +219,5 @@ if [ -n "$TAKEN" ]; then
   jq -r '.comments[] | select(.body | test("^\\W*(approved )?plan\\b"; "i")) | "  DRIFT a plan comment by \(.author.login), \(.createdAt)"' "$tmp/comments.json" | tr -d '\r' >> "$tmp/flight.out"
   if [ -s "$tmp/flight.out" ]; then cat "$tmp/flight.out"; findings=$((findings + $(wc -l < "$tmp/flight.out"))); else ok "no worktree, branch or plan names #$TAKEN"; fi
 fi
-
-# 9 cannot say a reason is false, only that it names something that changed
-# since: a closed issue, a retired invariant, a phase with no open milestone.
-# Only the Why cell counts. The Surfaced cell names where the row came from,
-# which is closed by the time anyone reads it.
-say "9. stale reasons — open shelf rows whose reason names what has since changed (read these):"
-if [ -s "$tmp/ms.json" ]; then jq -r '.[].title' "$tmp/ms.json" | tr -d '\r' > "$tmp/open-ms.txt"; else : > "$tmp/open-ms.txt"; fi
-awk '/^## Deferral shelf/ { on = 1; next } /^## / { on = 0 } on && /^\| [^-|]/' "$tmp/roadmap.md" |
-awk -F'\t' '
-  FILENAME == ARGV[1] { state[$1] = $2; next }
-  FILENAME == ARGV[2] { declared[$1] = 1; next }
-  FILENAME == ARGV[3] { phases = 1; if (match($0, /^Phase [0-9]+/)) open[substr($0, 1, RLENGTH)] = 1; next }
-  {
-    split($0, cell, "|")
-    if (!match(cell[2], /\[#[0-9]+\]/)) next
-    own = substr(cell[2], RSTART + 2, RLENGTH - 3)
-    if (state[own] != "OPEN") next
-    why = cell[5]; out = ""
-    split(cell[3], surfaced, ",")
-    for (w = why; match(w, /#[0-9]+/); w = substr(w, RSTART + RLENGTH)) {
-      m = substr(w, RSTART + 1, RLENGTH - 1)
-      if (state[m] == "CLOSED" && surfaced[1] !~ ("#" m "$") && index(out, " #" m " ") == 0) out = out " #" m " (closed),"
-    }
-    for (w = why; match(w, /I[0-9]+[a-z]?/); w = substr(w, RSTART + RLENGTH)) {
-      t = substr(w, RSTART, RLENGTH)
-      if (substr(w, RSTART + RLENGTH, 1) !~ /[A-Za-z0-9]/ && substr(w, RSTART - 1, 1) !~ /[A-Za-z0-9]/ && !(t in declared)) out = out " " t " (retired),"
-    }
-    for (w = why; phases && match(w, /Phase [0-9]+/); w = substr(w, RSTART + RLENGTH)) {
-      p = substr(w, RSTART, RLENGTH)
-      if (!(p in open) && index(out, " " p " ") == 0) out = out " " p " (closed),"
-    }
-    if (out != "") { sub(/,$/, "", out); printf "  read  #%s: its reason cites%s\n", own, out }
-  }' "$tmp/issues.tsv" "$tmp/spec-invariants.txt" "$tmp/open-ms.txt" - > "$tmp/stale.out"
-if [ -s "$tmp/stale.out" ]; then cat "$tmp/stale.out"; else ok "no open shelf reason names a closed issue, retired invariant or closed phase"; fi
 
 if [ "$findings" -eq 0 ]; then say "pre-flight clean"; else say "$findings finding(s) — fix in this pass, not a note"; exit 1; fi

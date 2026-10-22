@@ -4,6 +4,7 @@
 mod support;
 
 use ratatui::layout::Rect;
+use std::assert_matches;
 use vigia::{Action, App, Body, Pointing, Position, Row, View, body_layout, diff_height};
 use vigia_core::{Frame, Highlighter, History, Standing};
 
@@ -184,6 +185,7 @@ fn scrolling_off_the_end_of_a_file_continues_into_the_next_one() {
         .map(|n| Position {
             file: n / BLOCK,
             row: n % BLOCK,
+            under: 0,
         })
         .collect();
     assert_eq!(
@@ -215,7 +217,11 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
     );
     assert_eq!(
         landed,
-        Position { file: 3, row: 0 },
+        Position {
+            file: 3,
+            row: 0,
+            under: 0
+        },
         "the walk did not start"
     );
 
@@ -237,6 +243,7 @@ fn scrolling_up_walks_file_boundaries_the_same_way_down_does() {
             Position {
                 file: absolute / BLOCK,
                 row: absolute % BLOCK,
+                under: 0,
             }
         })
         .collect();
@@ -283,11 +290,9 @@ fn the_bottom_of_the_diff_is_content_rather_than_blank() {
         TOTAL,
         "the screen is full but ends somewhere other than the end of the diff: {top:?}"
     );
-    assert!(
-        matches!(
-            view.rows.last().expect("a drawn row"),
-            Row::Line { .. } | Row::Reason { .. }
-        ),
+    assert_matches!(
+        view.rows.last().expect("a drawn row"),
+        Row::Line { .. } | Row::Reason { .. },
         "the bottom row is {:?} rather than content",
         view.rows.last()
     );
@@ -314,7 +319,8 @@ fn home_and_end_go_to_the_first_and_last_file() {
         ),
         Position {
             file: FILES - 1,
-            row: 0
+            row: 0,
+            under: 0,
         }
     );
     assert_eq!(
@@ -325,7 +331,11 @@ fn home_and_end_go_to_the_first_and_last_file() {
             &history,
             Action::Top
         ),
-        Position { file: 0, row: 0 }
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        }
     );
 }
 
@@ -353,7 +363,11 @@ fn n_and_p_step_one_file_and_land_on_its_heading() {
                 &history,
                 Action::File(1)
             ),
-            Position { file, row: 0 },
+            Position {
+                file,
+                row: 0,
+                under: 0
+            },
             "`n` did not land on file {file}'s heading"
         );
     }
@@ -366,7 +380,11 @@ fn n_and_p_step_one_file_and_land_on_its_heading() {
                 &history,
                 Action::File(-1)
             ),
-            Position { file, row: 0 },
+            Position {
+                file,
+                row: 0,
+                under: 0
+            },
             "`p` did not land on file {file}'s heading"
         );
     }
@@ -381,7 +399,11 @@ fn n_and_p_step_one_file_and_land_on_its_heading() {
             &history,
             Action::Scroll(2)
         ),
-        Position { file: 1, row: 2 },
+        Position {
+            file: 1,
+            row: 2,
+            under: 0
+        },
         "the fixture does not put the viewport inside file 1"
     );
     assert_eq!(
@@ -392,7 +414,11 @@ fn n_and_p_step_one_file_and_land_on_its_heading() {
             &history,
             Action::File(-1)
         ),
-        Position { file: 0, row: 0 },
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        },
         "`p` from inside a file stopped at that file's heading, so the key means \
          two things depending on where the reader was"
     );
@@ -417,7 +443,11 @@ fn the_file_step_stops_at_both_ends() {
             &history,
             Action::File(-1)
         ),
-        Position { file: 0, row: 0 },
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        },
         "`p` at the first file moved"
     );
 
@@ -438,7 +468,11 @@ fn the_file_step_stops_at_both_ends() {
             &history,
             Action::File(-1)
         ),
-        Position { file: 0, row: 2 },
+        Position {
+            file: 0,
+            row: 2,
+            under: 0
+        },
         "`p` inside the first file jumped to its heading, which is `g`'s job"
     );
 
@@ -459,7 +493,8 @@ fn the_file_step_stops_at_both_ends() {
         ),
         Position {
             file: FILES - 1,
-            row: 0
+            row: 0,
+            under: 0,
         },
         "`n` at the last file moved"
     );
@@ -501,7 +536,11 @@ fn a_page_keeps_one_row_of_overlap() {
             &history,
             Action::Page(-1)
         ),
-        Position { file: 0, row: 0 },
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        },
         "paging back did not return to the top"
     );
 }
@@ -544,7 +583,11 @@ fn a_half_page_keeps_no_overlap_because_it_already_is_one() {
             &history,
             Action::HalfPage(-1)
         ),
-        Position { file: 0, row: 0 },
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        },
         "half a page back did not return to the top of a {rows} row body"
     );
 
@@ -638,7 +681,11 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
     );
     assert_eq!(
         before,
-        Position { file: 7, row: 2 },
+        Position {
+            file: 7,
+            row: 2,
+            under: 0
+        },
         "the scroll did not land"
     );
 
@@ -674,7 +721,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 }
 
 /// How many variants [`Action`] has.
-const VARIANTS: usize = 28;
+const VARIANTS: usize = 29;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
 fn tag(action: Action) -> usize {
@@ -717,6 +764,7 @@ fn tag(action: Action) -> usize {
         Action::MenuRow(_) => 25,
         Action::TogglePersist => 26,
         Action::MenuReset => 27,
+        Action::Refresh => 28,
     }
 }
 
@@ -776,6 +824,7 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         // Mid-track, because the ends are degenerate.
         Action::DiffTo(vigia::TRACK_SCALE / 2),
         Action::Redraw,
+        Action::Refresh,
     ];
 
     let named: std::collections::BTreeSet<usize> = actions.into_iter().map(tag).collect();
@@ -1113,8 +1162,9 @@ fn every_jump_lands_on_a_heading_and_never_on_a_gap() {
         let view = app
             .view(&mut frame, &mut highlighter, &history, split())
             .expect("view");
-        assert!(
-            matches!(view.rows.first(), Some(Row::File(_))),
+        assert_matches!(
+            view.rows.first(),
+            Some(Row::File(_)),
             "{name} landed on {:?} rather than on a file's heading",
             view.rows.first()
         );
@@ -1220,7 +1270,8 @@ fn end_scroll_holds() {
         end,
         Position {
             file: FILES - 1,
-            row: 0
+            row: 0,
+            under: 0,
         },
         "`G` moved"
     );
@@ -1266,7 +1317,8 @@ fn follow_end_holds() {
         end,
         Position {
             file: FILES - 1,
-            row: 0
+            row: 0,
+            under: 0,
         }
     );
     let now = after(
@@ -1300,7 +1352,14 @@ fn tall_end_scrolls() {
         &history,
         Action::Bottom,
     );
-    assert_eq!(end, Position { file: 1, row: 0 });
+    assert_eq!(
+        end,
+        Position {
+            file: 1,
+            row: 0,
+            under: 0
+        }
+    );
     let now = after(
         &mut app,
         &mut frame,
@@ -1310,7 +1369,11 @@ fn tall_end_scrolls() {
     );
     assert_eq!(
         now,
-        Position { file: 1, row: 1 },
+        Position {
+            file: 1,
+            row: 1,
+            under: 0
+        },
         "a step down inside a last file taller than the pane held"
     );
 }
@@ -1343,10 +1406,686 @@ fn wrapped_end_scrolls() {
             .expect("view")
             .top
     };
-    assert_eq!(step(Action::Bottom), Position { file: 0, row: 0 });
+    assert_eq!(
+        step(Action::Bottom),
+        Position {
+            file: 0,
+            row: 0,
+            under: 0
+        }
+    );
     assert_eq!(
         step(Action::Scroll(1)),
-        Position { file: 0, row: 1 },
+        Position {
+            file: 0,
+            row: 1,
+            under: 0
+        },
         "a step down held while wrapped rows were still below the pane"
+    );
+}
+
+/// The fixture's last file in status order, which sorts its names as text.
+const LAST: usize = 9;
+
+/// A note under the added line of the fixture's file `at`, with one body row per
+/// entry of `rows`.
+fn note_on(scratch: &Scratch, at: usize, rows: usize) -> vigia_core::Note {
+    let path = format!("src/mod_{at}.rs");
+    let text = std::fs::read_to_string(scratch.root().join(&path)).expect("the file");
+    vigia_core::Note {
+        id: format!("note-{at}"),
+        path,
+        side: vigia_core::Side::New,
+        line: 1,
+        text: text.lines().next().expect("a line").to_owned(),
+        first: None,
+        body: (0..rows)
+            .map(|row| format!("row {row}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        status: vigia_core::Status::Open,
+        reply: None,
+        written: std::time::SystemTime::now(),
+    }
+}
+
+/// The view after `action`, with its notes drawn.
+fn stepped(
+    app: &mut App,
+    frame: &mut Frame,
+    highlighter: &mut Highlighter,
+    action: Action,
+) -> View {
+    stepped_in(app, frame, highlighter, action, split())
+}
+
+/// [`stepped`] in the layout `body`.
+fn stepped_in(
+    app: &mut App,
+    frame: &mut Frame,
+    highlighter: &mut Highlighter,
+    action: Action,
+    body: Body,
+) -> View {
+    app.apply(action, frame, body.diff).expect("apply");
+    app.view(frame, highlighter, &History::new(), body)
+        .expect("view")
+}
+
+/// The note rows a screen draws, in order.
+fn note_rows(view: &View) -> Vec<Row> {
+    view.rows
+        .iter()
+        .filter(|row| matches!(row, Row::Note { .. }))
+        .cloned()
+        .collect()
+}
+
+/// The fixture's file `at` with a note under its added line, the pane at the top.
+fn noted(name: &str, at: usize, rows: usize) -> (Scratch, App) {
+    let scratch = fixture(name);
+    let mut app = App::new();
+    app.set_notes(vec![note_on(&scratch, at, rows)]);
+    (scratch, app)
+}
+
+#[test]
+fn note_rows_step() {
+    let (scratch, mut app) = noted("scroll-note-step", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let whole = note_rows(&stepped(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Top,
+    ));
+    assert!(whole.len() > 2, "the note drew {} rows", whole.len());
+    // The heading, the hunk header and the removed line, onto the added line.
+    let line = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(3));
+    assert_eq!(
+        line.top,
+        Position {
+            file: 0,
+            row: 3,
+            under: 0
+        },
+        "three steps did not reach the noted line"
+    );
+    for (k, row) in whole.iter().enumerate() {
+        let view = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(1));
+        assert_eq!(
+            view.top,
+            Position {
+                file: 0,
+                row: 3,
+                under: k + 1
+            },
+            "step {} did not move one row into the note",
+            k + 1
+        );
+        assert_eq!(
+            &view.rows[0],
+            row,
+            "step {} did not put note row {k} at the top",
+            k + 1
+        );
+        assert_eq!(
+            view.rows_above, 3,
+            "inside the note the bar does not count the three rows above its line"
+        );
+    }
+    let past = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(1));
+    assert_eq!(
+        past.top,
+        Position {
+            file: 0,
+            row: 4,
+            under: 0
+        },
+        "the step after the note's last row did not reach the row after it"
+    );
+}
+
+#[test]
+fn note_rows_step_back() {
+    let (scratch, mut app) = noted("scroll-note-back", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let whole = note_rows(&stepped(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Top,
+    ));
+    stepped(&mut app, &mut frame, &mut highlighter, Action::File(1));
+    let gap = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(-1));
+    assert_eq!(
+        gap.top,
+        Position {
+            file: 0,
+            row: 4,
+            under: 0
+        },
+        "one step up from the second file did not reach the first file's gap"
+    );
+    let back = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(-1));
+    assert_eq!(
+        back.top,
+        Position {
+            file: 0,
+            row: 3,
+            under: whole.len()
+        },
+        "one step up from below the note passed over it"
+    );
+    assert_eq!(
+        Some(&back.rows[0]),
+        whole.last(),
+        "the step up did not land on the note's last row"
+    );
+}
+
+#[test]
+fn wheel_steps_rows() {
+    let (scratch, mut app) = noted("scroll-note-wheel", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(3));
+    let view = stepped(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Scroll(vigia::WHEEL_ROWS),
+    );
+    assert_eq!(
+        view.top,
+        Position {
+            file: 0,
+            row: 3,
+            under: vigia::WHEEL_ROWS.unsigned_abs()
+        },
+        "a notch over the note moved logical rows rather than display rows"
+    );
+}
+
+#[test]
+fn page_down_overlap() {
+    let height = body();
+    let (scratch, mut app) = noted("scroll-note-page", 0, height * 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    let before = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(4));
+    assert_eq!(before.rows.len(), height, "the screen was not full");
+    let after = stepped(&mut app, &mut frame, &mut highlighter, Action::Page(1));
+    assert_eq!(
+        after.rows[0],
+        before.rows[height - 1],
+        "a page over a long note did not keep exactly one display row of overlap"
+    );
+    assert_eq!(
+        (after.top.row, after.top.under),
+        (3, height - 1 + 1),
+        "the page did not land inside the note"
+    );
+}
+
+#[test]
+fn jump_clears_under() {
+    let (scratch, mut app) = noted("scroll-note-jumps", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    for jump in [
+        Action::Top,
+        Action::File(1),
+        Action::ListRow(0),
+        Action::Bottom,
+        Action::DiffTo(0),
+    ] {
+        stepped_in(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            Action::Top,
+            listed(),
+        );
+        let inside = stepped_in(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            Action::Scroll(5),
+            listed(),
+        );
+        assert_eq!(inside.top.under, 2, "the setup did not reach the note");
+        let view = stepped_in(&mut app, &mut frame, &mut highlighter, jump, listed());
+        assert_eq!(view.top.under, 0, "{jump:?} kept a hung-row offset");
+    }
+}
+
+#[test]
+fn edit_above_keeps_under() {
+    let (scratch, mut app) = noted("scroll-note-edit", 1, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::File(1));
+    let before = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(5));
+    assert_eq!(before.top.under, 2, "the setup did not reach the note");
+    scratch.edit_line("src/mod_0.rs", 0, "fn moved() {}\nfn more() {}");
+    support::settle(&mut frame);
+    let after = app
+        .view(&mut frame, &mut highlighter, &History::new(), split())
+        .expect("view");
+    assert_eq!(after.top, before.top, "an edit above moved the position");
+    assert_eq!(
+        after.rows[0], before.rows[0],
+        "an edit above moved the screen"
+    );
+}
+
+#[test]
+fn note_shrinks_under() {
+    let (scratch, mut app) = noted("scroll-note-shrinks", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    let inside = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(9));
+    assert_eq!(
+        inside.top.under, 6,
+        "the setup did not reach the note's sixth row"
+    );
+    app.set_notes(vec![note_on(&scratch, 0, 1)]);
+    let after = app
+        .view(&mut frame, &mut highlighter, &History::new(), split())
+        .expect("view");
+    let left = note_rows(&after).len();
+    assert_eq!(
+        after.top,
+        Position {
+            file: 0,
+            row: 3,
+            under: left
+        },
+        "a note that shrank under the offset did not clamp it to its last row"
+    );
+    assert_matches!(
+        after.rows[0],
+        Row::Note { last: true, .. },
+        "the top after the clamp is not the note's last row: {:?}",
+        after.rows[0]
+    );
+}
+
+#[test]
+fn page_up_overlap() {
+    let height = body();
+    let (scratch, mut app) = noted("scroll-note-page-up", 0, height * 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    let below = stepped(&mut app, &mut frame, &mut highlighter, Action::File(1));
+    let after = stepped(&mut app, &mut frame, &mut highlighter, Action::Page(-1));
+    assert_eq!(after.rows.len(), height, "the screen was not full");
+    assert_eq!(
+        after.rows[height - 1],
+        below.rows[0],
+        "a page up over a long note did not keep exactly one display row of overlap"
+    );
+    assert_eq!(
+        after.steps().len(),
+        height,
+        "the page up did not open the screen inside the note"
+    );
+    assert!(
+        after.top.row == 3 && after.top.under > 0,
+        "the page up opened on {:?}, not inside the note",
+        after.top
+    );
+}
+
+#[test]
+fn keys_between_frames() {
+    let (scratch, mut app) = noted("scroll-note-keys", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let whole = note_rows(&stepped(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Top,
+    ));
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(3));
+    app.apply(Action::Scroll(1), &mut frame, body())
+        .expect("apply");
+    let down = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(1));
+    assert_eq!(
+        down.top.under, 2,
+        "two steps down before a frame did not move two rows into the note"
+    );
+    stepped(&mut app, &mut frame, &mut highlighter, Action::File(1));
+    app.apply(Action::Scroll(-1), &mut frame, body())
+        .expect("apply");
+    let up = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(-1));
+    assert_eq!(
+        up.top,
+        Position {
+            file: 0,
+            row: 3,
+            under: whole.len()
+        },
+        "two steps up before a frame passed over the note"
+    );
+    stepped(&mut app, &mut frame, &mut highlighter, Action::File(1));
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(-1));
+    app.apply(Action::Scroll(-1), &mut frame, body())
+        .expect("apply");
+    let from_gap = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(-1));
+    assert_eq!(
+        from_gap.top,
+        Position {
+            file: 0,
+            row: 3,
+            under: whole.len() - 1
+        },
+        "two steps up from the gap before a frame passed over the note"
+    );
+}
+
+#[test]
+fn note_steps_up_inside() {
+    let (scratch, mut app) = noted("scroll-note-up-inside", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(7));
+    let one = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(-1));
+    assert_eq!(
+        one.top.under, 3,
+        "a step up inside the note did not move one row"
+    );
+    let two = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(-2));
+    assert_eq!(
+        two.top.under, 1,
+        "two steps up inside the note did not move two rows"
+    );
+}
+
+#[test]
+fn jump_drops_step() {
+    let (scratch, mut app) = noted("scroll-note-jump-step", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    stepped(&mut app, &mut frame, &mut highlighter, Action::File(1));
+    app.apply(Action::Scroll(-1), &mut frame, body())
+        .expect("apply");
+    let top = stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    assert_eq!(
+        top.top,
+        Position::default(),
+        "a step up owed before `g` moved the screen after it"
+    );
+}
+
+#[test]
+fn page_up_bar() {
+    let height = body();
+    let (scratch, mut app) = noted("scroll-note-page-bar", 1, height * 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    stepped(&mut app, &mut frame, &mut highlighter, Action::File(2));
+    let up = stepped(&mut app, &mut frame, &mut highlighter, Action::Page(-1));
+    assert_eq!(
+        (up.top.file, up.top.row),
+        (1, 3),
+        "the page up did not open inside the second file's note"
+    );
+    assert_eq!(
+        up.rows_above,
+        BLOCK + 3,
+        "the bar does not count the first file's block and the three rows above the line"
+    );
+}
+
+#[test]
+fn drag_travel_logical() {
+    let (scratch, mut app) = noted("scroll-note-drag", 0, 6);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    let top = stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    let half = vigia::TRACK_SCALE / 2;
+    let travel = TOTAL - top.shown();
+    let target = usize::try_from(u64::from(half) * travel as u64 / u64::from(vigia::TRACK_SCALE))
+        .expect("row");
+    let dragged = stepped(&mut app, &mut frame, &mut highlighter, Action::DiffTo(half));
+    assert_eq!(
+        dragged.top,
+        Position {
+            file: target / BLOCK,
+            row: target % BLOCK,
+            under: 0
+        },
+        "a drag's travel counted the note's rows, which the bar does not"
+    );
+}
+
+#[test]
+fn end_note_steps_up() {
+    let height = body();
+    let (scratch, mut app) = noted("scroll-note-end-up", LAST, height * 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    let end = stepped(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Scroll(10_000),
+    );
+    assert!(end.ended, "the setup did not reach the end of the diff");
+    assert!(
+        end.top.under > 0,
+        "the end of the diff does not open inside the note: {:?}",
+        end.top
+    );
+    let mut last = end.rows[0].clone();
+    for step in 0..height * 2 + 4 {
+        let up = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(-1));
+        assert_eq!(
+            up.rows[1], last,
+            "step {step} up from the end of the diff did not move the screen one row"
+        );
+        last = up.rows[0].clone();
+    }
+}
+
+#[test]
+fn end_note_shrinks() {
+    let height = body();
+    let (scratch, mut app) = noted("scroll-note-end-shrinks", LAST, height * 2);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    let end = stepped(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Scroll(10_000),
+    );
+    assert!(
+        end.ended && end.top.under > 2,
+        "the setup did not end inside the note"
+    );
+    app.set_notes(vec![note_on(&scratch, LAST, 1)]);
+    let after = app
+        .view(&mut frame, &mut highlighter, &History::new(), split())
+        .expect("view");
+    assert_eq!(
+        after.rows.len(),
+        height,
+        "a note that shrank under the end of the diff left the screen short"
+    );
+    assert!(
+        after.top.under <= note_rows(&after).len(),
+        "the offset {} outlived the note's {} rows",
+        after.top.under,
+        note_rows(&after).len()
+    );
+}
+
+#[test]
+fn shrink_under_step() {
+    let height = body();
+    let (scratch, mut app) = noted("scroll-note-shrink-step", 0, height + 5);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    let mut inside = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(3));
+    for _ in 0..height {
+        inside = stepped(&mut app, &mut frame, &mut highlighter, Action::Scroll(1));
+    }
+    assert_eq!(
+        inside.top.under, height,
+        "the setup did not step deep into the note"
+    );
+    for file in 1..FILES {
+        scratch.checkout(&format!("src/mod_{file}.rs"));
+    }
+    support::settle(&mut frame);
+    let after = app
+        .view(&mut frame, &mut highlighter, &History::new(), split())
+        .expect("view");
+    assert_eq!(
+        after.rows.len(),
+        height,
+        "the diff shrank under a stepped top and the screen was left short"
+    );
+}
+
+#[test]
+fn step_up_span() {
+    // Three files of different spans, so a top the step up moves out of the first
+    // file is clamped against the wrong one if the bar keeps the first one's span.
+    let height = body();
+    let scratch = Scratch::new("scroll-note-span");
+    scratch.write("a.rs", "a0\n");
+    scratch.write("b.rs", "b0\nb1\nb2\n");
+    scratch.write("c.rs", "c0\n");
+    scratch.commit_all("base");
+    scratch.write("a.rs", "A0\n");
+    scratch.write("b.rs", "B0\nB1\nB2\n");
+    scratch.write("c.rs", "C0\n");
+    let mut app = App::new();
+    app.set_notes(vec![vigia_core::Note {
+        id: "span".to_owned(),
+        path: "b.rs".to_owned(),
+        side: vigia_core::Side::New,
+        line: 3,
+        text: "B2".to_owned(),
+        first: None,
+        body: (0..height * 2)
+            .map(|row| format!("row {row}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        status: vigia_core::Status::Open,
+        reply: None,
+        written: std::time::SystemTime::now(),
+    }]);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut highlighter = Highlighter::eager();
+    stepped(&mut app, &mut frame, &mut highlighter, Action::Top);
+    stepped(&mut app, &mut frame, &mut highlighter, Action::File(2));
+    // A screenful less one, as steps: a page from this short screen would be three.
+    let up = stepped(
+        &mut app,
+        &mut frame,
+        &mut highlighter,
+        Action::Scroll(-isize::try_from(height - 1).expect("rows")),
+    );
+    assert_eq!(
+        (up.top.file, up.top.row),
+        (1, 7),
+        "the step up did not open inside the second file's note: {:?}",
+        up.top
+    );
+    assert!(
+        up.top.under > 0,
+        "the page up opened on the noted line itself"
+    );
+    // The first file's block is its heading, hunk header, two lines and the gap.
+    assert_eq!(
+        up.rows_above,
+        5 + 7,
+        "the bar clamped the second file's row against the first file's span"
+    );
+}
+
+#[test]
+fn box_keeps_end() {
+    let height = body();
+    let end_of = |boxed: bool| {
+        let (scratch, mut app) = noted("scroll-note-box-end", LAST, height * 2);
+        let worktree = scratch.worktree();
+        let mut frame = worktree.frame();
+        frame.advance().expect("advance");
+        let mut highlighter = Highlighter::eager();
+        let last = stepped(&mut app, &mut frame, &mut highlighter, Action::Bottom);
+        if boxed {
+            // The removed line, above the line the note hangs under.
+            let anchor = last.anchor_at(2).expect("the removed line takes a note");
+            app.open_box(anchor, None);
+        }
+        stepped(
+            &mut app,
+            &mut frame,
+            &mut highlighter,
+            Action::DiffTo(vigia::TRACK_SCALE),
+        );
+        app.take_box();
+        let view = app
+            .view(&mut frame, &mut highlighter, &History::new(), split())
+            .expect("view");
+        (view.top, view.rows)
+    };
+    assert_eq!(
+        end_of(true),
+        end_of(false),
+        "a box open at the end of the diff moved where the reader stands once it closed"
     );
 }

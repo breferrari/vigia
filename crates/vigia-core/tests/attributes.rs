@@ -198,3 +198,404 @@ fn lfs_keeps_links() {
     );
     assert_eq!((diff.added, diff.removed), (1, 1));
 }
+
+/// A pointer under `filter=lfs` that status must read again, because its
+/// timestamp moved after the index was written, with a driver that cannot be
+/// spawned.
+fn racy_pointer(name: &str) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(
+        ".gitattributes",
+        "lfs/*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let pointer = "version https://git-lfs.github.com/spec/v1\noid sha256:\
+        4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 12345\n";
+    scratch.write("lfs/pointer.png", pointer);
+    scratch.write("notes.txt", numbered_lines(3));
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    // The same bytes again, so only the timestamp says it may have changed.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    scratch.write("lfs/pointer.png", pointer);
+    scratch.write("notes.txt", numbered_lines(4));
+    scratch
+}
+
+#[test]
+fn racy_lfs_lists() {
+    let scratch = racy_pointer("attr-racy-lfs");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame
+        .advance()
+        .expect("a racily clean LFS pointer with no driver to run stopped the walk");
+    let paths: Vec<&str> = frame.files().iter().map(|c| c.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["notes.txt"],
+        "the walk did not list exactly the changed file"
+    );
+}
+
+/// An LFS pointer to `object` committed as `a.png`, with `worktree` written
+/// where it was after the index, and `object` in the local store when `stored`.
+/// `notes.txt` changes beside it, so a walk always has one change to list.
+fn lfs_content(name: &str, object: &[u8], worktree: &[u8], stored: bool) -> Scratch {
+    let scratch = Scratch::new(name);
+    scratch.write(
+        ".gitattributes",
+        "*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let (oid, pointer) = support::lfs_pointer(object, 0xab);
+    scratch.write("a.png", pointer);
+    scratch.write("notes.txt", numbered_lines(3));
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    if stored {
+        scratch.write(
+            &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
+            object,
+        );
+    }
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    scratch.write("a.png", worktree);
+    scratch.write("notes.txt", numbered_lines(4));
+    scratch
+}
+
+/// The paths one walk of `scratch` lists.
+fn listed(scratch: &Scratch) -> Vec<String> {
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    frame.files().iter().map(|c| c.path.clone()).collect()
+}
+
+#[test]
+fn racy_driver_not_run() {
+    let scratch = Scratch::new("attr-racy-driver");
+    let marker = scratch.root().join("ran");
+    scratch.write(".gitattributes", "*.csv filter=marker\n");
+    scratch.write("a.csv", numbered_lines(3));
+    scratch.write("notes.txt", numbered_lines(3));
+    scratch.commit_all("initial");
+    // After the commit, so only a status read could start it.
+    scratch.git(&[
+        "config",
+        "filter.marker.clean",
+        &format!("touch '{}'; cat", marker.display()),
+    ]);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    scratch.write("a.csv", numbered_lines(3));
+    scratch.write("notes.txt", numbered_lines(4));
+    assert_eq!(
+        listed(&scratch),
+        ["notes.txt"],
+        "the walk listed the wrong files"
+    );
+    assert!(!marker.exists(), "the status walk ran the clean driver");
+}
+
+#[test]
+fn racy_lfs_content_unchanged() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-same", &object, &object, true);
+    assert_eq!(
+        listed(&scratch),
+        ["notes.txt"],
+        "content equal to its LFS object listed as changed"
+    );
+}
+
+#[test]
+fn racy_lfs_content_changed() {
+    let object = b"real image bytes\n".repeat(10);
+    let mut edited = object.clone();
+    edited[5] = b'X';
+    let scratch = lfs_content("attr-lfs-edited", &object, &edited, true);
+    assert_eq!(
+        listed(&scratch),
+        ["a.png", "notes.txt"],
+        "content that differs from its LFS object did not list"
+    );
+}
+
+#[test]
+fn racy_lfs_no_object() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-unfetched", &object, &object, false);
+    assert_eq!(
+        listed(&scratch),
+        ["a.png", "notes.txt"],
+        "content whose object is not fetched did not list"
+    );
+}
+
+#[test]
+fn racy_lfs_large_listed() {
+    let object = vec![7u8; 16 * 1024 * 1024 + 1];
+    let scratch = lfs_content("attr-lfs-large", &object, &object, true);
+    assert_eq!(
+        listed(&scratch),
+        ["a.png", "notes.txt"],
+        "a file over the compare bound did not list"
+    );
+}
+
+#[test]
+fn racy_lfs_size_first() {
+    let object = b"real image bytes\n".repeat(10);
+    let longer = b"real image bytes\n".repeat(11);
+    let scratch = lfs_content("attr-lfs-longer", &object, &longer, true);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(
+        frame.files().iter().any(|c| c.path == "a.png"),
+        "a length other than the pointer's did not list"
+    );
+    assert_eq!(
+        worktree.lfs_compares(),
+        0,
+        "a length mismatch still read the object"
+    );
+}
+
+#[test]
+fn racy_lfs_compare_cached() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-cached", &object, &object, true);
+    scratch.backdate("a.png");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    frame.advance().expect("advance again");
+    assert_eq!(
+        worktree.lfs_compares(),
+        1,
+        "an unchanged fingerprint compared the file again"
+    );
+}
+
+#[test]
+fn driver_after_reload() {
+    let scratch = Scratch::new("attr-driver-reload");
+    let marker = scratch.root().join("ran");
+    scratch.write(".gitattributes", "*.csv filter=marker\n");
+    scratch.write("a.csv", numbered_lines(3));
+    scratch.write("notes.txt", numbered_lines(3));
+    scratch.commit_all("initial");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    // Named after the walk opened, so only a reloaded walk could start it.
+    scratch.git(&[
+        "config",
+        "filter.marker.clean",
+        &format!("touch '{}'; cat", marker.display()),
+    ]);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    scratch.write("a.csv", numbered_lines(3));
+    scratch.write("notes.txt", numbered_lines(4));
+    frame.advance().expect("advance after the config changed");
+    let paths: Vec<&str> = frame.files().iter().map(|c| c.path.as_str()).collect();
+    assert_eq!(paths, ["notes.txt"], "the walk listed the wrong files");
+    assert!(
+        !marker.exists(),
+        "a driver named after the walk opened ran on the reloaded walk"
+    );
+}
+
+#[test]
+fn racy_lfs_unsettled() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-unsettled", &object, &object, true);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(
+        frame.settles_in(std::time::SystemTime::now()).is_some(),
+        "a verdict on an unsettled fingerprint armed no wake for when it settles"
+    );
+    frame.advance().expect("advance again");
+    assert_eq!(
+        worktree.lfs_compares(),
+        2,
+        "a verdict taken on a fingerprint inside the settle margin was kept"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn lfs_mode_change() {
+    use std::os::unix::fs::PermissionsExt;
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-mode", &object, &object, true);
+    std::fs::set_permissions(
+        scratch.path_of("a.png"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .expect("make it executable");
+    assert_eq!(
+        listed(&scratch),
+        ["a.png", "notes.txt"],
+        "a mode change on an LFS file equal to its object was dropped"
+    );
+}
+
+#[test]
+fn lfs_attribute_removed() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-unfiltered", &object, &object, true);
+    scratch.backdate("a.png");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert!(
+        frame.files().iter().all(|c| c.path != "a.png"),
+        "the setup listed the LFS file"
+    );
+    scratch.write(".gitattributes", "*.txt text\n");
+    frame.advance().expect("advance after the attribute went");
+    assert!(
+        frame.files().iter().any(|c| c.path == "a.png"),
+        "a file no longer under filter=lfs stayed hidden by its cached verdict"
+    );
+}
+
+#[test]
+fn lfs_walk_budget() {
+    let first = vec![1u8; 10 * 1024 * 1024];
+    let second = vec![2u8; 10 * 1024 * 1024];
+    let scratch = Scratch::new("attr-lfs-budget");
+    scratch.write(
+        ".gitattributes",
+        "*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let objects = [("a.png", &first, 0xa1), ("b.png", &second, 0xb2)];
+    for (rela, object, seed) in objects {
+        let (_, pointer) = support::lfs_pointer(object, seed);
+        scratch.write(rela, pointer);
+    }
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    for (rela, object, seed) in objects {
+        let (oid, _) = support::lfs_pointer(object, seed);
+        scratch.write(
+            &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
+            object,
+        );
+        scratch.write(rela, object);
+        scratch.backdate(rela);
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(
+        frame.files().len(),
+        1,
+        "one walk compared more than its 16 MiB budget"
+    );
+    let now = std::time::SystemTime::now();
+    assert_eq!(
+        frame.settles_in(now),
+        Some(std::time::Duration::ZERO),
+        "a file the walk could not afford armed no wake to compare it"
+    );
+    frame.advance_if_settled(now).expect("the wake's walk");
+    assert!(
+        frame.files().is_empty(),
+        "the wake did not compare the file the first walk could not afford"
+    );
+}
+
+#[test]
+fn lfs_verdicts_pruned() {
+    let object = b"real image bytes\n".repeat(10);
+    let scratch = lfs_content("attr-lfs-pruned", &object, &object, true);
+    scratch.backdate("a.png");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(worktree.lfs_cached(), 1, "the setup kept no verdict");
+    // Back to the stored pointer, which the walk no longer flags. Written
+    // rather than checked out, since checkout would run the broken driver.
+    scratch.write("a.png", support::lfs_pointer(&object, 0xab).1);
+    frame.advance().expect("advance after the restore");
+    assert_eq!(
+        worktree.lfs_cached(),
+        0,
+        "a verdict outlived the file the walk stopped flagging"
+    );
+}
+
+#[test]
+fn lfs_large_blob_unread() {
+    let scratch = Scratch::new("attr-lfs-large-blob");
+    scratch.write(
+        ".gitattributes",
+        "*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    scratch.write("big.txt", numbered_lines(400));
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    scratch.write("big.txt", numbered_lines(401));
+    assert_eq!(
+        listed(&scratch),
+        ["big.txt"],
+        "the edited file did not list"
+    );
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    assert_eq!(
+        worktree.lfs_blob_reads(),
+        0,
+        "a stored blob too large to be an LFS pointer was read to find out"
+    );
+}
+
+#[test]
+fn lfs_wakes_stop_when_decided() {
+    let scratch = Scratch::new("attr-lfs-wakes");
+    scratch.write(
+        ".gitattributes",
+        "*.png filter=lfs diff=lfs merge=lfs -text\n",
+    );
+    let objects: Vec<(String, Vec<u8>, u8)> = (0..3u8)
+        .map(|n| (format!("{n}.png"), vec![n; 10 * 1024 * 1024], 0xc0 + n))
+        .collect();
+    for (rela, object, seed) in &objects {
+        let (_, pointer) = support::lfs_pointer(object, *seed);
+        scratch.write(rela, pointer);
+    }
+    scratch.commit_all("initial");
+    scratch.git(&["config", "filter.lfs.process", "no-such-filter-process"]);
+    for (rela, object, seed) in &objects {
+        let (oid, _) = support::lfs_pointer(object, *seed);
+        scratch.write(
+            &format!(".git/lfs/objects/{}/{}/{oid}", &oid[0..2], &oid[2..4]),
+            object,
+        );
+        scratch.write(rela, object);
+        scratch.backdate(rela);
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    // One file a walk, each walk armed by the one before it.
+    for walk in 1..objects.len() {
+        let now = std::time::SystemTime::now();
+        assert!(
+            frame.settles_in(now).is_some(),
+            "walk {walk} left files undecided and armed no wake"
+        );
+        frame.advance_if_settled(now).expect("the wake's walk");
+    }
+    assert!(frame.files().is_empty(), "a file was left undecided");
+    assert_eq!(
+        frame.settles_in(std::time::SystemTime::now()),
+        None,
+        "a wake stayed armed once every LFS file was decided"
+    );
+}

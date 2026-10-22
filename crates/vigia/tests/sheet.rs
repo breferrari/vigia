@@ -12,6 +12,7 @@ use ratatui::crossterm::event::{
 };
 use ratatui::layout::Rect;
 use ratatui::style::Color;
+use std::assert_matches;
 use vigia::{
     Action, App, Chrome, Glyphs, Grabbed, Hovered, Pointing, Regions, Sheet, Theme, action_for,
     body_layout, regions, render,
@@ -350,8 +351,9 @@ fn the_sheet_is_opaque() {
 
         for y in sheet.top..sheet.top + sheet.height {
             for x in sheet.left..sheet.left + sheet.width {
-                assert!(
-                    matches!(open[(x, y)].style().bg, None | Some(Color::Reset)),
+                assert_matches!(
+                    open[(x, y)].style().bg,
+                    None | Some(Color::Reset),
                     "cell {x},{y} inside the {}x{} pane's sheet kept the \
                      background {:?} from what it covers, so the sheet is a tint \
                      rather than a window",
@@ -888,12 +890,15 @@ fn names(keys: &str, token: &str) -> bool {
     })
 }
 
-/// The gestures `README.md`'s two tables teach, as the cells a reader meets there.
-fn readme_gestures() -> Vec<String> {
-    let readme = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md"),
-    )
-    .expect("README.md is where the crate says it is");
+/// The gestures the key and mouse tables of `README.md` and `docs/KEYS.md`
+/// teach, as the cells a reader meets there.
+fn documented_gestures() -> Vec<String> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let readme = ["README.md", "docs/KEYS.md"]
+        .map(|name| {
+            std::fs::read_to_string(root.join(name)).unwrap_or_else(|e| panic!("read {name}: {e}"))
+        })
+        .join("\n");
 
     // Each table follows a bold caption. A row is `| cell | cell |`, and the left
     // cell is what a reader looks for.
@@ -931,7 +936,7 @@ fn readme_gestures() -> Vec<String> {
     }
     assert!(
         out.len() > 10,
-        "README.md's key and mouse tables parsed to {} rows, so this gate is \
+        "the key and mouse tables of README.md and docs/KEYS.md parsed to {} rows, so this gate is \
          reading the wrong thing and would pass over anything",
         out.len()
     );
@@ -959,7 +964,7 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
     }
     let drawn = rows.join("\n");
 
-    for cell in readme_gestures() {
+    for cell in documented_gestures() {
         // Every token of a cell on ONE drawn row, not each token anywhere on the sheet.
         let wanted: Vec<&str> = cell
             .split_whitespace()
@@ -981,7 +986,7 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
 }
 
 /// One value of every [`Action`] variant, for the two gates that walk them.
-const ALL_ACTIONS: [Action; 38] = [
+const ALL_ACTIONS: [Action; 39] = [
     Action::Quit,
     Action::Escape,
     Action::Scroll(1),
@@ -1020,6 +1025,7 @@ const ALL_ACTIONS: [Action; 38] = [
     Action::ListRow(0),
     Action::DiffTo(0),
     Action::Redraw,
+    Action::Refresh,
 ];
 
 /// Where a gesture can be asked for, as the reason a variant is or is not on the
@@ -1104,6 +1110,8 @@ fn reach_of(action: &Action) -> Reach {
         Action::DiffTo(_) => Reach::Mouse,
         // The digits, and a click on a listed file.
         Action::ListRow(_) => Reach::Both,
+        // `Ctrl+L`, and the sheet's `leaving` group names it.
+        Action::Refresh => Reach::Keyboard,
         Action::Redraw => Reach::Shell(
             "a resize, which the terminal reports and no reader asks for, so there \
              is nothing to teach",
@@ -1174,7 +1182,7 @@ fn bound_keys() -> Vec<(KeyEvent, String)> {
 /// `SPEC.md` while absent from the document a reader meets first.
 #[test]
 fn every_letter_the_map_binds_is_taught_by_the_readme() {
-    let taught: Vec<String> = readme_gestures()
+    let taught: Vec<String> = documented_gestures()
         .iter()
         .flat_map(|cell| {
             cell.split_whitespace()
@@ -1251,7 +1259,8 @@ fn mouse_phrases() -> Vec<&'static str> {
             | Action::PositionsPick
             | Action::PositionsRow(_)
             | Action::Escape
-            | Action::Redraw => Vec::new(),
+            | Action::Redraw
+            | Action::Refresh => Vec::new(),
         });
     }
 
@@ -3950,4 +3959,55 @@ fn a_sheet_missing_the_mouse_group_carries_no_line() {
         "the narrow sweep never reached a sheet short of gestures, so it proves \
          nothing"
     );
+}
+
+#[test]
+fn ctrl_l_on_sheet_row() {
+    // Folded into the sheet's own row at the wide spelling, and left out at the
+    // tight one as `q`'s row leaves out `Ctrl+C`: a change to either is a ruling.
+    let scratch = Scratch::large_diff("sheet-ctrl-l", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    for (at, wanted) in [
+        (
+            Rect::new(0, 0, WIDE, WHOLE_TABLE),
+            "?  Esc  Ctrl+L          this sheet · redraw the pane",
+        ),
+        (area(), "?  Esc       this sheet"),
+    ] {
+        let mut app = App::new();
+        toggle_at(&mut app, &mut frame, at);
+        let (buf, laid) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+        let (_, drawn) = read_sheet(&buf, &laid);
+        let row = drawn
+            .lines()
+            .find(|row| row.contains("this sheet"))
+            .unwrap_or_else(|| panic!("no row names the sheet:\n{drawn}"));
+        assert_eq!(
+            row.trim_matches(['│', ' ']).trim_end(),
+            wanted,
+            "the sheet's row at {}x{} changed",
+            at.width,
+            at.height
+        );
+    }
+}
+
+/// The sheet's first page on a tall pane, for `docs/KEYS.md`.
+#[test]
+fn sheet_frame() {
+    let scratch = Scratch::large_diff("sheet-frame", FILES, 40);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    materialise(&mut frame);
+    let mut app = App::new();
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let at = Rect::new(0, 0, 100, 34);
+    toggle_at(&mut app, &mut frame, at);
+    let (buf, _) = paint(&mut app, &mut frame, &mut highlighter, &history, at);
+    insta::assert_snapshot!(text_of(&buf, at));
 }

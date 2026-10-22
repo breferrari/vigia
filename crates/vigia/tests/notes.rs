@@ -5,6 +5,7 @@
 #[path = "../../vigia-core/tests/support/mod.rs"]
 mod support;
 
+use std::assert_matches;
 use std::fs;
 use std::time::{Duration, Instant};
 
@@ -451,8 +452,9 @@ impl Rig {
                 KeyCode::Char(c),
                 KeyModifiers::NONE,
             )));
-            assert!(
-                matches!(route, BoxRoute::Edit(_)),
+            assert_matches!(
+                route,
+                BoxRoute::Edit(_),
                 "{c:?} did not reach the box: {route:?}"
             );
         }
@@ -1292,7 +1294,7 @@ fn alt_enter_breaks_the_body_and_the_note_rows_break_with_it() {
 
     rig.type_text("first");
     let newline = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
-    assert!(matches!(rig.key(&newline), BoxRoute::Edit(_)));
+    assert_matches!(rig.key(&newline), BoxRoute::Edit(_));
     rig.type_text("second");
     let open = rig.app.note_box().expect("the box");
     assert_eq!(open.lines(), ["first", "second"]);
@@ -1310,7 +1312,7 @@ fn alt_enter_breaks_the_body_and_the_note_rows_break_with_it() {
             .contains(Modifier::REVERSED)
     );
 
-    assert!(matches!(rig.enter(), Committed::Written(_)));
+    assert_matches!(rig.enter(), Committed::Written(_));
     let listing = rig.store.list().expect("list");
     assert_eq!(listing.notes[0].body, "first\nsecond");
     rig.advance(RESOLVE_ARRIVING);
@@ -2538,8 +2540,9 @@ fn a_renamed_file_carries_its_note_to_the_new_path() {
     let worktree = scratch.worktree();
     let mut frame = worktree.frame();
     frame.advance().expect("advance");
-    assert!(
-        matches!(frame.files()[0].kind, ChangeKind::Renamed { .. }),
+    assert_matches!(
+        frame.files()[0].kind,
+        ChangeKind::Renamed { .. },
         "the fixture is not a rename: {:?}",
         frame.files()[0].kind
     );
@@ -2748,8 +2751,8 @@ fn a_note_whose_text_one_run_moved_and_the_other_edited_over_goes_where_the_text
         "the note landed in the run that edited over its line:\n{}",
         painted.rows().join("\n")
     );
-    assert!(
-        matches!(&painted.view.rows[at - 1], Row::Line { number: 9, text, .. } if text == "line 8"),
+    assert_matches!(
+        &painted.view.rows[at - 1], Row::Line { number: 9, text, .. } if text == "line 8",
         "{:?}",
         painted.view.rows[at - 1]
     );
@@ -3722,7 +3725,7 @@ fn a_line_that_moves_under_an_open_box_keeps_it() {
     assert!(rig.app.box_open());
     // And Enter pins the note to the number it was opened on, which is what a
     // note stores: the walk finds it by its text from there.
-    assert!(matches!(rig.enter(), Committed::Written(_)));
+    assert_matches!(rig.enter(), Committed::Written(_));
     let listing = rig.store.list().expect("list");
     assert_eq!(
         (listing.notes[0].line, listing.notes[0].text.as_str()),
@@ -3824,11 +3827,9 @@ fn a_continuation_row_anchors_to_its_head_line() {
     let painted = rig.paint(&mut frame, PANE, Pointing::default());
     let y = painted.row_of("a long line that wraps");
     let (left, _, origin) = painted.gutter();
-    assert!(
-        matches!(
-            painted.view.rows[usize::from(y + 1 - painted.laid.diff.top)],
-            Row::Wrap { .. }
-        ),
+    assert_matches!(
+        painted.view.rows[usize::from(y + 1 - painted.laid.diff.top)],
+        Row::Wrap { .. },
         "the line did not wrap:\n{}",
         painted.text(y + 1)
     );
@@ -3856,7 +3857,7 @@ fn a_continuation_row_anchors_to_its_head_line() {
     // And a press there opens the box on the whole line at the head's number.
     assert!(rig.press_opens(&painted, left, y + 1));
     rig.type_text("on the head");
-    assert!(matches!(rig.enter(), Committed::Written(_)));
+    assert_matches!(rig.enter(), Committed::Written(_));
     let written = &rig.store.list().expect("list").notes[0];
     assert_eq!(written.line, 5);
     assert_eq!(written.text, long.trim_end());
@@ -4269,12 +4270,12 @@ fn a_caret_above_a_grown_box_stays_on_screen_on_a_pane_that_cannot_hold_it() {
     for line in ["one", "two", "three", "four", "five"] {
         rig.type_text(line);
         let newline = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT));
-        assert!(matches!(rig.key(&newline), BoxRoute::Edit(_)));
+        assert_matches!(rig.key(&newline), BoxRoute::Edit(_));
     }
     rig.type_text("six");
     for _ in 0..3 {
         let up = Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
-        assert!(matches!(rig.key(&up), BoxRoute::Edit(_)));
+        assert_matches!(rig.key(&up), BoxRoute::Edit(_));
     }
     let (line, _) = rig.app.note_box().expect("the box").cursor();
     assert_eq!(line, 2, "the caret did not move off the last line");
@@ -6356,6 +6357,7 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_wherever_the_list_is_looking() 
             position: vigia::Position {
                 file: pinned,
                 row: 0,
+                under: 0,
             },
             anchored: false,
             diff_rows: 12,
@@ -6369,6 +6371,8 @@ fn a_note_on_a_path_in_both_runs_marks_one_entry_wherever_the_list_is_looking() 
             highlight: false,
             // The pin, which is what narrowed the walk to one file.
             single: true,
+            pictures: None,
+            rise: None,
         };
         let view = View::collect_noted(
             &mut frame,
@@ -7652,8 +7656,9 @@ fn rows_follow_the_window() {
         .view(&mut frame, &mut highlighter, &history, screen)
         .expect("view");
     assert_eq!(view.rows.len(), height, "the screen did not fill");
-    assert!(
-        matches!(view.rows.last(), Some(Row::Note { .. })),
+    assert_matches!(
+        view.rows.last(),
+        Some(Row::Note { .. }),
         "the screen's last row is not the answer's, so the answer is not what fills it"
     );
     let drawn = view
@@ -7667,4 +7672,66 @@ fn rows_follow_the_window() {
          10,000-line answer, so the rows follow the answer rather than the window",
         view.built
     );
+}
+
+/// One file carrying a note in every state, for `docs/NOTES.md`.
+#[test]
+fn note_states_frame() {
+    let scratch = fixture("notes-states-frame");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let put = |id: &str, line: u32, text: &str, body: &str, status, reply: Option<&str>| {
+        let mut left = note(id, line, text, body);
+        left.status = status;
+        left.reply = reply.map(str::to_owned);
+        rig.store.put(&left).expect("put");
+    };
+    put(
+        "n1",
+        5,
+        EDITED,
+        "use saturating_mul here",
+        Status::Open,
+        None,
+    );
+    put(
+        "n2",
+        3,
+        "line 3",
+        "why keep this line?",
+        Status::Seen,
+        Some("it seeds the margin; kept"),
+    );
+    put(
+        "n3",
+        7,
+        "line 7 as it was",
+        "rename this",
+        Status::Open,
+        None,
+    );
+    put("n4", 11, "line 11", "check the end", Status::Open, None);
+    rig.reload();
+    let painted = rig.paint(&mut frame, TALL, Pointing::default());
+    insta::assert_snapshot!(painted.rows().join("\n"));
+}
+
+/// The note box open under a line with a sentence half typed, for
+/// `docs/NOTES.md`.
+#[test]
+fn note_box_frame() {
+    let scratch = fixture("notes-box-frame");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut rig = Rig::open(&scratch);
+    let plain = rig.paint(&mut frame, PANE, Pointing::default());
+    let y = plain.row_of(EDITED);
+    let (left, _, _) = plain.gutter();
+    assert!(rig.press_opens(&plain, left + 1, y));
+    rig.type_text("should this reset on every event, or just the fir");
+    let typed = rig.paint(&mut frame, PANE, Pointing::default());
+    insta::assert_snapshot!(typed.rows().join("\n"));
 }

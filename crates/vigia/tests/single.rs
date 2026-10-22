@@ -213,6 +213,7 @@ fn scrolling_stops_at_both_ends_of_the_pinned_file() {
             Position {
                 file: PINNED,
                 row: SPAN - body(),
+                under: 0,
             },
             "scrolling past the end of a pinned file did not rest its last row \
              on the bottom"
@@ -233,7 +234,8 @@ fn scrolling_stops_at_both_ends_of_the_pinned_file() {
             view.top,
             Position {
                 file: PINNED,
-                row: 0
+                row: 0,
+                under: 0,
             },
             "scrolling above a pinned file left it, so the pin holds in one \
              direction only"
@@ -259,7 +261,8 @@ fn the_two_end_keys_reach_the_ends_of_this_file() {
         draw(&mut app, &mut frame, &mut highlighter, &history, split()).top,
         Position {
             file: PINNED,
-            row: 0
+            row: 0,
+            under: 0,
         },
         "`g` under a pin left for the first changed file"
     );
@@ -272,6 +275,7 @@ fn the_two_end_keys_reach_the_ends_of_this_file() {
         Position {
             file: PINNED,
             row: SPAN - body(),
+            under: 0,
         },
         "`G` under a pin did not reach the pinned file's last screenful"
     );
@@ -315,6 +319,7 @@ fn the_total_is_this_file_and_a_drag_lands_where_the_thumb_says() {
         Position {
             file: PINNED,
             row: (SPAN - body()) / 2,
+            under: 0,
         },
         "a drag on a pinned bar resolved against something other than the file \
          the thumb was drawn from"
@@ -349,7 +354,11 @@ fn n_p_a_digit_and_a_click_still_change_the_file() {
         let view = draw(&mut app, &mut frame, &mut highlighter, &history, listed());
         assert_eq!(
             view.top,
-            Position { file: want, row: 0 },
+            Position {
+                file: want,
+                row: 0,
+                under: 0
+            },
             "{action:?} did not move the pin to file {want}"
         );
         // Scrolled off the new file's end before the pin is read, which is what makes
@@ -403,7 +412,11 @@ fn n_p_a_digit_and_a_click_still_change_the_file() {
     let view = draw(&mut app, &mut frame, &mut highlighter, &history, listed());
     assert_eq!(
         view.top,
-        Position { file: 1, row: 0 },
+        Position {
+            file: 1,
+            row: 0,
+            under: 0
+        },
         "a click on a listed file did not move the pinned diff to it"
     );
     assert_eq!(
@@ -523,6 +536,7 @@ fn toggling_the_pin_returns_the_screen_it_started_from() {
         Position {
             file: PINNED,
             row: SPAN - body(),
+            under: 0,
         },
         "the pin did not rest the straddled file's last row on the bottom"
     );
@@ -597,6 +611,7 @@ fn an_unpinned_frame_is_unchanged_by_the_field_existing() {
         position: Position {
             file: PINNED,
             row: SPAN - 2,
+            under: 0,
         },
         anchored: true,
         wrap: false,
@@ -797,6 +812,7 @@ fn a_pinned_end_key_and_a_scroll_in_one_wake_both_move() {
         Position {
             file: PINNED,
             row: SPAN - body() - 1,
+            under: 0,
         },
         "a `k` batched with `G` moved nothing, so the reader presses a key up to \
          {} times before the screen answers",
@@ -828,6 +844,7 @@ fn the_first_file_pins_like_any_other() {
         Position {
             file: 0,
             row: SPAN - body(),
+            under: 0,
         },
         "scrolling past the end of a pinned first file did not clamp to it"
     );
@@ -982,6 +999,7 @@ fn a_pane_with_no_room_pins_without_panicking() {
                     position: Position {
                         file: PINNED,
                         row: SPAN * 2,
+                        under: 0,
                     },
                     anchored: true,
                     diff_rows,
@@ -1041,6 +1059,7 @@ fn a_page_and_a_half_page_clamp_at_the_pinned_files_ends() {
             Position {
                 file: PINNED,
                 row: SPAN - body(),
+                under: 0,
             },
             "{down:?} past the end of a pinned file did not clamp to it"
         );
@@ -1060,7 +1079,8 @@ fn a_page_and_a_half_page_clamp_at_the_pinned_files_ends() {
             view.top,
             Position {
                 file: PINNED,
-                row: 0
+                row: 0,
+                under: 0,
             },
             "{up:?} above a pinned file left it"
         );
@@ -1287,6 +1307,7 @@ fn a_straddle_reached_by_a_drag_pins_to_the_bottom_too() {
         Position {
             file,
             row: SPAN - body(),
+            under: 0,
         },
         "the pin after a drag did not rest the file's last row on the bottom"
     );
@@ -1321,7 +1342,8 @@ fn a_jump_onto_a_short_tail_survives_being_pinned_and_unpinned() {
         jumped.top,
         Position {
             file: FILES - 1,
-            row: 0
+            row: 0,
+            under: 0,
         },
         "the jump did not land on the last file's heading"
     );

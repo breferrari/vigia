@@ -1,0 +1,18 @@
+---
+source: crates/vigia/tests/render.rs
+expression: "screen(100, 14, &view, &chrome())"
+---
+"  vigia · current ▾ · 1 changed                                                           watching  "
+"                                                                                                    "
+"▸ R crates/vigia/src/shell.rs ← crates/vigia/src/main.rs                  ____________    +3    -1  "
+"────────────────────────────────────────────────────────────────────────────────────────────────────"
+"  R crates/vigia/src/shell.rs ← crates/vigia/src/main.rs                  ____________    +3    -1  "
+"  @@ -258,7 +258,9 @@                                                                               "
+"  258       pub fn advance(&mut self) {                                                             "
+"  259           let mut files = Vec::new();                                                         "
+"  260 -         for change in self.changes() {                                                      "
+"  260 +         for change in self.walk() {                                                         "
+"  261 +             // one per path                                                                 "
+"  262 +             files.push(change?);                                                            "
+"────────────────────────────────────────────────────────────────────────────────────────────────────"
+"  q quit · f follow · m config · ? keys                                                        1/1  "

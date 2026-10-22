@@ -16,10 +16,10 @@ const CLIMBING_LITERAL: &str = concat!("\"..", "/..");
 const SIBLING_LITERAL: &str = concat!("join(\"..", "\")");
 
 /// How many of `vigia`'s test files read outside the package.
-const ESCAPING_FILES: usize = 30;
+const ESCAPING_FILES: usize = 36;
 
 /// The English spelling of [`ESCAPING_FILES`], which is how the prose says it.
-const ESCAPING_FILES_SPELLED: &str = "thirty";
+const ESCAPING_FILES_SPELLED: &str = "thirty-six";
 
 /// The repository root, two levels above this package.
 fn repo_root() -> PathBuf {
@@ -965,41 +965,6 @@ fn the_release_pipeline_publishes_to_the_registry() {
     );
 }
 
-/// The no-C-toolchain gate reads its target list from the release config rather
-/// than from a second hand-typed copy.
-#[test]
-fn the_purity_gate_derives_its_targets_from_the_release_config() {
-    // Comment-stripped before slicing, because the region is heavily commented and
-    // those comments discuss targets by name.
-    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    // Bounded at both ends.
-    let job = ci
-        .split_once("assert no cc, cmake or bindgen")
-        .map(|(_, rest)| rest)
-        .expect("ci.yml carries the no-C-toolchain assertion");
-    let job = job
-        .split_once("exit $status")
-        .map(|(script, _)| script)
-        .expect("the no-C-toolchain script ends by exiting its status");
-
-    assert!(
-        job.contains("metadata.dist.targets"),
-        "the no-C-toolchain job must derive its targets from \
-         [workspace.metadata.dist] via `cargo metadata`, not re-type them. A \
-         hand-typed second copy is how `x86_64-apple-darwin` shipped unchecked"
-    );
-
-    // Non-vacuity: if the job re-acquired a literal list, the derivation above
-    // could still be present and unused. No triple should be spelled out.
-    for target in toml_array(&repo_file("Cargo.toml"), "targets") {
-        assert!(
-            !job.contains(&target),
-            "{target} is spelled literally in the purity job, which means the \
-             hand-typed list is back alongside the derivation"
-        );
-    }
-}
-
 /// A bump whose push lost a race with a merge starts the release again, and any other
 /// rejected push fails.
 #[test]
@@ -1187,7 +1152,9 @@ fn the_push_that_moves_main_is_authorised_before_the_version_does() {
     // the assertion.
     let dispatch = hand_off_dispatch(&bump);
     assert!(
-        dispatch.contains(r#"= "true" ]; then tag=dry-run"#),
+        dispatch.contains(r#"if [ "${IN_REHEARSE}" = "true" ]; then tag=dry-run"#)
+            && step_block(&bump, "hand off to the release")
+                .contains("IN_REHEARSE: ${{ inputs.rehearse }}"),
         "the rehearsal's tag no longer depends on `rehearse` being true in the \
          way this gate can read. A flipped comparison here publishes for real \
          on every rehearsal: {dispatch}"
@@ -1354,24 +1321,6 @@ fn the_licence_each_crate_ships_is_the_repository_licence() {
     }
 }
 
-/// The grammar count the README states is the one the dump holds.
-#[test]
-fn the_readme_states_the_grammar_count_the_dump_holds() {
-    let roster = repo_file("crates/vigia-core/assets/GRAMMARS.txt");
-    let held = roster
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .count();
-
-    let readme = repo_file("README.md");
-    let claim = format!("**{held} grammars**");
-    assert!(
-        readme.contains(&claim),
-        "README.md does not say {claim:?}, and the dump holds {held} grammars. \
-         Whichever moved, they have to move together"
-    );
-}
-
 /// Drives the version raise against `manifest`, in a scratch directory of its
 /// own. Returns whether it passed and the manifest it left behind.
 #[cfg(unix)]
@@ -1460,384 +1409,14 @@ fn the_version_raise_counts_the_lines_it_moved_and_nothing_else() {
     );
 }
 
-/// Drives the judgement `ci complete` runs, with fabricated leg results.
-#[cfg(unix)]
-fn ci_complete(draft: &str, class: &str, legs: &[&str]) -> bool {
-    let script = repo_root().join(".github/scripts/ci-complete.sh");
-    std::process::Command::new("sh")
-        .arg(&script)
-        .arg(draft)
-        .arg(class)
-        .args(legs)
-        .output()
-        .unwrap_or_else(|e| panic!("run {}: {e}", script.display()))
-        .status
-        .success()
-}
-
-/// The legs `ci.yml` passes, in its order.
-#[cfg(unix)]
-const LEGS: [&str; 7] = [
-    "lint",
-    "test",
-    "budgets",
-    "benches",
-    "pure-rust",
-    "musl",
-    "docs",
-];
-
-/// `LEGS` paired with `results`, as `name=result`.
-#[cfg(unix)]
-fn legs(results: [&str; 7]) -> Vec<String> {
-    LEGS.iter()
-        .zip(results)
-        .map(|(name, result)| format!("{name}={result}"))
-        .collect()
-}
-
-/// A draft's skipped legs are not a failure, a docs pull request's skipped
-/// heavy legs are not a failure, and every other skip and every failure is.
-#[cfg(unix)]
-#[test]
-fn ci_complete_judgement() {
-    const S: &str = "success";
-    const K: &str = "skipped";
-    let full = legs([S, S, S, S, S, S, K]);
-    let docs = legs([S, K, K, K, K, K, S]);
-    let all_skipped = legs([K; 7]);
-    fn strs(v: &[String]) -> Vec<&str> {
-        v.iter().map(String::as_str).collect()
-    }
-
-    assert!(
-        ci_complete("false", "full", &strs(&full)),
-        "a full green run has to pass"
-    );
-    // A push carries no pull request, so the workflow passes an empty draft
-    // flag and an empty class. Reading those as "not a draft, run everything"
-    // is the whole of it, and reading them as an error turned every push to
-    // `main` red.
-    assert!(
-        ci_complete("", "", &strs(&full)),
-        "a push has no pull request; its draft flag and class are empty, which is not an error"
-    );
-    assert!(
-        ci_complete("true", "", &strs(&all_skipped)),
-        "a draft skips every leg by design and the matrix runs on ready_for_review"
-    );
-    assert!(
-        ci_complete("false", "docs", &strs(&docs)),
-        "a docs pull request runs the documents leg and skips the heavy ones by design"
-    );
-
-    for (draft, class, results, why) in [
-        (
-            "false",
-            "full",
-            [S, K, S, S, S, S, K],
-            "a heavy leg that skipped on a full run is the absent matrix this gate exists for",
-        ),
-        (
-            "false",
-            "",
-            [S, K, K, K, K, K, S],
-            "a docs-shaped run with no class is a classifier that never ran, not a docs pull request",
-        ),
-        (
-            "false",
-            "docs",
-            [S, K, K, K, K, K, K],
-            "a docs pull request whose documents leg skipped ran nothing",
-        ),
-        (
-            "false",
-            "docs",
-            [S, K, "failure", K, K, K, S],
-            "a docs pull request cannot launder a failing heavy leg through its skips",
-        ),
-        (
-            "true",
-            "",
-            [K, S, K, K, K, K, K],
-            "a draft that ran some legs and skipped others is a partial run",
-        ),
-        (
-            "false",
-            "full",
-            [S, "failure", S, S, S, S, K],
-            "a failing leg fails the gate",
-        ),
-        (
-            "true",
-            "",
-            [K, "failure", K, K, K, K, K],
-            "a draft cannot launder a failing leg through its skips",
-        ),
-        (
-            "false",
-            "full",
-            [S, "cancelled", S, S, S, S, K],
-            "a cancelled leg never reported and is not a pass",
-        ),
-        (
-            "",
-            "",
-            [K, K, K, K, K, K, K],
-            "a push is never a draft, so legs that all skipped on one did not run and should have",
-        ),
-    ] {
-        assert!(!ci_complete(draft, class, &strs(&legs(results))), "{why}");
-    }
-
-    assert!(
-        !ci_complete("false", "full", &[]),
-        "no results at all means the workflow stopped passing them, not that every leg passed"
-    );
-    assert!(
-        !ci_complete("false", "full", &["success"]),
-        "a bare result with no leg name is the old calling shape, and the script must refuse it"
-    );
-}
-
-/// Drives `change-class.sh` with a list of paths and returns its last line.
-#[cfg(unix)]
-fn change_class(paths: &str) -> String {
-    change_class_with(paths, "")
-}
-
-/// The same, with the `full-ci` label set.
-#[cfg(unix)]
-fn change_class_forced(paths: &str) -> String {
-    change_class_with(paths, "true")
-}
-
-#[cfg(unix)]
-fn change_class_with(paths: &str, forced: &str) -> String {
-    use std::io::Write;
-    use std::process::Stdio;
-
-    let script = repo_root().join(".github/scripts/change-class.sh");
-    let mut child = std::process::Command::new("sh")
-        .arg(&script)
-        .env("CI_FULL", forced)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap_or_else(|e| panic!("run {}: {e}", script.display()));
-    child
-        .stdin
-        .take()
-        .expect("the child's stdin is a pipe")
-        .write_all(paths.as_bytes())
-        .expect("the paths reach the script");
-    let out = child.wait_with_output().expect("the script exits");
-    assert!(out.status.success(), "change-class.sh failed on {paths:?}");
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .last()
-        .unwrap_or_default()
-        .to_owned()
-}
-
-/// Documents, skills, templates and images are `docs`; anything else, an
-/// empty list included, is `full`.
-#[cfg(unix)]
-#[test]
-fn change_class_decides() {
-    for (paths, class) in [
-        ("README.md\nSPEC.md\ndocs/THEME.md\n", "docs"),
-        (
-            ".claude/skills/take-next/SKILL.md\n.claude/settings.json\n",
-            "docs",
-        ),
-        (".claude/scripts/mutate.mjs\n", "full"),
-        (
-            ".github/ISSUE_TEMPLATE/report.md\n.github/PULL_REQUEST_TEMPLATE.md\n.github/release.yml\n",
-            "docs",
-        ),
-        ("assets/preview.svg\nLICENSE\n", "docs"),
-        ("README.md\ncrates/vigia/src/lib.rs\n", "full"),
-        ("README.md\n.github/workflows/ci.yml\n", "full"),
-        ("README.md\n.github/scripts/ci-complete.sh\n", "full"),
-        ("Cargo.toml\n", "full"),
-        ("assets/syntaxes/dump.bin\n", "full"),
-        ("crates/vigia-core/assets/NOTICE.md\n", "full"),
-        ("crates/vigia/tests/package.rs\n", "full"),
-        ("", "full"),
-        ("\n\n", "full"),
-    ] {
-        assert_eq!(change_class(paths), class, "the class of {paths:?}");
-    }
-    assert_eq!(
-        change_class_forced("README.md\n"),
-        "full",
-        "the full-ci label did not force the full run"
-    );
-}
-
-/// Every job that skips on a docs pull request says so, and the documents
-/// job runs only then.
-#[test]
-fn heavy_legs_gated() {
-    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    for job in ["test", "budgets", "benches", "pure-rust", "musl"] {
-        let block = ci
-            .split_once(&format!("\n  {job}:\n"))
-            .map(|(_, rest)| rest.split("\n  ").take(6).collect::<Vec<_>>().join("\n  "))
-            .unwrap_or_else(|| panic!("ci.yml declares the {job} job"));
-        assert!(
-            block.contains("needs: [changes]")
-                && block.contains("needs.changes.outputs.class != 'docs'"),
-            "the {job} job does not skip on a docs pull request:\n{block}"
-        );
-    }
-    let docs = ci
-        .split_once("\n  docs:\n")
-        .map(|(_, rest)| rest.split("\n  ").take(6).collect::<Vec<_>>().join("\n  "))
-        .expect("ci.yml declares the docs job");
-    assert!(
-        docs.contains("needs.changes.outputs.class == 'docs'"),
-        "the docs job does not run only on a docs pull request:\n{docs}"
-    );
-}
-
-/// The documents job names every test binary that reads a document.
-///
-/// A test that reads `README.md`, `SPEC.md` or `docs/THEME.md` has to run when
-/// only that document changed. Scanned by string literal, because a read is
-/// a path in the source and nothing else marks it.
-#[test]
-fn docs_suites_named() {
-    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    let step = ci
-        .split_once("the suites that read documents")
-        .map(|(_, rest)| rest.split("\n      -").next().unwrap_or_default())
-        .expect("ci.yml has the documents step");
-
-    const DOCUMENTS: [&str; 9] = [
-        "README",
-        "SPEC",
-        "ROADMAP",
-        "RULINGS",
-        "CLAUDE",
-        "CHANGELOG",
-        "CONTRIBUTING",
-        "RELEASE-SMOKE",
-        "REVOCATIONS",
-    ];
-    let mut missing = Vec::new();
-    for crate_dir in ["crates/vigia", "crates/vigia-core"] {
-        let tests = repo_root().join(crate_dir).join("tests");
-        for entry in std::fs::read_dir(&tests)
-            .unwrap_or_else(|e| panic!("read {}: {e}", tests.display()))
-            .flatten()
-        {
-            let path = entry.path();
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
-            }
-            let source = read(&path);
-            // A fixture named README.md is not a read of the repository's. A
-            // read resolves from the crate directory or the repository root.
-            let resolves = source.contains("CARGO_MANIFEST_DIR") || source.contains("repo_root()");
-            let reads = resolves
-                && source.lines().any(|line| {
-                    let line = line.trim_start();
-                    !line.starts_with("//")
-                        && (DOCUMENTS.iter().any(|name| {
-                            line.contains(&format!("\"{name}.md\""))
-                                || line.contains(&format!("/{name}.md\""))
-                        }) || line.contains("docs/THEME.md\"")
-                            || line.contains("docs/CONFIG.md\"")
-                            || line.contains("docs/TECHPACK.md\""))
-                });
-            if !reads {
-                continue;
-            }
-            let name = path
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            if !step.contains(&format!("--test {name}")) {
-                missing.push(format!("{crate_dir}/tests/{name}.rs"));
-            }
-        }
-    }
-    assert!(
-        missing.is_empty(),
-        "these tests read a document and the documents job does not run them, so a \
-         docs-only pull request can break what they check:\n{}",
-        missing.join("\n")
-    );
-    assert!(
-        step.contains("--test package") && step.contains("--test register"),
-        "the documents step lost package or register:\n{step}"
-    );
-}
-
-/// The workflow calls the script the gate above proves.
-#[test]
-fn the_ci_workflow_runs_the_script_the_gate_proves() {
-    let ci = read(&repo_root().join(".github/workflows/ci.yml"));
-    assert!(
-        ci.contains(".github/scripts/ci-complete.sh"),
-        "ci.yml does not run ci-complete.sh, so its judgement is gated in a test and unused in CI"
-    );
-    // The gate above drives the script with whatever a test passes. This pins
-    // the shape production actually sends, which is where it broke: on a push
-    // the expression below expands to nothing at all.
-    assert!(
-        ci.contains("github.event.pull_request.draft }}'"),
-        "ci.yml does not pass the draft expression to the script, so the gate's draft \
-         cases are testing an argument production never sends"
-    );
-    assert!(
-        ci.contains("'${{ needs.changes.outputs.class }}'"),
-        "ci.yml does not pass the class to the script, so a docs pull request's skips          and a broken classifier's skips are judged alike"
-    );
-    for leg in [
-        "lint",
-        "test",
-        "budgets",
-        "benches",
-        "pure-rust",
-        "musl",
-        "docs",
-    ] {
-        let arg = format!("'{leg}=${{{{ needs.{leg}.result }}}}'");
-        assert!(
-            ci.contains(&arg),
-            "ci.yml does not pass {arg} to the script, so that leg is judged by nothing"
-        );
-    }
-
-    // The gate that drives the script is Unix only, which is sound exactly
-    // while the job stays on a Unix runner. Asserted here because this test
-    // runs on every platform and that one does not.
-    let (_, after) = ci
-        .split_once("  ci-complete:")
-        .expect("ci.yml declares the ci-complete job");
-    let runs_on = after
-        .lines()
-        .find_map(|l| l.trim().strip_prefix("runs-on:"))
-        .map(str::trim)
-        .expect("ci-complete declares a runner");
-    assert_eq!(
-        runs_on, "ubuntu-latest",
-        "ci-complete moved to {runs_on:?}, so the Unix-only gate over its script \
-         no longer covers where it runs"
-    );
-}
-
 /// The release raises the version through the script the gate above proves.
 #[test]
 fn the_bump_workflow_runs_the_script_the_gate_proves() {
     let bump = without_comments(&repo_file(".github/workflows/bump.yml"));
     let step = step_block(&bump, "raise the version");
     assert!(
-        step.contains("sh .github/scripts/raise-version.sh '${{ steps.version.outputs.next }}'"),
+        step.contains("NEXT: ${{ steps.version.outputs.next }}")
+            && step.contains("sh .github/scripts/raise-version.sh \"$NEXT\""),
         "bump.yml's raise step does not run raise-version.sh with the computed version, \
          so the gate over the script proves nothing about the release: {step}"
     );
@@ -1985,6 +1564,19 @@ fn the_bump_writes_the_changelog_it_publishes() {
          release: {step}"
     );
     assert!(
+        step.contains(
+            "git log -1 --format='%B' \"$sha\" | tr -d '\\r' | grep '^Release-note-replaces:'"
+        ),
+        "bump.yml's changelog step does not pass Release-note-replaces lines, so a \
+         retired note still ships: {step}"
+    );
+    assert!(
+        step_block(&bump, "commit the bump")
+            .contains("git rm -q --ignore-unmatch .github/release-summary.md"),
+        "the release commit leaves the summary behind, so the next release opens \
+         with this one's"
+    );
+    assert!(
         bump.contains("fetch-depth: 0"),
         "bump.yml checks out without `fetch-depth: 0`, so it holds no tags and \
          the range the notes are written from cannot reach the previous release"
@@ -2021,6 +1613,18 @@ fn changelog_entry(
     subjects: &str,
     changelog: &str,
 ) -> (bool, String, String) {
+    changelog_summary(case, version, subjects, changelog, None)
+}
+
+/// [`changelog_entry`], with `summary` as the release summary file when given.
+#[cfg(unix)]
+fn changelog_summary(
+    case: &str,
+    version: &str,
+    subjects: &str,
+    changelog: &str,
+    summary: Option<&str>,
+) -> (bool, String, String) {
     use std::io::Write;
     use std::process::Stdio;
 
@@ -2029,12 +1633,20 @@ fn changelog_entry(
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
     let path = dir.join("CHANGELOG.md");
     std::fs::write(&path, changelog).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
+    // A file a trailer could glob to, were the script to expand one.
+    std::fs::write(dir.join("#41=#50"), "").expect("write the glob bait");
+    let summary_path = dir.join("release-summary.md");
+    if let Some(summary) = summary {
+        std::fs::write(&summary_path, summary).expect("write the summary");
+    }
 
     let mut child = Command::new("sh")
+        .current_dir(&dir)
         .arg(&script)
         .arg(version)
         .arg("2026-01-01")
         .arg(&path)
+        .arg(&summary_path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -2147,6 +1759,131 @@ fn note_wins() {
     assert!(
         said.contains("Release-note: none: #21"),
         "the log does not name the pull request whose note is none:\n{said}"
+    );
+}
+
+/// `Release-note-replaces:` drops the named pull requests' entries, keeps the
+/// rest, and fails on a number the range does not hold.
+#[cfg(unix)]
+#[test]
+fn note_replaces() {
+    let records = "#40\trelease\tRelease-note: PDFs draw in every build\n\
+                   #40\trelease\tRelease-note-replaces: #41\n\
+                   #40\trelease\tRelease-note-replaces: #42, #44\n\
+                   #44\trelease\tRelease-note: Another old line\n\
+                   #41\trelease\tRelease-note: PDFs draw with a feature\n\
+                   #42\trelease\tA build without PDFs shows them as binary (#42)\n\
+                   #43\trelease\tRelease-note: A key moves\n";
+    let (passed, left, said) = changelog_entry("replaces", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(passed, "the generator refused a replacing range:\n{said}");
+    assert_eq!(
+        bullets(&left, "0.2.0"),
+        ["- PDFs draw in every build", "- A key moves"],
+        "the replaced entries were not dropped, or a kept one was:\n{left}"
+    );
+    assert!(
+        said.contains("replaced by #40: #41")
+            && said.contains("replaced by #40: #42")
+            && said.contains("replaced by #40: #44"),
+        "the log does not name what was replaced:\n{said}"
+    );
+
+    for (case, line, why) in [
+        (
+            "replaces-unknown",
+            "Release-note-replaces: #99",
+            "#99, which has no record",
+        ),
+        (
+            "replaces-bare",
+            "Release-note-replaces: 41",
+            "41, which is not a pull request number",
+        ),
+        (
+            "replaces-prefix",
+            "Release-note-replaces: #4",
+            "#4, which has no record",
+        ),
+        (
+            "replaces-self",
+            "Release-note-replaces: #50",
+            "replaces itself",
+        ),
+        (
+            "replaces-glob",
+            "Release-note-replaces: #*",
+            "#*, which is not a pull request number",
+        ),
+    ] {
+        let records = format!(
+            "#50\trelease\tRelease-note: A key moves\n#50\trelease\t{line}\n#41\trelease\tOld (#41)\n"
+        );
+        let (passed, left, said) = changelog_entry(case, "0.2.0", &records, CHANGELOG_BEFORE);
+        assert!(
+            !passed && left == CHANGELOG_BEFORE,
+            "{case}: a replacement the range cannot honour cut a version:\n{left}"
+        );
+        assert!(
+            said.contains("::error::#50 replaces") && said.contains(why),
+            "{case}: the refusal does not say why:\n{said}"
+        );
+    }
+}
+
+/// A bad replacement and an unlabelled pull request in one range are both
+/// named before the bump stops.
+#[cfg(unix)]
+#[test]
+fn replaces_named_with_rest() {
+    let records = "#80\trelease\tRelease-note: A key moves\n\
+                   #80\trelease\tRelease-note-replaces: #99\n\
+                   #81\t\tUnlabelled (#81)\n";
+    let (passed, left, said) = changelog_entry("replaces-rest", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        !passed && left == CHANGELOG_BEFORE,
+        "the range cut a version:\n{left}"
+    );
+    assert!(
+        said.contains("#80 replaces #99") && said.contains("#81 is labelled neither"),
+        "one failure hid the other:\n{said}"
+    );
+}
+
+/// A release summary file opens the section above the bullets; without one
+/// the section is the bullets alone; an empty one fails.
+#[cfg(unix)]
+#[test]
+fn release_summary() {
+    let records = "#60\trelease\tRelease-note: A key moves\n";
+    let (passed, left, said) = changelog_summary(
+        "summary",
+        "0.2.0",
+        records,
+        CHANGELOG_BEFORE,
+        Some("Pictures no longer hold up the pane.\n\n"),
+    );
+    assert!(passed, "the generator refused a summary:\n{said}");
+    assert!(
+        left.contains(
+            "## [0.2.0] - 2026-01-01\n\nPictures no longer hold up the pane.\n\n- A key moves\n"
+        ),
+        "the summary does not open the section above the bullets:\n{left}"
+    );
+    let (passed, left, _) = changelog_entry("no-summary", "0.2.0", records, CHANGELOG_BEFORE);
+    assert!(
+        passed && left.contains("## [0.2.0] - 2026-01-01\n\n- A key moves\n"),
+        "without a summary the section is not the bullets alone:\n{left}"
+    );
+    let (passed, left, said) = changelog_summary(
+        "empty-summary",
+        "0.2.0",
+        records,
+        CHANGELOG_BEFORE,
+        Some(" \n\n"),
+    );
+    assert!(
+        !passed && left == CHANGELOG_BEFORE && said.contains("is empty"),
+        "an empty summary did not fail the bump:\n{said}"
     );
 }
 
@@ -2420,30 +2157,6 @@ fn title_check_rejects() {
     assert!(passed, "a phrase inside backticks failed:\n{said}");
 }
 
-/// The lint job runs the title check on pull requests, with history to diff.
-#[test]
-fn ci_runs_title_check() {
-    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    let lint = ci
-        .split_once("\n  lint:")
-        .and_then(|(_, rest)| rest.split_once("\n  test:"))
-        .map(|(lint, _)| lint)
-        .expect("ci.yml has a lint job before its test job");
-    assert!(
-        lint.contains("sh .github/scripts/title-check.sh"),
-        "the lint job does not run title-check.sh:\n{lint}"
-    );
-    assert!(
-        lint.contains("fetch-depth: 0"),
-        "the lint job checks out without history, so the PR's commits cannot be read"
-    );
-    assert!(
-        lint.contains("TITLE: ${{ github.event.pull_request.title }}")
-            && !lint.contains("title-check.sh \"${{"),
-        "the PR title must reach the script through env, never the command line"
-    );
-}
-
 /// The two documents every session reads first, and the most each may weigh
 /// in bytes. Growing past the ceiling fails the build.
 ///
@@ -2524,36 +2237,6 @@ fn no_ledger_carries_a_byte_ceiling() {
 /// Moves with `config::KEYS`, and the gate below is what says so: the wrong word
 /// here fails against the document, and the wrong word there fails against this.
 const CONFIG_KEYS_SPELLED: &str = "Ten keys";
-
-/// A revoked non-goal is gone from the documents that carried it, not annotated.
-///
-/// `CLAUDE.md`'s rule and the reason for it: a rule that survives being overruled
-/// re-fires on the next session, and the argument is had again from zero. The
-/// entry in the ledger is the other half, because a deletion with nothing saying
-/// who made it is indistinguishable from an accident.
-#[test]
-fn the_revoked_non_goal_left_the_spec_and_the_roadmap_for_the_ledger() {
-    for (path, text) in [
-        ("SPEC.md", repo_file("SPEC.md")),
-        ("ROADMAP.md", repo_file("ROADMAP.md")),
-    ] {
-        for phrase in ["branch or commit browsing", "Branch and commit browsing"] {
-            assert!(
-                !text.contains(phrase),
-                "{path} still carries {phrase:?}, so the override did not happen"
-            );
-        }
-    }
-
-    let ledger = repo_file("REVOCATIONS.md");
-    for phrase in ["Branch and commit browsing", "branch or commit browsing"] {
-        assert!(
-            ledger.contains(phrase),
-            "REVOCATIONS.md does not carry {phrase:?} verbatim, so the ruling was \
-             deleted rather than withdrawn"
-        );
-    }
-}
 
 /// `SPEC.md` names every key the config file accepts, and counts them right.
 ///
@@ -2654,8 +2337,8 @@ fn the_config_doc_teaches_a_config_file_that_parses_and_names_every_key() {
     );
 }
 
-/// Every gesture that a config key also reaches has a row in `README.md`'s key
-/// table.
+/// Every gesture that a config key also reaches has a row in `docs/KEYS.md`'s
+/// key table.
 ///
 /// The other half of the config block's gate, one vocabulary over: the block
 /// teaches what a reader *writes* and this table teaches what they *press*, and a
@@ -2663,11 +2346,11 @@ fn the_config_doc_teaches_a_config_file_that_parses_and_names_every_key() {
 /// The reverse direction belongs to `sheet.rs::every_gesture_the_readme_teaches_is_named_on_the_sheet`,
 /// since the table also teaches gestures no config key reaches.
 #[test]
-fn the_readme_key_table_names_every_gesture_a_config_key_reaches() {
-    let readme = repo_file("README.md");
+fn key_table_complete() {
+    let readme = repo_file("docs/KEYS.md");
 
     // The table follows a bold caption and a row's left cell is what a reader
-    // looks for. `sheet.rs::readme_gestures` reads both tables the same way;
+    // looks for. `sheet.rs::documented_gestures` reads both tables the same way;
     // only the keyboard one can carry a config key's gesture.
     //
     // The end is the first line that is neither blank nor a row, which is the
@@ -2698,7 +2381,7 @@ fn the_readme_key_table_names_every_gesture_a_config_key_reaches() {
     // below, and a change to the table's shape is exactly how that happens.
     assert!(
         taught.len() >= vigia::config::KEYS.len(),
-        "README.md's key table parsed to {} cells, so this gate is reading the \
+        "docs/KEYS.md's key table parsed to {} cells, so this gate is reading the \
          document's shape wrongly rather than reading its rows",
         taught.len()
     );
@@ -2713,7 +2396,7 @@ fn the_readme_key_table_names_every_gesture_a_config_key_reaches() {
         .collect();
     assert!(
         missing.is_empty(),
-        "the config file can set what {missing:?} press and README.md's key table \
+        "the config file can set what {missing:?} press and docs/KEYS.md's key table \
          never names them, so a reader can configure a gesture they cannot find"
     );
 }
@@ -2810,16 +2493,16 @@ fn a_resolve_holds_the_line_for_the_length_the_spec_gives_it() {
     );
 
     let told = phrase(
-        repo_file("README.md")
+        repo_file("docs/NOTES.md")
             .lines()
             .find(|line| line.contains("**When the agent resolves one**")),
         "holds for ",
         ",",
     )
-    .expect("README.md tells a reader how long the answer holds");
+    .expect("docs/NOTES.md tells a reader how long the answer holds");
     assert_eq!(
         told, held,
-        "README.md tells a reader the answer holds {told:?} and SPEC.md gives it \
+        "docs/NOTES.md tells a reader the answer holds {told:?} and SPEC.md gives it \
          {held:?}"
     );
 
@@ -2841,23 +2524,18 @@ const GRAVIOLA_MIRRORED: &str = "0.4.1";
 
 /// The mirrored CPU-feature list is pinned to the release it was read from.
 ///
-/// The guard exists because graviola asserts rather than degrades and this
-/// workspace aborts rather than unwinds, so a feature added upstream is a dead
+/// The guard exists because graviola asserts rather than degrades and a panic
+/// outside a picture's catch aborts, so a feature added upstream is a dead
 /// monitor on hardware nobody here can test. A caret range would take that
 /// silently, and no test of the guard's own behaviour can see it: the guard
 /// keeps answering, about the wrong list.
 #[test]
 fn the_cpu_guard_still_mirrors_the_release_it_was_read_from() {
     let lock = repo_file("Cargo.lock");
-    let resolved = lock
-        .split("[[package]]")
-        .find(|block| block.contains("name = \"graviola\""))
-        .and_then(|block| {
-            block
-                .lines()
-                .find_map(|line| line.trim().strip_prefix("version = "))
-        })
-        .map(|version| version.trim_matches('"').to_owned())
+    let resolved = lock_packages(&lock)
+        .find_map(|(name, version)| (name == "graviola").then_some(version))
+        .flatten()
+        .map(str::to_owned)
         .expect("Cargo.lock resolves graviola");
 
     assert_eq!(
@@ -2968,7 +2646,7 @@ fn lost_invariant_fails() {
     );
 }
 
-/// The upgrade the README teaches a Windows reader moves the binary aside.
+/// The upgrade `docs/INSTALL.md` teaches a Windows reader moves the binary aside.
 ///
 /// The assertion that matters is the absence. Stopping the servers frees the
 /// same path, so it reads like the obvious fix and was this defect's first
@@ -2978,11 +2656,8 @@ fn the_windows_upgrade_note_moves_the_binary_rather_than_stopping_it() {
     // Both ends bounded, and to the block rather than the file: stopping a hung
     // pane is fair advice elsewhere, and it is only the upgrade that must not
     // reach for it.
-    let block = repo_file("README.md")
-        .split_once("<summary><b>Upgrading on Windows")
-        .and_then(|(_, rest)| rest.split_once("</details>"))
-        .map(|(block, _)| block.to_owned())
-        .expect("README.md tells a Windows reader how to upgrade under an open session");
+    let install = repo_file("docs/INSTALL.md");
+    let block = section(&install, "\n## Upgrading on Windows");
 
     assert!(
         block.contains("Move-Item") && block.contains("vigia.exe"),
@@ -3008,7 +2683,7 @@ fn the_windows_upgrade_note_moves_the_binary_rather_than_stopping_it() {
 fn the_readme_names_what_the_pane_is_before_installation() {
     let readme = repo_file("README.md");
     let (above, _) = readme
-        .split_once("cargo install vigia")
+        .split_once("brew install")
         .expect("README.md no longer tells a reader how to install");
 
     for wanted in ["`?`", vigia::CONFIG_FILE] {
@@ -3040,17 +2715,6 @@ fn the_spec_quotes_the_sheets_purpose_lines() {
     );
 }
 
-/// Direct dependencies that `README.md`'s `Built with` table leaves out on purpose.
-const NOT_IN_README: [&str; 7] = [
-    "libc",
-    "rustix",
-    "rustls-graviola",
-    "serde_json",
-    "signal-hook",
-    "ureq",
-    "windows-sys",
-];
-
 /// Every direct dependency of every workspace member, as (name, dev), sorted
 /// and unique. Members depending on each other are left out.
 fn direct_dependencies() -> &'static [(String, bool)] {
@@ -3075,16 +2739,32 @@ fn direct_dependencies() -> &'static [(String, bool)] {
         );
         let metadata: serde_json::Value =
             serde_json::from_slice(&output.stdout).expect("cargo metadata answers JSON");
+        let members: BTreeSet<&str> = metadata["packages"]
+            .as_array()
+            .expect("metadata lists packages")
+            .iter()
+            .filter_map(|package| package["name"].as_str())
+            .collect();
 
         let found: BTreeSet<(String, bool)> = metadata["packages"]
             .as_array()
             .expect("metadata lists packages")
             .iter()
             .flat_map(|package| package["dependencies"].as_array().expect("a list"))
-            .filter(|dependency| dependency["path"].is_null())
-            .map(|dependency| {
-                let name = dependency["name"].as_str().expect("a name").to_owned();
-                (name, dependency["kind"] == "dev")
+            // A path dependency on another member is the workspace, not a
+            // dependency; a fork under `vendor/` is one like any other.
+            .filter(|dependency| {
+                !dependency["name"]
+                    .as_str()
+                    .is_some_and(|name| members.contains(name))
+            })
+            // A renamed dependency by both names, the crate's and the code's.
+            .flat_map(|dependency| {
+                let dev = dependency["kind"] == "dev";
+                [dependency["name"].as_str(), dependency["rename"].as_str()]
+                    .into_iter()
+                    .flatten()
+                    .map(move |name| (name.to_owned(), dev))
             })
             .collect();
         assert!(
@@ -3125,232 +2805,420 @@ fn dependencies_in_spec() {
     );
 }
 
-/// Every dependency but a dev one is in the README's `Built with` table or on
-/// [`NOT_IN_README`], and that list holds only dependencies absent from the table.
-#[test]
-fn dependencies_in_readme() {
-    let readme = repo_file("README.md");
-    let table = section(&readme, "\n## 🧱 Built with");
-    let in_table = |name: &str| {
-        let link = format!("[{name}](");
-        table
-            .lines()
-            .any(|line| line.starts_with('|') && line.contains(&link))
-    };
-    let shipped: Vec<&str> = direct_dependencies()
-        .iter()
-        .filter(|(_, dev)| !dev)
-        .map(|(name, _)| name.as_str())
-        .collect();
-
-    let unplaced: Vec<&str> = shipped
-        .iter()
-        .copied()
-        .filter(|name| !in_table(name) && !NOT_IN_README.contains(name))
-        .collect();
-    assert!(
-        unplaced.is_empty(),
-        "{unplaced:?} is a direct dependency and README.md's `Built with` table \
-         neither names it nor is it on NOT_IN_README. Add a row, or add it to the list"
-    );
-
-    let stale: Vec<&str> = NOT_IN_README
-        .into_iter()
-        .filter(|name| in_table(name) || !shipped.contains(name))
-        .collect();
-    assert!(
-        stale.is_empty(),
-        "NOT_IN_README lists {stale:?}, which the table names or no manifest declares"
-    );
-}
-
-/// A ready run is never cancelled by the draft run a push made just before it.
-#[test]
-fn ready_run_survives() {
-    let ci = repo_file(".github/workflows/ci.yml");
-    let group = ci
-        .lines()
-        .find(|line| line.trim_start().starts_with("group:"))
-        .expect("ci.yml has a concurrency group");
-    assert!(
-        group.contains("github.event.pull_request.draft"),
-        "the concurrency group is not keyed on the draft flag, so a push and the \
-         ready event cancel each other and the survivor can be the skipped run: {group}"
-    );
-    assert!(
-        group.contains("github.ref == 'refs/heads/main' && github.sha"),
-        "main's commits share a concurrency group, and a group keeps one pending \
-         run, so a burst of merges cancels the ones in the middle: {group}"
-    );
-}
-
-/// The names of the steps in `ci` that run `cargo test` without
-/// `VIGIA_BUDGET_SLACK`, which `support::budget` reads.
-fn unslacked_steps(ci: &str) -> Vec<String> {
-    without_comments(ci)
-        .split("- name:")
-        .skip(1)
-        .filter(|step| {
-            (step.contains("cargo test") || step.contains("cargo nextest"))
-                && !step.contains("VIGIA_BUDGET_SLACK:")
+/// The packages in `lock` that could run a picture's decode on a thread of
+/// their own, or in C: a thread pool, or a codec built on a native library.
+fn threaded_codecs(lock: &str) -> Vec<String> {
+    const CODECS: [&str; 10] = [
+        "png", "jpeg", "jpg", "gif", "webp", "tiff", "avif", "heif", "dav1d", "turbo",
+    ];
+    lock_packages(lock)
+        .filter_map(|(name, _)| {
+            let native = name.ends_with("-sys") && CODECS.iter().any(|codec| name.contains(codec));
+            (name == "rayon" || native).then(|| name.to_owned())
         })
-        .map(|step| step.lines().next().unwrap_or_default().trim().to_owned())
         .collect()
 }
 
-/// A wall-clock gate asks for slack through `budget`, and without the variable
-/// the step holds it to the raw bound. `watch.rs` ran that way unnoticed.
+/// The panic hook tells the picture worker apart by its thread's name, so a
+/// decoder that panics on a thread of its own would abort the pane after all.
 #[test]
-fn ci_tests_get_slack() {
-    let fixture = "      - name: test\n        run: cargo nextest run --workspace\n      \
-                   - name: doctests\n        run: cargo test --workspace --doc\n      \
-                   - name: budgets\n        run: cargo test --test budgets\n        \
-                   env:\n          VIGIA_BUDGET_SLACK: \"3\"\n";
+fn codecs_on_worker() {
     assert_eq!(
-        unslacked_steps(fixture),
-        ["test", "doctests"],
-        "the scan missed a test step with no slack"
+        threaded_codecs(&repo_file("Cargo.lock")),
+        Vec::<String>::new(),
+        "a decode could now run outside a picture's catch, where the panic hook aborts"
     );
-
-    let ci = repo_file(".github/workflows/ci.yml");
-    assert!(
-        ci.contains("cargo test"),
-        "ci.yml runs no `cargo test`, so this gate reads nothing"
-    );
-    let bare = unslacked_steps(&ci);
-    assert!(
-        bare.is_empty(),
-        "ci.yml runs `cargo test` without VIGIA_BUDGET_SLACK in {bare:?}, so every \
-         `budget()` bound those steps reach runs unloosened on a shared runner"
+    let fixture = "[[package]]\nname = \"rayon\"\n\n[[package]]\nname = \"libwebp-sys\"\n\n[[package]]\nname = \"png\"\n";
+    assert_eq!(
+        threaded_codecs(fixture),
+        ["rayon", "libwebp-sys"],
+        "the check no longer sees a thread pool or a native codec"
     );
 }
 
-/// The debug suite runs under nextest, every test and every failure, and the
-/// doctests keep a step of their own.
-///
-/// `cargo test` runs the binaries one after another and stops at the first
-/// that fails. Either of those coming back is a slower step that also says
-/// less when it is red.
-#[test]
-fn nextest_runs_the_suite() {
-    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    let step = step_block(&ci, "test");
-    assert!(
-        step.contains("cargo nextest run --workspace --profile ci"),
-        "the test step does not run the workspace under nextest's ci profile: {step}"
-    );
-    assert!(
-        ci.contains("tool: nextest"),
-        "ci.yml installs no nextest binary, so the test step cannot run"
-    );
-    assert!(
-        ci.contains("cargo test --workspace --doc"),
-        "ci.yml runs no doctests, which nextest does not run"
-    );
+/// Each package in a lock, by name and version.
+fn lock_packages(lock: &str) -> impl Iterator<Item = (&str, Option<&str>)> {
+    lock.split("[[package]]").filter_map(|block| {
+        let field = |key: &str| {
+            block.lines().find_map(|line| {
+                line.trim()
+                    .strip_prefix(key)?
+                    .strip_prefix(" = ")
+                    .map(|value| value.trim_matches('"'))
+            })
+        };
+        Some((field("name")?, field("version")))
+    })
+}
 
-    let config = repo_file(".config/nextest.toml");
-    let profile = config
-        .split_once("[profile.ci]")
-        .map(|(_, rest)| rest)
-        .expect(".config/nextest.toml declares the ci profile");
-    assert!(
-        profile.contains("fail-fast = false"),
-        "the ci profile stops at the first failure, so a red run hides the rest: {profile}"
-    );
-    assert!(
-        !config.contains("retries"),
-        "the nextest config retries tests, so a flake can report as a pass"
+/// The versions of `crate_name` the lock resolves, sorted.
+fn versions_of<'a>(lock: &'a str, crate_name: &str) -> Vec<&'a str> {
+    let mut versions: Vec<&str> = lock_packages(lock)
+        .filter(|(name, _)| *name == crate_name)
+        .filter_map(|(_, version)| version)
+        .collect();
+    versions.sort_unstable();
+    versions
+}
+
+/// The versions SPEC §6 names for `crate_name` in its list of the font
+/// crates' copies: "`skrifa` 0.44.0 and 0.46.2".
+fn named_versions<'a>(spec: &'a str, crate_name: &str) -> Vec<&'a str> {
+    let sentence = spec
+        .split("so the lock holds exactly these copies")
+        .nth(1)
+        .and_then(|rest| rest.split(". ").next())
+        .expect("SPEC §6 names the font crates' copies");
+    let mut versions: Vec<&str> = sentence
+        .split(&format!("`{crate_name}` "))
+        .nth(1)
+        .map(|rest| {
+            rest.split([',', '`'])
+                .next()
+                .unwrap_or_default()
+                .split(" and ")
+                .map(str::trim)
+                .collect()
+        })
+        .unwrap_or_default();
+    versions.sort_unstable();
+    versions
+}
+
+#[test]
+fn font_copies_named() {
+    // `hayro` needs a `skrifa` no `usvg` shares, so two copies are deliberate,
+    // and a third, or one nobody named, is not.
+    let (lock, spec) = (repo_file("Cargo.lock"), repo_file("SPEC.md"));
+    for crate_name in ["skrifa", "read-fonts", "fearless_simd"] {
+        let named = named_versions(&spec, crate_name);
+        assert!(!named.is_empty(), "SPEC §6 names no copy of {crate_name}");
+        assert_eq!(
+            versions_of(&lock, crate_name),
+            named,
+            "the lock's copies of {crate_name} are not the ones SPEC §6 names"
+        );
+    }
+    let three = "[[package]]\nname = \"skrifa\"\nversion = \"0.44.0\"\n\n[[package]]\nname = \"skrifa\"\nversion = \"0.45.0\"\n\n[[package]]\nname = \"skrifa\"\nversion = \"0.46.2\"\n";
+    assert_eq!(
+        versions_of(three, "skrifa"),
+        ["0.44.0", "0.45.0", "0.46.2"],
+        "the check no longer sees every copy"
     );
 }
 
-/// Every cache is written from main only, and the documents job never writes.
-///
-/// A pull request restores main's cache and rebuilds the workspace crates,
-/// which the cache does not hold anyway. A branch that saves spends the
-/// quota on a copy of the same dependencies and evicts the one every branch
-/// reads.
+/// PDFs are on in every build of vigia, `cargo install` included, and
+/// vigia-core leaves them to whoever depends on it.
 #[test]
-fn cache_saved_from_main_only() {
-    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    let uses: Vec<&str> = ci.split("- uses: Swatinem/rust-cache@v2").skip(1).collect();
+fn pdf_feature_shipped() {
+    let vigia = without_comments(&repo_file("crates/vigia/Cargo.toml"));
+    let default = vigia
+        .lines()
+        .find(|line| line.trim_start().starts_with("default = ["))
+        .unwrap_or_default();
     assert!(
-        uses.len() >= 6,
-        "ci.yml uses rust-cache {} time(s), so this gate reads too little",
-        uses.len()
+        default.contains("\"pdf\""),
+        "vigia's default features leave PDFs out: {default:?}"
     );
-    for (n, block) in uses.iter().enumerate() {
-        let with = block.split("\n      -").next().unwrap_or_default();
+    assert!(
+        vigia.contains("\npdf = [\"dep:hayro\", \"vigia-core/pdf\"]"),
+        "vigia's pdf feature no longer turns PDFs on in both crates"
+    );
+    let root = without_comments(&repo_file("Cargo.toml"));
+    let dist = root
+        .split_once("[workspace.metadata.dist]")
+        .map(|(_, rest)| rest.split("\n[").next().unwrap_or(rest))
+        .expect("Cargo.toml has a dist section");
+    assert!(
+        !dist.contains("default-features"),
+        "the release binaries are built without the default features: {dist}"
+    );
+    let core = without_comments(&repo_file("crates/vigia-core/Cargo.toml"));
+    assert!(
+        core.contains("\npdf = [") && !core.contains("\ndefault = ["),
+        "vigia-core turns PDFs on for every crate that depends on it"
+    );
+}
+
+/// Each fork under `vendor/` replaces the crate it forks in vigia's graph,
+/// so no type or thread-local exists twice. `forks.sh` checks the rest of a
+/// fork, which needs the network.
+#[test]
+fn forks_replace_crates() {
+    let output = Command::new(env!("CARGO"))
+        .args([
+            "tree",
+            "-p",
+            "vigia",
+            "-e",
+            "normal",
+            "--target",
+            "all",
+            "--all-features",
+            "--prefix",
+            "none",
+            "--format",
+            "{p}",
+            "--offline",
+        ])
+        .current_dir(repo_root())
+        .output()
+        .expect("cargo runs");
+    assert!(output.status.success(), "`cargo tree` failed");
+    let graph = String::from_utf8_lossy(&output.stdout);
+    let mut forks = 0;
+    for entry in std::fs::read_dir(repo_root().join("vendor"))
+        .expect("read vendor/")
+        .flatten()
+    {
+        if !entry.path().join("patches").is_dir() {
+            continue;
+        }
+        let patches = std::fs::read_to_string(entry.path().join("PATCHES.md")).expect("PATCHES.md");
+        let base = patches
+            .lines()
+            .find_map(|line| line.strip_prefix("Base: `"))
+            .and_then(|rest| rest.split_once('`'))
+            .map(|(name, _)| name.to_owned())
+            .expect("PATCHES.md names its base crate");
+        let manifest =
+            std::fs::read_to_string(entry.path().join("Cargo.toml")).expect("Cargo.toml");
+        let fork = manifest
+            .lines()
+            .find_map(|line| line.strip_prefix("name = \""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .expect("the fork has a name");
         assert!(
-            with.contains("save-if: ${{ github.ref == 'refs/heads/main' }}")
-                || with.contains("save-if: false"),
-            "rust-cache use {} saves from every branch:\n{with}",
-            n + 1
+            graph
+                .lines()
+                .any(|line| line.starts_with(&format!("{fork} v"))),
+            "vigia's graph does not hold the fork {fork}"
+        );
+        assert!(
+            !graph
+                .lines()
+                .any(|line| line.starts_with(&format!("{base} v"))),
+            "vigia's graph holds {base} beside its fork {fork}"
+        );
+        forks += 1;
+    }
+    assert!(forks > 0, "no fork was found, so this test checks nothing");
+    // Upstream `syntect` is held beside the fork in two places, `xtask` for
+    // `two-face`'s types and `vigia-core`'s tests to compare against; both stay
+    // the version the fork is cut from.
+    let base =
+        std::fs::read_to_string(repo_root().join("vendor/syntect/PATCHES.md")).expect("PATCHES.md");
+    let version = base
+        .lines()
+        .find_map(|line| line.strip_prefix("Base: `syntect` "))
+        .and_then(|rest| rest.split_whitespace().next())
+        .expect("a Base line for syntect");
+    assert!(
+        repo_file("xtask/Cargo.toml").contains(&format!("syntect = {{ version = \"={version}\"")),
+        "xtask's syntect is not the {version} the fork is cut from"
+    );
+    assert!(
+        repo_file("crates/vigia-core/Cargo.toml").contains(&format!(
+            "syntect-upstream = {{ package = \"syntect\", version = \"={version}\""
+        )),
+        "vigia-core's syntect-upstream is not the {version} the fork is cut from"
+    );
+}
+
+/// The workspace patches no crate: a `[patch]` reaches a checkout and never a
+/// crates.io build, so a fix carried that way ships to half the installs.
+#[test]
+fn no_patch_section() {
+    for file in ["Cargo.toml", ".cargo/config.toml", ".cargo/config"] {
+        let Ok(text) = std::fs::read_to_string(repo_root().join(file)) else {
+            continue;
+        };
+        assert!(
+            !text
+                .lines()
+                .map(str::trim_start)
+                .any(|line| { line.starts_with("[patch") || line.starts_with("patch.") }),
+            "{file} takes a patch; publish the fix as a vendor/ fork instead"
         );
     }
 }
 
-/// Runs `cited-gates.sh` in a scratch repository holding `t/a.rs` with
-/// `fn kept`, over one commit whose body is `message`.
-#[cfg(unix)]
-fn cited_gates(case: &str, message: &str, body: &str) -> (bool, String) {
-    run_in_scratch(
-        case,
-        &[("t/a.rs", "fn kept() {}\nfn kept_more() {}\n")],
-        &[("change", message)],
-        "cited-gates.sh",
-        ("BODY", body),
-    )
+/// Each job under `jobs:`, by name, with its own lines.
+fn jobs_of(workflow: &str) -> Vec<(String, String)> {
+    let Some((_, rest)) = workflow.split_once("\njobs:") else {
+        return Vec::new();
+    };
+    // `jobs:` is the last top-level key in every workflow here.
+    let names = keys_at_indent(rest, 2);
+    names
+        .iter()
+        .map(|name| {
+            let from = rest
+                .split_once(&format!("\n  {name}:\n"))
+                .map_or("", |(_, rest)| rest);
+            let next = names
+                .iter()
+                .filter_map(|other| from.find(&format!("\n  {other}:\n")))
+                .min()
+                .unwrap_or(from.len());
+            (name.clone(), from[..next].to_owned())
+        })
+        .collect()
 }
 
-/// A commit or PR body that cites a gate the branch does not define fails.
-#[cfg(unix)]
+/// Each release archive is attested and each binary carries its crate list.
 #[test]
-fn cited_gates_exist() {
-    let (passed, said) = cited_gates("kept", "Gate: `a.rs::kept`.", "");
-    assert!(passed, "a gate the branch defines failed:\n{said}");
-
-    let (passed, said) = cited_gates("prefix", "Gate: `a.rs::kep`.", "");
-    assert!(
-        !passed,
-        "a name that is only a prefix of a gate passed:\n{said}"
+fn release_attested() {
+    let manifest = repo_file("Cargo.toml");
+    for setting in ["github-attestations = true", "cargo-auditable = true"] {
+        assert!(
+            manifest.lines().any(|line| line == setting),
+            "[workspace.metadata.dist] does not set {setting}"
+        );
+    }
+    let release = without_comments(&repo_file(".github/workflows/release.yml"));
+    let jobs = jobs_of(&release);
+    let attesting: Vec<&str> = jobs
+        .iter()
+        .filter(|(_, block)| block.contains("\"attestations\": \"write\""))
+        .map(|(job, _)| job.as_str())
+        .collect();
+    assert_eq!(
+        attesting,
+        ["host"],
+        "the attestation scopes reach other jobs"
     );
-
-    let (passed, said) = cited_gates("file", "Gate: `b.rs::kept`.", "");
-    assert!(!passed, "a gate cited in the wrong file passed:\n{said}");
-
-    let (passed, said) = cited_gates("body", "No gate.", "Gate: `a.rs::gone`.");
-    assert!(!passed, "a PR body citing a missing gate passed:\n{said}");
+    let host = jobs
+        .iter()
+        .find(|(job, _)| job == "host")
+        .map(|(_, block)| block.as_str())
+        .expect("dist's host job");
     assert!(
-        said.contains("a.rs::gone"),
-        "the missing gate was not named:\n{said}"
+        host.contains("uses: actions/attest@"),
+        "the host job attests nothing"
     );
+    let signing: Vec<&str> = jobs
+        .iter()
+        .filter(|(_, block)| block.contains("\"id-token\": \"write\""))
+        .map(|(job, _)| job.as_str())
+        .collect();
+    assert_eq!(
+        signing,
+        ["host", "custom-publish-crates-io"],
+        "an OIDC token reaches a job that neither attests nor publishes"
+    );
+    assert!(
+        jobs.iter()
+            .any(|(job, block)| job == "build-local-artifacts"
+                && block.contains("Install cargo-auditable")),
+        "the build job builds without cargo-auditable"
+    );
+    // No job that can sign as this repository runs a script fetched unpinned.
+    for (job, block) in &jobs {
+        let signs = block.contains("\"id-token\": \"write\"")
+            || block.contains("\"attestations\": \"write\"");
+        assert!(
+            !signs
+                || !(block.contains("curl ") || block.contains("| sh") || block.contains("| iex")),
+            "job `{job}` holds a signing scope and runs a fetched script"
+        );
+    }
 }
 
-/// The lint job checks cited gates on pull requests, with the body and history.
-#[test]
-fn ci_runs_cited_gates() {
-    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    let lint = ci
-        .split_once("\n  lint:")
-        .and_then(|(_, rest)| rest.split_once("\n  test:"))
-        .map(|(lint, _)| lint)
-        .expect("ci.yml has a lint job before its test job");
-    assert!(
-        lint.contains("sh .github/scripts/cited-gates.sh")
-            && lint.contains("github.event.pull_request.body"),
-        "the lint job does not run cited-gates.sh with the PR body:\n{lint}"
-    );
-}
+#[path = "../../../xtask/src/frames.rs"]
+#[allow(dead_code)]
+mod frames;
 
-/// The lint job's one network download retries, so a release CDN that answers
-/// 500 once does not turn `main` red.
+/// Each frame picture under `assets/` is exactly what the generator draws from
+/// its snapshot today, every picture there is one the generator knows, and every
+/// docs page that shows one names it with its label. A failure is fixed by
+/// `cargo run -p xtask --bin frames`.
 #[test]
-fn dist_install_retries() {
-    let ci = without_comments(&repo_file(".github/workflows/ci.yml"));
-    let step = step_block(&ci, "the generated release workflow is current");
-    assert!(
-        step.contains("for attempt in") && step.contains("break") && step.contains("|| exit 1"),
-        "the cargo-dist install does not retry and then fail, so one bad download \
-         either fails the build or is swallowed:\n{step}"
+fn frame_svgs_match() {
+    for frame in frames::FRAMES {
+        let snapshot = repo_file(&format!("{}/{}", frames::SNAPSHOTS, frame.snapshot));
+        let svg = repo_file(&format!("assets/{}", frame.file));
+        assert!(
+            svg == frames::draw(frame, &snapshot),
+            "{} is not what {} draws today; run `cargo run -p xtask --bin frames`",
+            frame.file,
+            frame.snapshot
+        );
+        // A label points at the row whose text it names, so a renderer change
+        // that moves a row cannot leave a label on the wrong one.
+        if !frame.labels.is_empty() {
+            let drawn = frames::drawn_rows(frame, &snapshot);
+            for label in frame.labels {
+                assert!(
+                    drawn
+                        .get(label.row)
+                        .is_some_and(|row| row.contains(label.marker)),
+                    "{}'s {} label points at a row without {:?}",
+                    frame.file,
+                    label.name,
+                    label.marker
+                );
+            }
+        }
+        if let Some(run) = frames::overflow(&svg) {
+            panic!("{} draws past its window: {run}", frame.file);
+        }
+        // XML forbids a double hyphen inside a comment, and a viewer then draws
+        // nothing at all.
+        for comment in svg.split("<!--").skip(1) {
+            let body = comment.split("-->").next().unwrap_or_default();
+            assert!(
+                !body.contains("--"),
+                "{} has a comment no XML parser accepts",
+                frame.file
+            );
+        }
+    }
+    let known: Vec<&str> = frames::FRAMES.iter().map(|frame| frame.file).collect();
+    for entry in std::fs::read_dir(repo_root().join("assets"))
+        .expect("read assets/")
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("frame-") {
+            assert!(
+                known.contains(&name.as_str()),
+                "assets/{name} is a frame the generator no longer draws"
+            );
+        }
+    }
+    // The README links by absolute URL, so crates.io can load it.
+    let mut pages: Vec<(std::path::PathBuf, &str)> = std::fs::read_dir(repo_root().join("docs"))
+        .expect("read docs/")
+        .flatten()
+        .map(|entry| (entry.path(), "../assets/"))
+        .collect();
+    pages.push((
+        repo_root().join("README.md"),
+        "https://raw.githubusercontent.com/breferrari/vigia/main/assets/",
+    ));
+    let readme = std::fs::read_to_string(repo_root().join("README.md")).expect("read README.md");
+    assert_eq!(
+        readme.matches("assets/frame-").count(),
+        readme
+            .matches("https://raw.githubusercontent.com/breferrari/vigia/main/assets/frame-")
+            .count(),
+        "README.md links a frame by a relative path, which crates.io cannot load"
     );
+    for (path, prefix) in pages {
+        let page = std::fs::read_to_string(&path).unwrap_or_default();
+        for frame in frames::FRAMES {
+            let image = format!("({prefix}{})", frame.file);
+            for (at, _) in page.match_indices(&image) {
+                let alt = page[..at].rsplit("![").next().unwrap_or_default();
+                assert_eq!(
+                    alt.trim_end_matches(']'),
+                    frame.label,
+                    "{} shows {} with alt text that is not its label",
+                    path.display(),
+                    frame.file
+                );
+            }
+        }
+    }
 }

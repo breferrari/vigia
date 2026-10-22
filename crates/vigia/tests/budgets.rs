@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use ratatui_image::picker::ProtocolType;
 use vigia::{
     ARRIVING_FRAME, Action, App, BOX_ROWS, Body, Change, Glyphs, Input, Key, LEAVING, NoteEffects,
     PaintStats, Pointing, Row, Theme, View, WHEEL_ROWS, body_layout, box_cells, box_entrance,
@@ -2496,10 +2497,10 @@ fn a_frame_with_fifty_notes_departing_holds_the_frame_budget() {
             if !effects.is_running() {
                 effects.arm(departures(arriving), &theme, Instant::now());
                 let counted = if arriving { &arrivals } else { &sweeps };
-                counted.set(counted.get() + 1);
+                counted.update(|v| v + 1);
                 arriving = !arriving;
             }
-            running.set(running.get() + usize::from(effects.is_running()));
+            running.update(|v| v + usize::from(effects.is_running()));
         }
         time_cpu(|| {
             sample(history, scratch.root(), EDITED_PATH);
@@ -2856,7 +2857,7 @@ fn a_frame_with_the_box_open_and_its_entrance_running_holds_the_frame_budget() {
                 );
                 if let Some(over) = box_cells(&laid, &view) {
                     entrance.process(ARRIVING_FRAME.into(), &mut buf, over);
-                    processed.set(processed.get() + 1);
+                    processed.update(|v| v + 1);
                 }
                 if entrance.done() {
                     entrance = box_entrance(&theme);
@@ -3282,4 +3283,675 @@ fn arrival_holds_the_budget() {
             (fenced, None)
         },
     );
+}
+
+/// I9 with a changed image's pictures on screen: a settled frame repaints the
+/// built panels and decodes nothing. `SPEC.md` §11.1.
+#[test]
+fn pictures_frame_budget() {
+    pictures_frame(ProtocolType::Halfblocks);
+}
+
+/// The same with Kitty placeholders, after the one frame that sends the images.
+#[test]
+fn pictures_frame_kitty() {
+    pictures_frame(ProtocolType::Kitty);
+}
+
+/// The frame that first draws Kitty pictures, at the largest size
+/// measured, a 300x100 pane at a high-DPI 20x40 cell, costs what the same
+/// frame costs in half-blocks: the image bytes go on the writer's lane, not
+/// into the frame. Interleaved, best of three each, so a loaded machine moves
+/// both, and failed only when the thread's CPU agrees with the wall.
+#[test]
+fn pictures_first_draw_large() {
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let draw = |protocol| {
+        pictures_frame_at(
+            protocol,
+            "a/screen.png",
+            support::screen_png(10),
+            support::screen_png(200),
+            Rect::new(0, 0, 300, 100),
+            Some((20, 40)),
+            false,
+        )
+    };
+    // The round with the least thread CPU, so wall and CPU are one frame's.
+    let best = |was: (Duration, Duration), now: (Duration, Duration)| {
+        if now.1 < was.1 { now } else { was }
+    };
+    let (mut kitty, mut halfblocks) = (
+        (Duration::MAX, Duration::MAX),
+        (Duration::MAX, Duration::MAX),
+    );
+    let mut sent = 0;
+    for _ in 0..3 {
+        let (bytes, first) = draw(ProtocolType::Kitty);
+        sent = bytes;
+        kitty = best(kitty, first);
+        halfblocks = best(halfblocks, draw(ProtocolType::Halfblocks).1);
+    }
+    let over = |kitty: Duration, halfblocks: Duration| {
+        kitty.as_secs_f64() > halfblocks.as_secs_f64() * 1.5 + 0.002
+    };
+    eprintln!(
+        "note: first draw, Kitty {kitty:?} with {sent} bytes of uploads, half-blocks {halfblocks:?}"
+    );
+    assert!(
+        sent > 1_000_000,
+        "the Kitty pictures sent {sent} bytes, so this prices nothing"
+    );
+    if over(kitty.0, halfblocks.0) && !over(kitty.1, halfblocks.1) {
+        eprintln!(
+            "note: first draw over on the wall, {:?} against {:?}, and not in thread CPU, {:?} against {:?}: the host",
+            kitty.0, halfblocks.0, kitty.1, halfblocks.1
+        );
+        return;
+    }
+    assert!(
+        !over(kitty.0, halfblocks.0),
+        "the frame that first draws Kitty pictures took {kitty:?} against half-blocks' {halfblocks:?} \
+         (wall, thread CPU), so the image bytes are back on the frame"
+    );
+}
+
+/// The settled frames after the first draw, at the largest size measured, in
+/// Kitty and in half-blocks, against I9.
+#[test]
+#[ignore = "scheduled budget"]
+fn pictures_settled_large() {
+    for protocol in [ProtocolType::Kitty, ProtocolType::Halfblocks] {
+        pictures_frame_at(
+            protocol,
+            "a/screen.png",
+            support::screen_png(10),
+            support::screen_png(200),
+            Rect::new(0, 0, 300, 100),
+            Some((20, 40)),
+            true,
+        );
+    }
+}
+
+/// The first-draw table: run by hand with `--ignored --nocapture`.
+#[test]
+#[ignore = "a measurement for the record, not a gate"]
+fn first_draw_table() {
+    for (width, height) in [(120, 40), (240, 80), (300, 100)] {
+        for (protocol, cell) in [
+            (ProtocolType::Kitty, (10, 20)),
+            (ProtocolType::Kitty, (20, 40)),
+            (ProtocolType::Halfblocks, (20, 40)),
+        ] {
+            let (sent, first) = pictures_frame_at(
+                protocol,
+                "a/screen.png",
+                support::screen_png(10),
+                support::screen_png(200),
+                Rect::new(0, 0, width, height),
+                Some(cell),
+                false,
+            );
+            eprintln!(
+                "table: {protocol:?} {width}x{height} pane, {}x{} cell, {sent} bytes sent, first draw {first:?}",
+                cell.0, cell.1
+            );
+        }
+    }
+}
+
+/// The same with Sixel, which writes each panel's sequence into its first cell
+/// on every frame.
+#[test]
+fn pictures_frame_sixel() {
+    pictures_frame(ProtocolType::Sixel);
+}
+
+/// The same with iTerm2 images, one per panel row.
+#[test]
+fn pictures_frame_iterm2() {
+    pictures_frame(ProtocolType::Iterm2);
+}
+
+fn pictures_frame(protocol: ProtocolType) {
+    pictures_frame_of(
+        protocol,
+        "a/screen.png",
+        support::screen_png(10),
+        support::screen_png(200),
+    );
+}
+
+/// [`support::icon_svg`] at 1024x1024.
+fn large_svg(seed: u8) -> String {
+    support::icon_svg(seed).replace(r#"width="24" height="24""#, r#"width="1024" height="1024""#)
+}
+
+/// The same with a changed SVG's pictures on screen.
+#[test]
+fn pictures_frame_svg() {
+    pictures_frame_of(
+        ProtocolType::Halfblocks,
+        "a/icon.svg",
+        // Drawn at its own size, so large enough to fill the pane as a
+        // screenshot would.
+        large_svg(1).into_bytes(),
+        large_svg(2).into_bytes(),
+    );
+}
+
+/// The same with a changed PDF's pictures on screen.
+#[cfg(feature = "pdf")]
+#[test]
+fn pictures_frame_pdf() {
+    pictures_frame_of(
+        ProtocolType::Halfblocks,
+        "a/doc.pdf",
+        support::pdf(&[(1024, 1024, &support::icon_ops(1))]),
+        support::pdf(&[(1024, 1024, &support::icon_ops(200))]),
+    );
+}
+
+/// The worker draws a page of 20 MB of content within its bound: priced by
+/// its length, it renders small. Measured 2026-10-19 on macOS, release:
+/// 0.29 to 0.51 seconds from 3 to 20 MB, the longest at 20.
+#[cfg(feature = "pdf")]
+#[test]
+fn pdf_stream_bound() {
+    use vigia::pictures::{Inks, Pictures};
+
+    let mut ops = support::icon_ops(200);
+    ops.push(b'\n');
+    while ops.len() < 10_000 {
+        ops.extend_from_slice(b"0.5 0.5 0.5 rg 1 1 3 3 re f\n");
+    }
+    let heavy = support::pdf_doc(&[(24, 24, &ops)], "", 2_000, &[], "");
+    let scratch = Scratch::new("pdf-stream-bound");
+    scratch.write("a.pdf", support::icon_pdf(1));
+    scratch.commit_all("baseline");
+    scratch.write("a.pdf", &heavy);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let pane = Rect::new(0, 0, 120, 40);
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let layout = layout_of(&app, pane, frame.files().len());
+    let history = History::new();
+    let mut highlighter = Highlighter::eager();
+    let view = app
+        .view(&mut frame, &mut highlighter, &history, layout)
+        .expect("view");
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    let _timed = exclusively_timed();
+    // Each in a cache of its own, so each builds the page from nothing.
+    let build = || {
+        let mut pictures = Pictures::new(
+            Inks {
+                canvas: (0x0d, 0x11, 0x17),
+                changed: (0xf8, 0x51, 0x49),
+            },
+            ratatui_image::picker::Picker::halfblocks(),
+            Box::new(|| {}),
+        );
+        let mut rows = view.rows.clone();
+        let began = Instant::now();
+        pictures.attach(&mut rows, &frame);
+        assert!(
+            pictures.settle(support::ceiling(Duration::from_secs(60))),
+            "the picture was not built"
+        );
+        began.elapsed()
+    };
+    let round = || {
+        let mut builds = Samples::new(PDF_STREAM_BUILDS);
+        for _ in 0..PDF_STREAM_BUILDS {
+            builds.push(build());
+        }
+        builds
+    };
+    let first = round();
+    // The build runs on the worker, which this thread's CPU clock cannot see,
+    // so a breach is retried once and never attributed.
+    holds_p99_rounds(
+        "the worker builds a page of 20 MB of content within its bound",
+        budget(Duration::from_millis(600)),
+        &first,
+        String::new,
+        || (round(), None),
+    );
+}
+
+/// Builds of the 20 MB page timed per round.
+#[cfg(feature = "pdf")]
+const PDF_STREAM_BUILDS: usize = 3;
+
+/// A PDF of about 16 MiB, the most the frame path reads: an image's worth of
+/// bytes it skips, and a content stream that inflates to 15 MiB, which it
+/// measures.
+#[cfg(feature = "pdf")]
+fn heaviest_pdf(seed: u8) -> Vec<u8> {
+    let image_bytes: Vec<u8> = (0..15u32 << 20).map(|n| (n as u8) ^ seed).collect();
+    let mut image = format!(
+        "<< /Type /XObject /Subtype /Image /Width 2048 /Height 2048 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n",
+        image_bytes.len()
+    )
+    .into_bytes();
+    image.extend_from_slice(&image_bytes);
+    image.extend_from_slice(b"\nendstream");
+    let zeros = support::zlib_zeros(15 << 20);
+    let mut content = format!(
+        "<< /Filter /FlateDecode /Length {} >>\nstream\n",
+        zeros.len()
+    )
+    .into_bytes();
+    content.extend_from_slice(&zeros);
+    content.extend_from_slice(b"\nendstream");
+    support::pdf_doc(
+        &[(24, 24, &support::icon_ops(seed))],
+        "/XObject << /Im1 5 0 R >>",
+        1,
+        &[&image, &content],
+        "",
+    )
+}
+
+/// I9 while five PDFs of about 16 MiB each are changed on screen: the frame
+/// that first sees them reads their headers alone, and no frame after it
+/// reads them at all.
+#[cfg(feature = "pdf")]
+#[test]
+fn pdf_frame_read() {
+    use vigia::pictures::{Inks, Pictures};
+
+    // From the start: writing 80 MiB of PDFs is the heaviest fixture here, and
+    // it must not run beside another gate's timed region.
+    let _timed = exclusively_timed();
+
+    let scratch = Scratch::new("i9-pdf-read");
+    for n in 0..5 {
+        scratch.write(&format!("a/doc_{n}.pdf"), heaviest_pdf(n));
+    }
+    scratch.commit_all("baseline");
+    for n in 0..5 {
+        scratch.write(&format!("a/doc_{n}.pdf"), heaviest_pdf(n + 100));
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let pane = Rect::new(0, 0, 120, 40);
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let theme = Theme::dark();
+    let mut buf = Buffer::empty(pane);
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        ratatui_image::picker::Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let screen_layout = layout_of(&app, pane, frame.files().len());
+    let mut paint = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
+        let chrome = app.chrome(
+            "fixture",
+            None,
+            vigia::Stood {
+                standing: &Standing::Current,
+                now: 0,
+            },
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
+        let mut view = app
+            .view(frame, highlighter, &history, screen_layout)
+            .expect("view");
+        pictures.attach(&mut view.rows, frame);
+        render(&mut buf, pane, &view, &theme, Glyphs::default(), &chrome);
+        view
+    };
+    // The first paint a reader sees, cold, in a pane of its own.
+    let (sized, read, cold_wall, cold_cpu) = pdf_cold_paint(&scratch, pane);
+    assert_eq!(
+        sized, 5,
+        "not every PDF drew a size line, so this would time less"
+    );
+    eprintln!(
+        "note: the first frame with {sized} changed 16 MiB PDFs on screen took {cold_cpu:?} \
+         of thread CPU, {cold_wall:?} on the wall, and read {read} bytes"
+    );
+    // What the CPU gate cannot see: a frame that waited on reading them whole.
+    assert!(
+        read < 1024 * 1024,
+        "the first frame read {read} bytes of five 16 MiB PDFs, more than their headers"
+    );
+    if !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return;
+    }
+    // Each is sized on the worker, so the frame that first sees them reads
+    // only their headers. Gated on thread CPU: a fresh runner's disk and
+    // scanner can hold the wall clock on files written a moment ago.
+    assert!(
+        cold_cpu < budget(I9_FRAME),
+        "I9: the first frame with five changed 16 MiB PDFs on screen took {cold_cpu:?} \
+         of thread CPU ({cold_wall:?} on the wall)"
+    );
+    let mut cold = || {
+        let (sized, read, wall, cpu) = pdf_cold_paint(&scratch, pane);
+        assert_eq!(
+            sized, 5,
+            "a fresh pane drew {sized} of five PDFs, so it would time less"
+        );
+        assert!(
+            read < 1024 * 1024,
+            "a fresh pane read {read} bytes of five PDFs"
+        );
+        (wall, cpu)
+    };
+    let mut colds = Samples::new(COLD_PDF_FRAMES);
+    for _ in 0..COLD_PDF_FRAMES {
+        colds.push(cold().0);
+    }
+    holds_p99(
+        "I9: the first frame of a fresh pane with five changed 16 MiB PDFs on screen",
+        budget(I9_FRAME),
+        &colds,
+        String::new,
+        &mut cold,
+    );
+    // The long-lived pane only now, so its worker's builds run beside none of
+    // the cold samples.
+    paint(&mut frame, &mut app, &mut highlighter);
+    // Read once more when they settle, as every file read inside the margin is.
+    settle(&mut frame);
+    let mut timed = |frame: &mut Frame, app: &mut App, highlighter: &mut Highlighter| {
+        time_cpu(|| {
+            paint(frame, app, highlighter);
+        })
+    };
+    for _ in 0..WARMUP_FRAMES {
+        timed(&mut frame, &mut app, &mut highlighter);
+    }
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        frames.push(timed(&mut frame, &mut app, &mut highlighter).0);
+    }
+    eprintln!(
+        "note: frames with five 16 MiB PDFs on screen p50 {:?}, p99 {:?}",
+        frames.percentile(0.5),
+        frames.percentile(0.99)
+    );
+    holds_p99(
+        "I9 over half: a frame with five changed 16 MiB PDFs on screen, after the one that read them",
+        budget(I9_FRAME / 2),
+        &frames,
+        || format!("({sized} PDFs sized on screen)"),
+        || timed(&mut frame, &mut app, &mut highlighter),
+    );
+}
+
+/// Cold frames timed after the first, each in a pane of its own.
+#[cfg(feature = "pdf")]
+const COLD_PDF_FRAMES: usize = 20;
+
+/// The first frame of a fresh pane over `scratch`'s changed PDFs: how many drew
+/// a size line, the bytes it read, and its wall and thread CPU time.
+#[cfg(feature = "pdf")]
+fn pdf_cold_paint(scratch: &Scratch, pane: Rect) -> (usize, u64, Duration, Duration) {
+    use vigia::pictures::{Inks, Pictures};
+
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let mut buf = Buffer::empty(pane);
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        ratatui_image::picker::Picker::halfblocks(),
+        Box::new(|| {}),
+    );
+    let screen_layout = layout_of(&app, pane, frame.files().len());
+    let chrome = app.chrome(
+        "fixture",
+        None,
+        vigia::Stood {
+            standing: &Standing::Current,
+            now: 0,
+        },
+        Pointing::default(),
+        Default::default(),
+        "",
+    );
+    let (view, wall, cpu) = timed_cpu(|| {
+        let mut view = app
+            .view(&mut frame, &mut highlighter, &history, screen_layout)
+            .expect("view");
+        pictures.attach(&mut view.rows, &frame);
+        render(
+            &mut buf,
+            pane,
+            &view,
+            &Theme::dark(),
+            Glyphs::default(),
+            &chrome,
+        );
+        view
+    });
+    let sized = view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Sized { .. }))
+        .count();
+    // Nothing on screen, so the worker skips what it has queued; its job in
+    // flight finishes here rather than beside the next timed frame.
+    pictures.attach(&mut [], &frame);
+    assert!(
+        pictures.settle(support::ceiling(Duration::from_secs(60))),
+        "a fresh pane's worker did not finish"
+    );
+    let stats = frame.stats();
+    (
+        sized,
+        stats.bytes + stats.measured_bytes + stats.paired_bytes,
+        wall,
+        cpu,
+    )
+}
+
+fn pictures_frame_of(protocol: ProtocolType, path: &str, old: Vec<u8>, new: Vec<u8>) {
+    pictures_frame_at(
+        protocol,
+        path,
+        old,
+        new,
+        Rect::new(0, 0, 120, 40),
+        None,
+        true,
+    );
+}
+
+/// [`pictures_frame_of`] on a pane of `pane`, at `cell` pixels a cell, or the
+/// picker's own, its settled frames gated only when `settled`. The bytes the
+/// first frame's uploads carry and that frame's wall and thread time.
+fn pictures_frame_at(
+    protocol: ProtocolType,
+    path: &str,
+    old: Vec<u8>,
+    new: Vec<u8>,
+    pane: Rect,
+    cell: Option<vigia::pictures::Cell>,
+    settled: bool,
+) -> (usize, (Duration, Duration)) {
+    use vigia::pictures::{self, Inks, Pictures};
+
+    let scratch = Scratch::new(&format!("i9-pictures-{protocol:?}"));
+    scratch.write(path, &old);
+    for file in 0..20 {
+        scratch.write(&format!("b/file_{file}.rs"), support::numbered_lines(200));
+    }
+    scratch.commit_all("baseline");
+    scratch.write(path, &new);
+    for file in 0..20 {
+        scratch.edit_line(&format!("b/file_{file}.rs"), 5, "fn changed() {}");
+    }
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    settle(&mut frame);
+
+    let mut app = App::new();
+    app.draw_pictures(true);
+    let mut highlighter = Highlighter::eager();
+    let history = History::new();
+    let theme = Theme::dark();
+    let mut buf = Buffer::empty(pane);
+    let mut pictures = Pictures::new(
+        Inks {
+            canvas: (0x0d, 0x11, 0x17),
+            changed: (0xf8, 0x51, 0x49),
+        },
+        {
+            let mut picker = ratatui_image::picker::Picker::halfblocks();
+            picker.set_protocol_type(protocol);
+            cell.map_or(picker.clone(), |cell| pictures::picker_at(&picker, cell))
+        },
+        Box::new(|| {}),
+    );
+    let screen_layout = layout_of(&app, pane, frame.files().len());
+    let sent = std::cell::Cell::new(0);
+    let mut paint = |frame: &mut Frame,
+                     app: &mut App,
+                     highlighter: &mut Highlighter,
+                     pictures: &mut Pictures| {
+        let chrome = app.chrome(
+            "fixture",
+            None,
+            vigia::Stood {
+                standing: &Standing::Current,
+                now: 0,
+            },
+            Pointing::default(),
+            Default::default(),
+            "",
+        );
+        let mut view = app
+            .view(frame, highlighter, &history, screen_layout)
+            .expect("view");
+        pictures.attach(&mut view.rows, frame);
+        // What the shell's writer does with an upload, here at once: a Kitty
+        // picture draws once the terminal holds it.
+        let uploads = pictures.written_at_once();
+        if !uploads.is_empty() {
+            sent.set(
+                sent.get()
+                    + uploads
+                        .iter()
+                        .map(|upload| upload.data.len())
+                        .sum::<usize>(),
+            );
+            pictures.attach(&mut view.rows, frame);
+        }
+        render(&mut buf, pane, &view, &theme, Glyphs::default(), &chrome);
+        view
+    };
+    paint(&mut frame, &mut app, &mut highlighter, &mut pictures);
+    let building = Instant::now();
+    assert!(
+        pictures.settle(support::ceiling(Duration::from_secs(120))),
+        "the pictures were not built"
+    );
+    eprintln!(
+        "note: three pictures of a 1170x2532 pair built in {:?}, off the paint",
+        building.elapsed()
+    );
+    // The frame that first draws them, once their uploads are written.
+    let (view, first) = {
+        // Alone on the machine, so a parallel test's work is not counted in
+        // it.
+        let _timed = exclusively_timed();
+        let (view, wall, cpu) =
+            timed_cpu(|| paint(&mut frame, &mut app, &mut highlighter, &mut pictures));
+        (view, (wall, cpu))
+    };
+    eprintln!(
+        "note: the first frame to draw them on a {}x{} pane took {:?}, {:?} of thread CPU, its uploads {} bytes",
+        pane.width,
+        pane.height,
+        first.0,
+        first.1,
+        sent.get()
+    );
+    let built = view
+        .rows
+        .iter()
+        .filter(|row| matches!(row, Row::Picture { ready: Some(_), .. }))
+        .count();
+    assert!(
+        built > 10,
+        "{built} rows of built pictures are on screen, so this would time a frame \
+         without them"
+    );
+
+    let decoded = pictures.decodes();
+    let mut timed = |frame: &mut Frame,
+                     app: &mut App,
+                     highlighter: &mut Highlighter,
+                     pictures: &mut Pictures| {
+        time_cpu(|| {
+            paint(frame, app, highlighter, pictures);
+        })
+    };
+    for _ in 0..WARMUP_FRAMES {
+        timed(&mut frame, &mut app, &mut highlighter, &mut pictures);
+    }
+    assert_eq!(
+        pictures.decodes(),
+        decoded,
+        "a settled frame decoded a picture again"
+    );
+    assert_eq!(
+        pictures::decodes_off_worker(),
+        0,
+        "a picture was decoded on the thread that paints"
+    );
+
+    if !settled || !absolute_gates_apply("cargo test --release -p vigia --test budgets") {
+        return (sent.get(), first);
+    }
+    let _timed = exclusively_timed();
+    let mut frames = Samples::new(SAMPLED_FRAMES);
+    for _ in 0..SAMPLED_FRAMES {
+        frames.push(timed(&mut frame, &mut app, &mut highlighter, &mut pictures).0);
+    }
+    eprintln!(
+        "note: {protocol:?} frames p50 {:?}, p99 {:?}",
+        frames.percentile(0.5),
+        frames.percentile(0.99)
+    );
+    holds_p99(
+        &format!(
+            "I9: a settled frame repainting a changed image's three pictures in {protocol:?} \
+             on a {}x{} pane",
+            pane.width, pane.height
+        ),
+        budget(I9_FRAME),
+        &frames,
+        || format!("({built} picture rows on screen)"),
+        || timed(&mut frame, &mut app, &mut highlighter, &mut pictures),
+    );
+    (sent.get(), first)
 }

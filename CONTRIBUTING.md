@@ -52,6 +52,8 @@ Every pull request carries one of two labels before it merges: `release` or `int
 
 What you control is the line a user reads. Put `Release-note: <one sentence>` in the Release note section of the pull request description, or in a commit message body on your branch, and that sentence becomes the changelog line instead of your title. Put `Release-note: none` when the change is internal. Write the sentence for someone who has never opened this repository: name what changed for them, not the rule behind it. If you write nothing, the title of a `release` pull request becomes the line, so make the title readable on its own.
 
+When a change makes an earlier pull request's line wrong, add `Release-note-replaces: #<n>` beside your own note, one per pull request, and that line leaves the release's notes. A maintainer can open a release's notes with a short summary by adding `.github/release-summary.md` before the release; the release commit removes it.
+
 The release reads the commit message first and the pull request description second, so a line in a commit wins. The CI check on wording, described below, reads commits only.
 
 Start the title of an `internal` pull request with a prefix that says what kind of work it is: `ci:`, `docs:`, `spec:`, `roadmap:`, `skill:`, `test:`, or `chore:` for anything else. A `release` pull request starts with `fix:` for a defect or `feat:` for a new feature. Its title can become the changelog line, prefix included. The prefix is for people reading the log and the changelog. The label is what the release reads.
@@ -74,17 +76,33 @@ cargo nextest run --workspace --profile ci    # the suite; cargo install cargo-n
 cargo nextest run -p vigia --test notes heat  # one suite, then a substring of the test names
 cargo test --workspace --doc                  # the doctests, which nextest does not run
 cargo test --release --test budgets           # a release gate; first_paint is the other, run as its own step like CI does
-cargo clippy --workspace --all-targets
-cargo fmt --all
+CARGO_BUILD_WARNINGS=deny cargo clippy --workspace --all-targets   # the lints, with the warnings CI refuses
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps   # the docs, with the warnings CI refuses
+cargo fmt -p vigia-core -p vigia -p xtask    # the members; --all would reformat the forks under vendor/
+cargo deny check advisories licenses sources   # cargo install cargo-deny --version 0.20.2 --locked
+cargo deny --exclude-dev check bans             # no crate that needs a C toolchain, outside dev-dependencies
 ```
+
+To look at every picture state beside ordinary code edits, build the scene bed and run `vigia` on what it prints in another pane:
+
+```sh
+cargo run -p xtask --bin scene -- static   # every state at once, listed one per line
+cargo run -p xtask --bin scene -- replay   # the same states written in bursts, about 20 seconds
+```
+
+Each run makes a new repository under your temp directory and touches nothing else.
+
+PDF pictures are on by default, in the release binaries, `cargo install vigia` and every build from a checkout. `--no-default-features` builds vigia without them, and then a changed PDF shows as binary.
 
 The suites run under nextest with its `ci` profile, which runs every test and reports every failure in one pass; `cargo test`, and nextest without that profile, stop at the first failure. The release gates run under `cargo test`, as CI runs them. CI sets `VIGIA_BUDGET_SLACK=3` on every step, because its shared runners are slow.
 
-CI runs on Linux, macOS and Windows, with a musl leg for the artifact that Linux actually ships. The budget gates run in debug on every commit. The absolute wall-clock tier runs in release only. A pull request that changes only documents, skills, templates or images runs the suites that read documents on Linux and skips the rest, so it finishes in a couple of minutes. The `full-ci` label forces the whole run on any pull request.
+A pull request runs fmt, clippy and the tests on Linux, macOS and Windows, a build on the minimum Rust version, the dependency check, the docs build and the suites that read documents. A pull request that changes only documents, skills, templates or images runs only the documents job. The slow suites run nightly on `main` and can be dispatched on a branch: the budgets in release on all three platforms, the musl binary Linux ships, the build without PDFs, the check for a C toolchain, the forks' own suites and the benches compile. A test that holds a frame to a fixed number of milliseconds is judged only there, in release; in a pull request's debug run it still checks the work it counts.
+
+The dependency check reads `deny.toml`. It fails on a known advisory, a licence outside the allowed list, any crate it bans for needing a C toolchain (outside dev-dependencies), and any source other than crates.io. It runs on every pull request that changes code, and weekly on `main`, because a new advisory needs no code change. An ignored advisory carries its reason in `deny.toml`.
 
 ## What this project will not do
 
-`ROADMAP.md`'s "Non-goals, permanent" is the list. It is permanent, not "later": staging and committing, branch browsing, comment threads, AI features, remote operations, and a GUI. Each is reviewer-class work or costs an invariant. The team will decline a proposal for one of those, and the decline is not a judgement on the idea.
+What this project will not do is listed in [ROADMAP.md](ROADMAP.md#non-goals-permanent).
 
 ## Licence
 

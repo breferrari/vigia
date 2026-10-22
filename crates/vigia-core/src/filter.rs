@@ -20,6 +20,17 @@ pub(crate) struct Filter {
     lfs: bool,
 }
 
+/// A path's `diff` attribute.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Diff {
+    /// `diff`: diff it as text.
+    Set,
+    /// `-diff`, or `binary`: never as text.
+    Unset,
+    /// `diff=<driver>`: as text, through a driver.
+    Driver,
+}
+
 impl Filter {
     /// Assemble a pipeline from the repository's configuration and attributes.
     pub(crate) fn new(repo: &gix::Repository) -> Result<Self> {
@@ -54,9 +65,9 @@ impl Filter {
         })
     }
 
-    /// What `rela_path`'s attributes say about diffing it: `diff` set, unset or
-    /// silent, and whether Git LFS stores it as a pointer.
-    pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<(Option<bool>, bool)> {
+    /// What `rela_path`'s attributes say about diffing it, if anything, and
+    /// whether Git LFS stores it as a pointer.
+    pub(crate) fn diff_attribute(&mut self, rela_path: &str) -> Result<(Option<Diff>, bool)> {
         let Filter {
             stack,
             objects,
@@ -77,10 +88,9 @@ impl Filter {
         for found in outcome.iter_selected() {
             match (found.assignment.name.as_str(), found.assignment.state) {
                 ("filter", gix::attrs::StateRef::Value(name)) => cleaned = name.as_bstr() == "lfs",
-                ("diff", gix::attrs::StateRef::Unset) => diff = Some(false),
-                ("diff", gix::attrs::StateRef::Set | gix::attrs::StateRef::Value(_)) => {
-                    diff = Some(true)
-                }
+                ("diff", gix::attrs::StateRef::Unset) => diff = Some(Diff::Unset),
+                ("diff", gix::attrs::StateRef::Set) => diff = Some(Diff::Set),
+                ("diff", gix::attrs::StateRef::Value(_)) => diff = Some(Diff::Driver),
                 _ => {}
             }
         }

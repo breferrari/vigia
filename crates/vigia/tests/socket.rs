@@ -467,7 +467,7 @@ fn a_range_carries_every_line_it_covers_to_the_session() {
 /// A message builder that says how many times it was asked for one.
 fn counting(calls: &Cell<u32>) -> impl FnOnce() -> String + '_ {
     move || {
-        calls.set(calls.get() + 1);
+        calls.update(|v| v + 1);
         "the note".to_owned()
     }
 }
@@ -648,7 +648,7 @@ fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
         },
     );
     assert_eq!(
-        rx.recv_timeout(ANSWERED)
+        rx.recv_timeout(support::ceiling(ANSWERED))
             .expect("an answer without a thread"),
         Posted::Failed,
         "a post with no slot to take reached the registry instead of being refused"
@@ -670,7 +670,7 @@ fn a_post_takes_its_slot_before_spawning_and_gives_it_back_when_it_ends() {
             },
         );
         assert_eq!(
-            rx.recv_timeout(ANSWERED)
+            rx.recv_timeout(support::ceiling(ANSWERED))
                 .unwrap_or_else(|_| panic!("post {round} never answered")),
             Posted::Failed
         );

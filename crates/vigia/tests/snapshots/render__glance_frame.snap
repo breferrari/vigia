@@ -1,0 +1,20 @@
+---
+source: crates/vigia/tests/render.rs
+expression: "screen(80, 16, &view, &chrome)"
+---
+"  vigia · current ▾ · 3 changed                                       watching  "
+"                                                                                "
+"▸ M src/engine/watch.rs                ● ■■■■■■■■■■■■ ____▁▂▂▄▆▄▆█    +3    -1  "
+"  M src/render/frame.rs                  ■■■■■■■■■■■■ _____▂▁_____   +11    -3  "
+"  M Cargo.toml                                        ____________    +2    -0  "
+"────────────────────────────────────────────────────────────────────────────────"
+"  M src/engine/watch.rs                ● ■■■■■■■■■■■■ ____▁▂▂▄▆▄▆█    +3    -1  "
+"  @@ -258,7 +258,9 @@                                                           "
+"  258       pub fn advance(&mut self) {                                         "
+"  259           let mut files = Vec::new();                                     "
+"  260 -         for change in self.changes() {                                  "
+"  260 +         for change in self.walk() {                                     "
+"  261 +             // one per path                                             "
+"  262 +             files.push(change?);                                        "
+"────────────────────────────────────────────────────────────────────────────────"
+"  q quit · f follow · m config · ? keys               0.8ms frame   19MiB  1/3  "

@@ -13,6 +13,8 @@ mod glyphs;
 /// integration test and must measure through the same reader the shell uses.
 pub mod icons;
 mod input;
+/// The Kitty images [`pictures`] builds, public because its panels hold them.
+pub mod kitty;
 /// The agent's side of `SPEC.md` §11.2 B21: `vigia mcp`, the stdio server
 /// over the notes store. Public because the suite drives it as the loop does.
 pub mod mcp;
@@ -25,6 +27,9 @@ pub mod menu;
 /// safe to ship.
 pub mod motion;
 mod notes;
+/// `SPEC.md` §11.1's pictures of a changed image. Public because the suite
+/// builds them as the pane does.
+pub mod pictures;
 /// `SPEC.md` §11.1's position list. Public for [`menu`]'s reason: the suite drives the
 /// overlay as the loop does.
 pub mod positions;
@@ -43,6 +48,7 @@ pub mod theme;
 /// Public for [`theme`]'s reason, and it is where `VIGIA_UPDATE` is read.
 pub mod update;
 mod view;
+mod writer;
 
 pub use app::{App, Asked, Sending, Stood, Voice};
 pub use clipboard::{Carrier, Route, plan, put, remote, system_tools, tmux_command};
@@ -78,7 +84,13 @@ pub use render::{
     diff_height, menu_cell, note_cells, notice_area, positions_gap, regions, render, voice_style,
 };
 pub use state::state_root;
-pub use terminal::{Background, Colours, Screen, Session, background_of, colours_of};
+#[cfg(unix)]
+pub use terminal::output_flags;
+pub use terminal::{
+    ANSWERING, BACKGROUND_WAIT, Background, Colours, PICTURES_WAIT, Screen, Session, ask,
+    background_of, colours_of, install_abort_hook, install_panic_hook, panic_after_upload,
+    panic_mid_frame, panic_mid_upload, picker,
+};
 pub use theme::{THEME_FILE, THEME_VAR, Theme, ThemeError};
 pub use update::{UPDATE_VAR, UpdateError};
 pub use view::{
@@ -122,12 +134,46 @@ enum Wake {
     Signalled,
     /// A warm finished, so a hunk that drew plain can draw in colour.
     Warmed,
+    /// A changed image's pictures were built, so the rows held for them can draw.
+    Pictured,
     /// A newer version exists, so the footer can name it.
     Update(String),
+    /// The watch is live but misses something, which the footer says once.
+    Notice(String),
     /// The notes store changed under another process's hand.
     Notes,
     /// Enter's post to the registered agent sessions came back.
     Posted(Posted),
+    /// The terminal took enough of what was waiting that a skipped frame can draw.
+    Cells,
+    /// A write to the terminal failed, so nothing drawn reaches it any more.
+    OutputLost,
+}
+
+/// The backlog below which a frame is always drawn, so a small frame never
+/// waits on the one before it.
+const SKIP_FLOOR: usize = 4096;
+
+/// The backlog above which a frame is held back whatever the last one weighed.
+const SKIP_CEILING: usize = 256 * 1024;
+
+/// How long a frame may be held back before one is drawn anyway.
+const STALE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// How long the first frame has to reach the terminal before the picture query.
+const QUERY_DRAIN: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// What the terminal writer tells this shell, wired to its wake channel.
+fn writer_wakes(tx: &Sender<Wake>) -> writer::Wakes {
+    let (cells, lost) = (tx.clone(), tx.clone());
+    writer::Wakes {
+        cells: Box::new(move || {
+            let _ = cells.send(Wake::Cells);
+        }),
+        lost: Box::new(move || {
+            let _ = lost.send(Wake::OutputLost);
+        }),
+    }
 }
 
 /// The staged count an empty pane shows. Counted again only after a tick, or after a
@@ -328,10 +374,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // The palette is asked for only when it will be used, so the default costs
     // one query and not eighteen.
     let wanted = theme::wants_colours(|key| std::env::var(key).ok());
-    let reply = terminal::ask(std::time::Duration::from_millis(150), wanted);
+    let reply = terminal::ask(terminal::BACKGROUND_WAIT, wanted);
     let colours = terminal::colours_of(&reply);
+    let depth = Depth::detect()?;
     let theme = theme::from_env(
-        Depth::detect()?,
+        depth,
         |key| std::env::var(key).ok(),
         terminal::background_of(&reply),
         colours.as_ref(),
@@ -340,6 +387,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Resolved once before the screen is taken, so the frame path never asks the
     // environment anything. An unrecognised value is refused, not defaulted.
     let glyphs = Glyphs::detect()?;
+
+    // Only the override is read here, so a value it refuses is reported on a
+    // terminal the reader can still read. The query itself waits for the first
+    // paint.
+    let forced = pictures::forced(&|key: &str| std::env::var(key).ok())?;
 
     // Here rather than inside `App` for the palette's reason: a config file that
     // does not parse has to be reported on a terminal the reader can still read.
@@ -378,8 +430,20 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // Before the terminal is taken, which is the whole point of it being here.
     let armed = signal::forward(tx.clone());
 
+    let pictured = tx.clone();
+    let pictures = pictures::Pictures::unpicked(
+        pictures::Inks::of(
+            &theme,
+            colours.as_ref().map(|colours| colours.background),
+            terminal::background_of(&reply) == Some(Background::Light),
+        ),
+        Box::new(move || {
+            let _ = pictured.send(Wake::Pictured);
+        }),
+    );
     let mut shell = Shell {
-        session: Session::enter()?,
+        pictures,
+        session: Session::enter(writer_wakes(&tx))?,
         app: App::configured(&config),
         hide: config.hide.clone(),
         config_path,
@@ -389,6 +453,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         // that draws something.
         notice_effects: EffectManager::default(),
         painted: Instant::now(),
+        held_since: None,
         highlighter: Highlighter::new(),
         // Empty at startup, so every file in an already-dirty worktree draws cold until
         // something writes to it.
@@ -430,6 +495,11 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         effects_ran: false,
     };
 
+    // Half-blocks until the picture query has answered, after the first paint.
+    let truecolour = depth == Depth::Truecolor;
+    shell.app.draw_pictures(truecolour);
+    frame.draw_svg(truecolour);
+
     // The arming from above, reported now that there is somewhere to report it. A
     // signal that arrived before this point is not lost: it waits in the channel
     // and the first `recv` below handles it.
@@ -464,6 +534,38 @@ pub fn run(path: &Path) -> Result<(), Failure> {
     // opening is one mechanism rather than two statements in a row that a future edit
     // can separate.
     shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
+
+    // After the first paint, so a terminal slow to answer delays only the
+    // pictures, and before the input thread, which would read the answer as
+    // keys. `SPEC.md` §11.1.
+    // Unix asks only a terminal that answered the background query; Windows,
+    // which sends no other, always asks. Forced half-blocks need no answer.
+    // The query writes the terminal directly, so the first frame has to be out
+    // before it starts, or its bytes would land inside the frame's. A terminal
+    // that has not read it by then is not asked.
+    let ask = forced != Some(ratatui_image::picker::ProtocolType::Halfblocks)
+        && (cfg!(windows) || !reply.is_empty())
+        && shell.session.writer().drain(QUERY_DRAIN);
+    let (mut picker, answer) = terminal::picker(ask);
+    picker.set_protocol_type(pictures::protocol_of(forced, answer, &|key: &str| {
+        std::env::var(key).ok()
+    }));
+    let drawn = pictures::drawn(truecolour, picker.protocol_type());
+    shell.app.draw_pictures(drawn);
+    frame.draw_svg(drawn);
+    shell.pictures.cell_reported(answer.heard, answer.cell);
+    shell.pictures.pick(picker);
+    shell.app.picture_cell(shell.pictures.device_cell());
+    // The window the cell was measured in, which a later resize is scaled from.
+    shell.follow_window();
+    if ask {
+        // On Windows the query drops a resize that came in during it, and it is
+        // sent blind there, so it may have printed.
+        if cfg!(windows) {
+            let _ = shell.session.screen().clear();
+        }
+        shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?;
+    }
 
     // Armed only now.
     spawn_watch(path.to_path_buf(), tx.clone(), shell.hide.clone());
@@ -548,6 +650,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
             shell.settle_notes(began);
             // The margin's end after a print that moved, which no filesystem event marks.
             shell.settle_heights(&mut frame);
+            shell.settle_pairs(&mut frame);
             shell.app.sample_memory();
             shell.draw(&mut frame, &worktree, &mut aside, began)?;
             shell.request_warm(&worktree, &tx);
@@ -591,8 +694,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     }
                     // What the pointer is over, before anything asks what it meant.
                     shell.hovered = hover_after(&event, regions, shell.hovered);
-                    // The mode: while the reader's hand is in the box every key is the
-                    // box's and a press anywhere else closes it, and only what the box
+                    // The mode: while the reader's hand is in the box every key but
+                    // `Ctrl+L` is the box's and a press anywhere else closes it, and only what the box
                     // does not answer reaches the map below.
                     if shell.app.box_open() {
                         match notes::box_route(&event, shell.box_area()) {
@@ -807,7 +910,12 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                     shell.app.warn(message);
                 }
                 // Deliberately nothing.
-                Wake::Warmed => {}
+                Wake::Warmed | Wake::Pictured | Wake::Cells => {}
+                Wake::OutputLost => {
+                    return Err(
+                        "the terminal stopped taking output, so nothing could be drawn".into(),
+                    );
+                }
                 Wake::Update(version) => {
                     shell.say(
                         format!("vigia {version} is available"),
@@ -815,6 +923,7 @@ pub fn run(path: &Path) -> Result<(), Failure> {
                         began,
                     );
                 }
+                Wake::Notice(message) => shell.say(message, Voice::Arrived, began),
                 // Marked rather than read here, so a burst of writes in one batch
                 // is one listing.
                 Wake::Notes => shell.notes_stale = true,
@@ -836,6 +945,8 @@ pub fn run(path: &Path) -> Result<(), Failure> {
         shell.settle_notes(began);
         // And the settle deadline, which can fall due under a drained batch too.
         shell.settle_heights(&mut frame);
+        // And a rename the worker scored, which pairs on this frame.
+        shell.settle_pairs(&mut frame);
 
         // Before the paint, so the cell drawn below carries this frame's number rather
         // than the previous one's, and inside the timed region, so the read's own cost
@@ -1004,6 +1115,8 @@ fn drain(batch: &mut Vec<Wake>, first: Wake, rx: &Receiver<Wake>, cap: usize) {
 
 /// The terminal and everything drawn onto it that outlives one frame.
 struct Shell {
+    /// A changed image's built pictures, and the worker that builds them.
+    pictures: pictures::Pictures,
     session: Session,
     app: App,
     /// The footer's messages, clipped to the footer.
@@ -1011,6 +1124,8 @@ struct Shell {
     /// When the previous frame painted. The time since it is what an effect is
     /// told, through `effect_interval`, which may answer none of it.
     painted: Instant,
+    /// Since when a frame has been held back for a terminal that is behind.
+    held_since: Option<Instant>,
     /// The syntax classes of whatever is on screen, kept between frames.
     highlighter: Highlighter,
     /// What changed recently: the source for the sparkline, the recency gradient
@@ -1107,7 +1222,54 @@ struct Shell {
     effects_ran: bool,
 }
 
+// On every way out, while the screen is still this pane's: the terminal keeps
+// a Kitty image past this process until told.
+impl Drop for Shell {
+    fn drop(&mut self) {
+        self.pictures.retire_all();
+        self.write_retired();
+        use std::io::Write;
+        let _ = self.session.screen().backend_mut().flush();
+    }
+}
+
 impl Shell {
+    /// Tell the pictures the window's size now, which the cell follows.
+    fn follow_window(&mut self) {
+        if self.pictures.follows_cell()
+            && let Ok(window) = ratatui::crossterm::terminal::window_size()
+            && self.pictures.window_sized(window)
+        {
+            self.app.picture_cell(self.pictures.device_cell());
+        }
+    }
+
+    /// Send the Kitty deletes owed. A failed write leaves the images to the
+    /// terminal's own quota.
+    fn write_retired(&mut self) {
+        let retired = self.pictures.retired_ids();
+        self.delete_images(retired);
+    }
+
+    /// Delete Kitty images `ids`, each after its upload stops.
+    fn delete_images(&mut self, ids: Vec<u32>) {
+        let tmux = self.pictures.tmux();
+        for id in ids {
+            let _ = self.session.delete(id, kitty::delete(id, tmux));
+        }
+    }
+
+    /// Hand the writer the Kitty images now on screen, and stop the uploads of
+    /// those that left it. A stopped one is deleted, since the terminal may
+    /// hold part of it.
+    fn write_uploads(&mut self) {
+        let (uploads, stopped) = self.pictures.uploads();
+        self.delete_images(stopped);
+        for upload in uploads {
+            let _ = self.session.upload(upload);
+        }
+    }
+
     /// The diff region's height for `action`, or zero where it reads none.
     fn diff_rows_for(
         &mut self,
@@ -1203,6 +1365,7 @@ impl Shell {
                 departing: self.ledger.ends_in(),
                 // And the frame after the box has left is the one that drops its.
                 closing: self.app.box_ends_in(),
+                held_back: forced_at(self.held_since, self.session.writer().unwritten()),
             },
             now,
         )
@@ -1229,6 +1392,15 @@ impl Shell {
     /// deadline is consumed on the turn that finds it and not on a timeout.
     fn settle_heights(&mut self, frame: &mut vigia_core::Frame) {
         if let Err(e) = frame.advance_if_settled(SystemTime::now()) {
+            self.walk_failed(frame, &e);
+        }
+    }
+
+    /// Pair the renames the worker scored since the last frame: the walk again,
+    /// once, with their scores filed.
+    fn settle_pairs(&mut self, frame: &mut vigia_core::Frame) {
+        let found = self.pictures.found_pairs();
+        if let Err(e) = self.pictures.pair(frame, found) {
             self.walk_failed(frame, &e);
         }
     }
@@ -1283,7 +1455,16 @@ impl Shell {
             self.noting = None;
             return Ok(true);
         }
-        if action != Action::Redraw {
+        if action == Action::Refresh {
+            self.pictures.refresh();
+            if let Err(e) = self.session.screen().clear() {
+                self.app.warn(format!("redraw: {e}"));
+            }
+        }
+        if matches!(action, Action::Redraw | Action::Refresh) {
+            self.follow_window();
+        }
+        if !matches!(action, Action::Redraw | Action::Refresh) {
             self.deselect();
             self.noting = None;
         }
@@ -1652,6 +1833,7 @@ impl Shell {
         let (_, held) = aside.as_mut()?;
         held.show_staged(self.app.staged());
         held.hide(self.hide.clone());
+        held.draw_svg(self.app.draws_pictures());
         held.advance().ok()?;
         let churn = held.churn().ok()?.unwrap_or_default();
         Some(Facts {
@@ -2081,7 +2263,24 @@ impl Shell {
             .app
             .view(frame, &mut self.highlighter, &self.history, body)
         {
-            Ok(view) => self.screen = view,
+            Ok(view) => {
+                self.screen = view;
+                self.pictures.attach(&mut self.screen.rows, frame);
+                // A size the worker found lays its file out again, in this frame.
+                let learned = self.pictures.found_sizes();
+                if !learned.is_empty() {
+                    for (stamp, width, height) in learned {
+                        frame.learn_size(stamp, width, height);
+                    }
+                    if let Ok(view) =
+                        self.app
+                            .view(frame, &mut self.highlighter, &self.history, body)
+                    {
+                        self.screen = view;
+                        self.pictures.attach(&mut self.screen.rows, frame);
+                    }
+                }
+            }
             // The wash goes too: this frame resolved nothing, and keeping the last
             // frame's answer would leave one standing over rows it no longer covers.
             Err(e) => {
@@ -2089,6 +2288,8 @@ impl Shell {
                 self.app.select(None);
             }
         }
+        // Whatever this frame's walks could not afford to pair goes to the worker.
+        self.pictures.score_pairs(frame);
         // A span the collect resolved to nothing is not a selection, whatever the
         // pointer did: it draws nothing, and left standing it would take `Esc`.
         if !self.app.holds_a_selection() {
@@ -2127,6 +2328,10 @@ impl Shell {
             self.elsewhere,
             &self.root,
         );
+        // Before the draw, so the terminal drops the Kitty images of pictures that
+        // left the screen, and takes those coming onto it.
+        self.write_retired();
+        self.write_uploads();
         // Borrowed out of `self` before the draw, not for style: the closure would
         // otherwise hold `&self` while `self.session` is borrowed mutably to reach
         // the terminal.
@@ -2141,19 +2346,33 @@ impl Shell {
         let note_effects = &mut self.note_effects;
         let box_effect = &mut self.box_effect;
         let menu_effect = &mut self.menu_effect;
-        let mut painted = Regions::default();
         let was = self.regions;
+        // Laid out whether or not the frame is drawn, so a press lands on the
+        // layout the input made even while the terminal is behind.
+        let painted = render::regions(area, &chrome, screen);
+        // A screen-anchored mark does not outlive a relayout, and both have to be
+        // retired here, between the layout and the paint that uses them.
+        chrome.hovered = repainted(chrome.hovered, was, painted);
+        chrome.selected = repainted(chrome.selected, was, painted);
+        chrome.noting = repainted(chrome.noting, was, painted);
+        let writer = self.session.writer();
+        let threshold = writer.last_frame().clamp(SKIP_FLOOR, SKIP_CEILING);
+        let stale = forced_at(self.held_since, writer.unwritten()).is_some_and(|at| now >= at);
+        if writer.backlogged(threshold) && !stale {
+            // Past the ceiling the forced draw waits, so the wake has to come as
+            // the backlog falls back under it, not only under the threshold.
+            if writer.unwritten() > SKIP_CEILING {
+                writer.backlogged(SKIP_CEILING);
+            }
+            self.held_since.get_or_insert(now);
+            self.settle_marks(&chrome, painted);
+            return Ok(());
+        }
+        self.held_since = None;
+        let mut drawn = area;
         self.session.screen().draw(|f| {
             let area = f.area();
-            // Captured from inside the draw, because `Frame::area` is the size the
-            // paint actually used: `Shell::area` reads it again and a resize between
-            // the two would leave a pointer told about a screen nobody saw.
-            painted = render::regions(area, &chrome, screen);
-            // A screen-anchored mark does not outlive a relayout, and both have to be
-            // retired here, between the layout and the paint that uses them.
-            chrome.hovered = repainted(chrome.hovered, was, painted);
-            chrome.selected = repainted(chrome.selected, was, painted);
-            chrome.noting = repainted(chrome.noting, was, painted);
+            drawn = area;
             render(f.buffer_mut(), area, screen, theme, glyphs, &chrome);
             // After the widgets, because an effect works on the cells they drew.
             // The notes' own, each over the cells its note drew this frame. A note
@@ -2184,6 +2403,20 @@ impl Shell {
         })?;
         self.painted = now;
         self.effects_ran = self.effects_running();
+        // A resize between the layout and the draw: the pointer follows the
+        // screen that was drawn.
+        let drawn = if drawn == area {
+            painted
+        } else {
+            render::regions(drawn, &chrome, &self.screen)
+        };
+        self.settle_marks(&chrome, drawn);
+        Ok(())
+    }
+
+    /// Keep the pointer's marks the layout left standing, and lay the pointer
+    /// over `regions`.
+    fn settle_marks(&mut self, chrome: &render::Chrome, regions: Regions) {
         self.hovered = chrome.hovered;
         if chrome.noting.is_none() {
             self.noting = None;
@@ -2191,10 +2424,17 @@ impl Shell {
         if chrome.selected.is_none() {
             self.deselect();
         }
-        self.regions = painted;
+        self.regions = regions;
         self.laid = self.overlays();
-        Ok(())
     }
+}
+
+/// When a screen held back since `held_since` is drawn anyway. None once the
+/// backlog is past the ceiling, so a terminal that has stopped reading is not
+/// handed a frame every [`STALE`] for as long as it stays stopped.
+fn forced_at(held_since: Option<Instant>, unwritten: usize) -> Option<Instant> {
+    let since = held_since?;
+    (unwritten <= SKIP_CEILING).then(|| since + STALE)
 }
 
 /// The pointer's marks, compared across one input event.
@@ -2226,12 +2466,20 @@ fn spawn_watch(path: PathBuf, tx: Sender<Wake>, hide: Option<vigia_core::Hidden>
             }
         };
         watcher.hide(hide);
+        // Whether the shell is still there to be told.
+        let told = |watcher: &mut vigia_core::Watcher<'_>| match watcher.take_store_notice() {
+            Some(message) => tx.send(Wake::Notice(message)).is_ok(),
+            None => true,
+        };
+        if !told(&mut watcher) {
+            return;
+        }
 
         // The tick says only that something changed, which is all the shell needs:
         // every tick triggers one status walk, and a walk finds whatever the events
         // missed.
         while let Some(tick) = watcher.next_tick() {
-            if tx.send(Wake::Tick(tick.paths)).is_err() {
+            if tx.send(Wake::Tick(tick.paths)).is_err() || !told(&mut watcher) {
                 return;
             }
         }
@@ -2274,6 +2522,69 @@ mod tests {
     //! The one rule in this file that is arithmetic rather than plumbing.
 
     use super::*;
+
+    #[test]
+    fn forced_bounded() {
+        let since = Instant::now();
+        assert_eq!(forced_at(None, 0), None, "nothing held, nothing forced");
+        assert_eq!(
+            forced_at(Some(since), SKIP_CEILING),
+            Some(since + STALE),
+            "a held screen under the ceiling was not drawn after STALE"
+        );
+        assert_eq!(
+            forced_at(Some(since), SKIP_CEILING + 1),
+            None,
+            "a terminal past the ceiling would be handed a frame every STALE"
+        );
+    }
+
+    /// The watch thread forwards every tick, not only the first.
+    #[test]
+    fn watch_forwards_ticks() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_nanos());
+        let dir =
+            std::env::temp_dir().join(format!("vigia-forward-{}-{stamp}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(out.status.success(), "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.join("a.txt"), "x\n").expect("write");
+        git(&["add", "a.txt"]);
+        git(&["commit", "-q", "-m", "initial"]);
+        let (tx, rx) = mpsc::channel();
+        spawn_watch(dir.clone(), tx, None);
+        // Written until it ticks, since the watch arms on its own thread.
+        let ticked = |round: usize| {
+            for attempt in 0..10 {
+                std::fs::write(dir.join("a.txt"), format!("{round} {attempt}\n")).expect("write");
+                let deadline = Instant::now() + std::time::Duration::from_secs(1);
+                while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+                    match rx.recv_timeout(left) {
+                        Ok(Wake::Tick(_)) => return true,
+                        Ok(_) => {}
+                        Err(_) => break,
+                    }
+                }
+            }
+            false
+        };
+        let first = ticked(0);
+        let second = first && ticked(1);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(first, "the watch never ticked");
+        assert!(second, "the watch stopped after its first tick");
+    }
 
     #[test]
     fn a_relative_worktree_root_still_names_the_folder() {
@@ -2432,6 +2743,56 @@ mod tests {
     }
 
     #[test]
+    fn aside_armed_like_pane() {
+        // `Shell` is private and holds a terminal, so the rule is read here.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let facts = shipped
+            .split("fn facts_at<'w>(")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    }\n").next())
+            .expect("facts_at is gone");
+        for switch in ["show_staged(", "hide(", "draw_svg("] {
+            assert!(
+                facts.contains(&format!("held.{switch}")),
+                "the aside frame is not armed with {switch}), so its totals disagree with the pane's"
+            );
+        }
+    }
+
+    #[test]
+    fn refresh_clears_and_resends() {
+        // `Shell` holds a terminal, so the route is read rather than driven.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        assert!(
+            shipped.contains(
+                "if action == Action::Refresh {\n            self.pictures.refresh();\n            if let Err(e) = self.session.screen().clear() {\n                self.app.warn(format!(\"redraw: {e}\"));\n            }"
+            ),
+            "`Ctrl+L` no longer retires the Kitty pictures and clears the screen"
+        );
+    }
+
+    #[test]
+    fn resize_follows_cell() {
+        // `Shell` holds a terminal, so the route is read rather than driven.
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        for route in [
+            "    shell.pictures.pick(picker);\n",
+            "    shell.follow_window();\n",
+            "if matches!(action, Action::Redraw | Action::Refresh) {\n            self.follow_window();",
+            "&& self.pictures.window_sized(window)\n        {\n            self.app.picture_cell(self.pictures.device_cell());",
+            "    shell.app.picture_cell(shell.pictures.device_cell());\n",
+        ] {
+            assert!(
+                shipped.contains(route),
+                "the cell no longer follows the window: {route}"
+            );
+        }
+    }
+
+    #[test]
     fn the_wash_is_dropped_on_every_route_that_ends_it() {
         // `Shell` is private and holds a terminal, so its rules are read here rather
         // than driven. Each of these was a defect: a span the collect resolved to
@@ -2445,7 +2806,7 @@ mod tests {
             "self.app.select(None);",
             // Neither is reachable from a test, and both shipped once.
             "if action == Action::Escape && (self.selected.is_some() || self.noting.is_some()) {",
-            "if action != Action::Redraw {",
+            "if !matches!(action, Action::Redraw | Action::Refresh) {",
             "if chrome.selected.is_none() {",
             // A note drag ends the same way when the layout moves under it.
             "chrome.noting = repainted(chrome.noting, was, painted);",
@@ -2847,7 +3208,7 @@ mod tests {
             .find("signal::forward(")
             .expect("`run` no longer arms the signal handler at all");
         let takeover = code
-            .find("Session::enter()")
+            .find("Session::enter(")
             .expect("`run` no longer takes the terminal");
         assert!(
             arming < takeover,
@@ -3132,6 +3493,14 @@ mod tests {
                      settled height on that path waits for the next event",
                 );
             assert!(walked < paint);
+            let paired = code[previous..paint]
+                .rfind("shell.settle_pairs(&mut frame)")
+                .map(|at| previous + at)
+                .expect(
+                    "a paint with no `settle_pairs` before it in the same arm, so a \
+                     rename the worker scored waits for the next event",
+                );
+            assert!(paired < paint);
             let noted = code[previous..paint]
                 .rfind("shell.settle_notes(began)")
                 .map(|at| previous + at)
@@ -3180,6 +3549,36 @@ mod tests {
             wrote < posted,
             "`commit_box` posts before it writes, so a socket could take a note \
              the store then refuses"
+        );
+    }
+
+    #[test]
+    fn picture_query_after_paint() {
+        let source = include_str!("lib.rs");
+        let shipped = source.split("#[cfg(test)]").next().expect("split");
+        let code: String = shipped
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let first_paint = code
+            .find("shell.draw(&mut frame, &worktree, &mut aside, Instant::now())?")
+            .expect("`run` no longer paints before the loop");
+        let query = code
+            .find("terminal::picker(")
+            .expect("`run` no longer asks for the picture protocol");
+        let input = code
+            .find("spawn_input(tx.clone())")
+            .expect("`run` no longer spawns the input thread");
+        assert!(
+            first_paint < query && query < input,
+            "the picture query runs before the first paint, which it would delay, \
+             or after the input thread, which would read its answer as keys"
+        );
+        assert_eq!(
+            code.matches("terminal::picker(").count(),
+            1,
+            "the picture query is asked more than once"
         );
     }
 
@@ -3325,6 +3724,18 @@ mod tests {
         let paint = code.find("fn paint<").expect("`Shell::paint` is gone");
         let paint = &code[paint..];
         let paint = &paint[..paint.find("\n    }\n").expect("`paint` never closes")];
+        // What the walks could not afford to pair goes to the worker after the
+        // view is attached, on every paint.
+        let attached = paint
+            .rfind("self.pictures.attach(")
+            .expect("`paint` no longer attaches pictures");
+        let sent = paint
+            .find("self.pictures.score_pairs(frame)")
+            .expect("`paint` no longer sends the unscored pairs to be scored");
+        assert!(
+            attached < sent,
+            "`paint` sends pairs before the view is attached"
+        );
         let asked = paint
             .find("effect_interval(\n            self.effects_ran,")
             .expect("`paint` no longer asks `effect_interval` with the previous paint's answer");

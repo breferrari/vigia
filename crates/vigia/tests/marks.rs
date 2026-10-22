@@ -79,22 +79,23 @@ fn heat(slices: &[(usize, u16, u16)]) -> [HeatBucket; HEAT_BUCKETS] {
 /// One file row carrying every glance element, so the mark is drawn beside a
 /// full cluster rather than into an empty row.
 fn one_file(notes: FileNotes, newest: bool) -> View {
-    View {
-        hidden: 0,
-        whole: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 1,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: vec![Row::file(FileEntry {
+    {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 1;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = vec![Row::file(FileEntry {
             origin: Origin::Unstaged,
             path: "src/engine/watch.rs".to_owned(),
             from: None,
@@ -107,13 +108,14 @@ fn one_file(notes: FileNotes, newest: bool) -> View {
             newest,
             notes,
             heat: heat(&[(0, 9, 0), (1, 2, 0), (5, 3, 4), (11, 0, 6)]),
-        })],
-        files: 1,
-        top: Position::default(),
-        read: 1,
-        scale: Scale::spread(12),
-        gutter: None,
-        notes: vigia::Noted::default(),
+        })];
+        view.files = 1;
+        view.top = Position::default();
+        view.read = 1;
+        view.scale = Scale::spread(12);
+        view.gutter = None;
+        view.notes = vigia::Noted::default();
+        view
     }
 }
 

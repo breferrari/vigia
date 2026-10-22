@@ -281,16 +281,17 @@ fn a_row_of_zero_width_characters_still_costs_the_pane() {
         "the fixture is not zero-width, so it cannot defeat a column bound"
     );
 
-    let view = View {
-        rows: vec![Row::Line {
+    let view = {
+        let mut view = View::default();
+        view.rows = vec![Row::Line {
             kind: vigia_core::LineKind::Context,
             number: 1,
             text: zero_width,
             spans: Vec::new(),
             emph: Vec::new(),
-        }],
-        files: 1,
-        ..View::default()
+        }];
+        view.files = 1;
+        view
     };
     let chrome = App::new().chrome(
         "fixture",
@@ -340,16 +341,17 @@ fn a_tab_stop_after_the_bound_still_counts_from_the_line_start() {
     // Tab stops are counted from the start of the line, across span boundaries, so the
     // counter the bound is written in terms of is the same counter tab expansion reads.
     let area = Rect::new(0, 0, 40, 6);
-    let view = View {
-        rows: vec![Row::Line {
+    let view = {
+        let mut view = View::default();
+        view.rows = vec![Row::Line {
             kind: vigia_core::LineKind::Context,
             number: 1,
             text: "\tab\tcd\tefgh\tij".to_owned(),
             spans: Vec::new(),
             emph: Vec::new(),
-        }],
-        files: 1,
-        ..View::default()
+        }];
+        view.files = 1;
+        view
     };
     let chrome = Chrome {
         menu: None,
@@ -529,16 +531,17 @@ fn spans_share_walk() {
                 class: vigia_core::Class::Plain,
             })
             .collect();
-        let view = View {
-            rows: vec![Row::Line {
+        let view = {
+            let mut view = View::default();
+            view.rows = vec![Row::Line {
                 kind: vigia_core::LineKind::Context,
                 number: 1,
                 text: text.clone(),
                 spans,
                 emph: Vec::new(),
-            }],
-            files: 1,
-            ..View::default()
+            }];
+            view.files = 1;
+            view
         };
         let mut buf = Buffer::empty(area);
         let stats = render(

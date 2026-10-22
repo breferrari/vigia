@@ -1118,3 +1118,47 @@ fn the_reset_spells_no_state_and_no_receipt_runs_over_it() {
         );
     });
 }
+
+#[test]
+fn refresh_over_overlays() {
+    // `Ctrl-L` redraws under any overlay and closes none, and walks nothing.
+    let mut pane = Pane::open("menu-refresh");
+    pane.with(|app, frame, _, _| {
+        for (open, shown, close) in [
+            (
+                Action::ToggleMenu,
+                (|c: &Chrome| c.menu.is_some()) as fn(&Chrome) -> bool,
+                Action::CloseMenu,
+            ),
+            (
+                Action::ToggleSheet,
+                |c: &Chrome| c.sheet.is_some(),
+                Action::CloseSheet,
+            ),
+            (
+                Action::TogglePositions,
+                |c: &Chrome| c.positions.is_some(),
+                Action::ClosePositions,
+            ),
+        ] {
+            apply(app, frame, area(), open);
+            assert!(shown(&chrome(app)), "{open:?} opened nothing");
+            let walks = frame.stats().walks;
+            apply(app, frame, area(), Action::Refresh);
+            assert!(shown(&chrome(app)), "Ctrl-L closed what {open:?} opened");
+            assert_eq!(frame.stats().walks, walks, "Ctrl-L walked");
+            apply(app, frame, area(), close);
+        }
+    });
+}
+
+/// The menu as a reader first sees it, for `docs/CONFIG.md`.
+#[test]
+fn menu_frame() {
+    let mut pane = Pane::open("menu-frame");
+    pane.with(|app, frame, highlighter, history| {
+        apply(app, frame, area(), Action::ToggleMenu);
+        let (buf, _) = paint(app, frame, highlighter, history, area());
+        insta::assert_snapshot!(text_of(&buf, area()));
+    });
+}

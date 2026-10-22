@@ -6,7 +6,7 @@ name: flake rate
 #
 # It deliberately does NOT fail when the test fails. A probe that goes red is
 # a probe nobody reads the output of, and the output is the entire point.
-# Read the run summary.
+# Read the run summary. A run that ran no test fails.
 #
 # Sample count is `jobs * iterations`. Prefer iterations over jobs: the
 # compile is paid once per job and the runner pool is small on macOS, so
@@ -25,7 +25,7 @@ on:
         type: string
         default: the_frame_budget_holds_through_a_bulk_rewrite
       target:
-        description: Integration test target (--test)
+        description: Integration test target (--test), or lib for the unit tests (--lib)
         type: string
         default: budgets
       jobs:
@@ -43,7 +43,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
+  CARGO_BUILD_WARNINGS: deny
 
 # Never share a group with `ci`. A probe that cancels a real run, or is
 # cancelled by one, produces a partial sample and reports it as a whole one.
@@ -51,17 +51,23 @@ concurrency:
   group: flake-rate-${{ github.run_id }}
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   plan:
     name: plan replicas
     runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 5
     outputs:
       replicas: ${{ steps.build.outputs.replicas }}
     steps:
       - id: build
         shell: bash
+        env:
+          IN_JOBS: ${{ inputs.jobs }}
         run: |
-          n='${{ inputs.jobs }}'
+          n="$IN_JOBS"
           case "$n" in ''|*[!0-9]*) echo "jobs must be a positive integer, got '$n'" >&2; exit 1;; esac
           [ "$n" -ge 1 ] || { echo "jobs must be >= 1" >&2; exit 1; }
           echo "replicas=$(seq 1 "$n" | jq -Rsc 'split("\n")[:-1]')" >> "$GITHUB_OUTPUT"
@@ -70,6 +76,9 @@ jobs:
     name: replica ${{ matrix.replica }}
     needs: plan
     runs-on: ${{ inputs.os }}
+    permissions:
+      contents: read
+    timeout-minutes: 120
     strategy:
       # One replica stalling says nothing about the others, and killing them
       # would throw away samples already paid for.
@@ -77,9 +86,13 @@ jobs:
       matrix:
         replica: ${{ fromJSON(needs.plan.outputs.replicas) }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # Build once. The loop below must measure the test, not rustc.
       - name: build
@@ -89,18 +102,28 @@ jobs:
         id: measure
         shell: bash
         env:
+          IN_ITERATIONS: ${{ inputs.iterations }}
+          IN_TARGET: ${{ inputs.target }}
+          IN_TEST: ${{ inputs.test }}
+          REPLICA: ${{ matrix.replica }}
+          IN_OS: ${{ inputs.os }}
           VIGIA_BUDGET_SLACK: ${{ inputs.slack }}
         run: |
           set -u
-          iterations='${{ inputs.iterations }}'
+          iterations="$IN_ITERATIONS"
           case "$iterations" in ''|*[!0-9]*) echo "iterations must be a positive integer" >&2; exit 1;; esac
           [ "$iterations" -ge 1 ] || { echo "iterations must be >= 1" >&2; exit 1; }
+
+          if [ "$IN_TARGET" = lib ]; then set -- --lib; else set -- --test "$IN_TARGET"; fi
 
           fail=0
           mkdir -p failures
           for i in $(seq 1 "$iterations"); do
-            if cargo test --release --test '${{ inputs.target }}' \
-                 '${{ inputs.test }}' -- --exact --nocapture > "failures/run-$i.log" 2>&1; then
+            passed=true
+            cargo test --release "$@" \
+              "$IN_TEST" -- --exact --nocapture > "failures/run-$i.log" 2>&1 || passed=false
+            sh .github/scripts/tests-ran.sh "failures/run-$i.log" "$IN_TARGET" "$IN_TEST" || exit 1
+            if "$passed"; then
               printf 'run %3d/%s  pass\n' "$i" "$iterations"
               rm -f "failures/run-$i.log"
             else
@@ -115,18 +138,17 @@ jobs:
           echo "fail=$fail" >> "$GITHUB_OUTPUT"
           echo "total=$iterations" >> "$GITHUB_OUTPUT"
           {
-            echo "### replica ${{ matrix.replica }} on ${{ inputs.os }}"
+            echo "### replica ${REPLICA} on ${IN_OS}"
             echo
-            echo "\`${{ inputs.test }}\` — **$fail failed of $iterations** (slack ${{ inputs.slack }})"
+            echo "\`${IN_TEST}\`: **$fail failed of $iterations** (slack ${VIGIA_BUDGET_SLACK})"
           } >> "$GITHUB_STEP_SUMMARY"
 
           # Exit 0 on a failing test, on purpose: see the header. A replica
-          # that could not run at all is a different thing and does fail,
-          # because `set -u` and the guards above have already exited.
+          # that could not run, or ran no test, has already exited.
 
       - name: upload failing runs
         if: steps.measure.outputs.fail != '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: failures-${{ inputs.os }}-replica-${{ matrix.replica }}
           path: failures/
@@ -137,14 +159,22 @@ jobs:
     needs: [plan, measure]
     if: always()
     runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 5
     steps:
       - shell: bash
+        env:
+          IN_TEST: ${{ inputs.test }}
+          IN_OS: ${{ inputs.os }}
+          IN_SLACK: ${{ inputs.slack }}
+          IN_JOBS: ${{ inputs.jobs }}
+          IN_ITERATIONS: ${{ inputs.iterations }}
         run: |
           {
             echo "## flake rate"
             echo
-            echo "Target: \`${{ inputs.test }}\` on \`${{ inputs.os }}\`, slack ${{ inputs.slack }}."
-            echo "Sample: ${{ inputs.jobs }} replicas x ${{ inputs.iterations }} iterations."
+            echo "Target: \`${IN_TEST}\` on \`${IN_OS}\`, slack ${IN_SLACK}."
+            echo "Sample: ${IN_JOBS} replicas x ${IN_ITERATIONS} iterations."
             echo
             echo "Per-replica tallies are above. Sum them for the rate."
             echo

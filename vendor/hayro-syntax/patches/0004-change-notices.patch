@@ -1,0 +1,99 @@
+diff --git a/src/filter/ascii_85.rs b/src/filter/ascii_85.rs
+index cbfb79d..9bbc062 100644
+--- a/src/filter/ascii_85.rs
++++ b/src/filter/ascii_85.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which grows its output within the decode limit in `crate::limit`. See PATCHES.md.
+ // Keep in sync with `hayro-postscript/src/string/ascii_85.rs`.
+ 
+ use crate::reader::Reader;
+diff --git a/src/filter/ccitt.rs b/src/filter/ccitt.rs
+index 0c5ac5c..fa0a7a8 100644
+--- a/src/filter/ccitt.rs
++++ b/src/filter/ccitt.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which checks an image against the decode limit in `crate::limit` before decoding it. See PATCHES.md.
+ use crate::object::Dict;
+ use crate::object::dict::keys::{
+     BLACK_IS_1, COLUMNS, ENCODED_BYTE_ALIGN, END_OF_BLOCK, END_OF_LINE, K, ROWS,
+diff --git a/src/filter/dct.rs b/src/filter/dct.rs
+index f3831a1..13fc480 100644
+--- a/src/filter/dct.rs
++++ b/src/filter/dct.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which checks an image against the decode limit in `crate::limit` before decoding it. See PATCHES.md.
+ use crate::object::Dict;
+ use crate::object::dict::keys::COLOR_TRANSFORM;
+ use crate::object::stream::{FilterResult, ImageColorSpace, ImageData, ImageDecodeParams};
+diff --git a/src/filter/jbig2.rs b/src/filter/jbig2.rs
+index e860b15..3f52c04 100644
+--- a/src/filter/jbig2.rs
++++ b/src/filter/jbig2.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which checks an image against the decode limit in `crate::limit` before decoding it. See PATCHES.md.
+ use crate::bit_reader::BitWriter;
+ use crate::object::Dict;
+ use crate::object::Stream;
+diff --git a/src/filter/jpx.rs b/src/filter/jpx.rs
+index 5af6f9d..3acfa37 100644
+--- a/src/filter/jpx.rs
++++ b/src/filter/jpx.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which checks an image against the decode limit in `crate::limit` before decoding it. See PATCHES.md.
+ use crate::bit_reader::BitWriter;
+ use crate::filter::FilterResult;
+ use crate::math::round_f32;
+diff --git a/src/filter/lzw_flate.rs b/src/filter/lzw_flate.rs
+index fe334e5..9bea4ea 100644
+--- a/src/filter/lzw_flate.rs
++++ b/src/filter/lzw_flate.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which grows its output within the decode limit in `crate::limit`, and never allocates a predictor row longer than its data. See PATCHES.md.
+ use crate::bit_reader::{BitChunk, BitChunks, BitReader, BitWriter, bit_mask};
+ use crate::filter::png::{self, BytesPerPixel, RowFilter};
+ use crate::object::Dict;
+diff --git a/src/filter/mod.rs b/src/filter/mod.rs
+index f419462..d56c5b1 100644
+--- a/src/filter/mod.rs
++++ b/src/filter/mod.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which makes `lzw_flate` visible in the crate, for the decode limit's tests. See PATCHES.md.
+ //! Results from decoding filtered data streams.
+ 
+ mod ascii_85;
+diff --git a/src/filter/run_length.rs b/src/filter/run_length.rs
+index eb28b51..621db1f 100644
+--- a/src/filter/run_length.rs
++++ b/src/filter/run_length.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which grows its output within the decode limit in `crate::limit`. See PATCHES.md.
+ use crate::reader::Reader;
+ use alloc::vec;
+ use alloc::vec::Vec;
+diff --git a/src/lib.rs b/src/lib.rs
+index a09993a..baca223 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which exports the decode limit in `limit`. See PATCHES.md.
+ /*!
+ A low-level library for reading PDF files.
+ 
+diff --git a/src/limit.rs b/src/limit.rs
+index 3cda986..e2fd1b8 100644
+--- a/src/limit.rs
++++ b/src/limit.rs
+@@ -1,3 +1,4 @@
++// Added for vigia-hayro-syntax. See PATCHES.md.
+ //! A limit on how many bytes stream decoding may produce on one thread.
+ //!
+ //! Decoding holds each stream's output whole, and a small file can name a
+diff --git a/src/object/stream.rs b/src/object/stream.rs
+index 1d7d839..19293c5 100644
+--- a/src/object/stream.rs
++++ b/src/object/stream.rs
+@@ -1,3 +1,4 @@
++// Changed for vigia-hayro-syntax, which counts every decoded filter output against the decode limit in `crate::limit`. See PATCHES.md.
+ //! Streams.
+ 
+ use crate::crypto::DecryptionTarget;

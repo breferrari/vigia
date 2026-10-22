@@ -4,6 +4,14 @@
 
 //! A disposable git repository, built by real `git`.
 
+mod assets;
+mod ceiling;
+// Each test binary takes the few generators it needs.
+#[allow(unused_imports)]
+pub use assets::*;
+#[allow(unused_imports)]
+pub use ceiling::{ceiling, ceiling_of};
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -77,6 +85,14 @@ pub fn timed_cpu<T>(work: impl FnOnce() -> T) -> (T, Duration, Duration) {
     (value, wall, cpu)
 }
 
+/// Keep this thread busy for `length` of wall time.
+pub fn spin_for(length: Duration) {
+    let start = Instant::now();
+    while start.elapsed() < length {
+        std::hint::spin_loop();
+    }
+}
+
 /// This thread's CPU time so far, or `None` where the platform has no clock.
 #[cfg(unix)]
 fn thread_cpu() -> Option<Duration> {
@@ -90,17 +106,46 @@ fn thread_cpu() -> Option<Duration> {
     ok.then(|| Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32))
 }
 
+/// This thread's cycles so far, converted at the highest rate calibration
+/// measured. Cycles count at a fixed rate while the thread runs, so a slice
+/// the thread lost time in reads a lower rate, and the highest is at most the
+/// true one: it reads as no less CPU than ran, and no overshoot is excused by
+/// the conversion. Microsoft's `QueryThreadCycleTime` page says not to convert
+/// cycles to time at all; `cycle_clock_direction` checks that this one holds.
+/// `None` where the rate could not be measured, which counts every frame's
+/// wall time as its own. `GetThreadTimes` steps at
+/// 15.625ms, too coarse to judge one frame.
 #[cfg(windows)]
 fn thread_cpu() -> Option<Duration> {
+    let rate = cycle_rate()?;
+    Some(Duration::from_nanos(
+        (thread_cycles()? as f64 / rate) as u64,
+    ))
+}
+
+/// This thread's cycles so far.
+#[cfg(windows)]
+fn thread_cycles() -> Option<u64> {
+    use windows_sys::Win32::System::Threading::GetCurrentThread;
+    use windows_sys::Win32::System::WindowsProgramming::QueryThreadCycleTime;
+
+    let mut cycles = 0u64;
+    // SAFETY: one out-parameter owned here, and a pseudo-handle that needs no
+    // close. The call writes only through that pointer.
+    let ok = unsafe { QueryThreadCycleTime(GetCurrentThread(), &mut cycles) } != 0;
+    ok.then_some(cycles)
+}
+
+/// This thread's kernel plus user time from `GetThreadTimes`, in clock
+/// interrupt steps ([`COARSE_TICK`] by default).
+#[cfg(windows)]
+pub fn thread_times() -> Option<Duration> {
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
 
-    let mut created = FILETIME::default();
-    let mut exited = FILETIME::default();
-    let mut kernel = FILETIME::default();
-    let mut user = FILETIME::default();
-    // SAFETY: four out-parameters, all owned here, and a pseudo-handle that needs
-    // no close. The call writes only through those pointers.
+    let [mut created, mut exited, mut kernel, mut user] = [FILETIME::default(); 4];
+    // SAFETY: four live locals of the type the call writes, and a pseudo-handle
+    // that needs no close.
     let ok = unsafe {
         GetThreadTimes(
             GetCurrentThread(),
@@ -110,14 +155,85 @@ fn thread_cpu() -> Option<Duration> {
             &mut user,
         )
     } != 0;
-    // Both halves, in units of a hundred nanoseconds. Kernel time is ours: a
-    // syscall the frame makes is work the frame did.
-    let ticks = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
-    ok.then(|| Duration::from_nanos((ticks(kernel) + ticks(user)) * 100))
+    let hundreds = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+    ok.then(|| Duration::from_nanos((hundreds(kernel) + hundreds(user)) * 100))
 }
+
+/// The most cycles a nanosecond of busy work took over a calibration spin,
+/// measured once per test binary.
+#[cfg(windows)]
+pub fn cycle_rate() -> Option<f64> {
+    static RATE: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+    *RATE.get_or_init(|| {
+        let mut fastest: Option<f64> = None;
+        for _ in 0..CALIBRATION_SLICES {
+            let (cycles, start) = (thread_cycles()?, Instant::now());
+            spin_for(CALIBRATION_SLICE);
+            let spun = thread_cycles()?.checked_sub(cycles)?;
+            let rate = spun as f64 / start.elapsed().as_nanos() as f64;
+            fastest = Some(fastest.map_or(rate, |was: f64| was.max(rate)));
+        }
+        fastest.filter(|rate| *rate > 0.0)
+    })
+}
+
+/// Busy slices the cycle rate is measured over.
+#[cfg(windows)]
+const CALIBRATION_SLICES: usize = 10;
+/// One slice's length.
+#[cfg(windows)]
+const CALIBRATION_SLICE: Duration = Duration::from_millis(20);
 
 #[cfg(not(any(unix, windows)))]
 fn thread_cpu() -> Option<Duration> {
+    None
+}
+
+/// The most this process has held resident so far, in MiB, or `None` where
+/// the platform cannot say. A peak, so memory a decode freed still counts.
+/// Only nextest gives each test a process of its own; under `cargo test`
+/// another test's peak would answer, so this is `None` there.
+pub fn peak_resident() -> Option<u64> {
+    let own = std::env::var("NEXTEST_EXECUTION_MODE").is_ok_and(|mode| mode == "process-per-test");
+    own.then(process_peak).flatten()
+}
+
+#[cfg(unix)]
+fn process_peak() -> Option<u64> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: `getrusage` fills the struct through the pointer, which points at
+    // a live local of exactly that type, and reads nothing else.
+    let ok = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } == 0;
+    // SAFETY: a zero return means the call filled the whole struct.
+    let peak = ok.then(|| unsafe { usage.assume_init() }.ru_maxrss as u64)?;
+    // Bytes on macOS, KiB elsewhere.
+    Some(if cfg!(target_os = "macos") {
+        peak >> 20
+    } else {
+        peak >> 10
+    })
+}
+
+#[cfg(windows)]
+fn process_peak() -> Option<u64> {
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    let size = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    let mut counters = PROCESS_MEMORY_COUNTERS {
+        cb: size,
+        ..Default::default()
+    };
+    // SAFETY: a pseudo-handle that needs no close, and a live local of the
+    // type the call writes, whose size it is told.
+    let ok = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &raw mut counters, size) } != 0;
+    ok.then_some(counters.PeakWorkingSetSize as u64 >> 20)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn process_peak() -> Option<u64> {
     None
 }
 
@@ -146,12 +262,8 @@ pub fn holds_p99(
 pub const COARSE_TICK: Duration = Duration::from_micros(15_625);
 
 /// This platform's thread clock step. Linux and macOS count in nanoseconds and
-/// microseconds.
-pub const CLOCK_TICK: Duration = if cfg!(windows) {
-    COARSE_TICK
-} else {
-    Duration::from_micros(1)
-};
+/// microseconds, and Windows in cycles.
+pub const CLOCK_TICK: Duration = Duration::from_micros(1);
 
 /// Breaching wall time a coarse clock needs before it can tell the host from
 /// the work, in its own ticks.
@@ -179,6 +291,8 @@ pub fn holds_p99_ticked(
 ) {
     let one = Shape::of(first);
     if one.p99 <= budget {
+        // Printed so a passing gate still says its margin.
+        eprintln!("budget: {claim}: {one}, against {budget:?}");
         return;
     }
 
@@ -626,6 +740,10 @@ pub fn delta(before: FrameStats, after: FrameStats) -> FrameStats {
         evicted: after.evicted - before.evicted,
         deferred: after.deferred - before.deferred,
         derived: after.derived - before.derived,
+        paired_bytes: after.paired_bytes - before.paired_bytes,
+        walks: after.walks - before.walks,
+        pairs_scored: after.pairs_scored - before.pairs_scored,
+        side_reads: after.side_reads - before.side_reads,
     }
 }
 
@@ -639,7 +757,7 @@ pub fn settle_tree(root: &Path) {
     const STILL_FOR: Duration = Duration::from_millis(40);
     const GIVE_UP_AFTER: Duration = Duration::from_secs(10);
 
-    let deadline = Instant::now() + GIVE_UP_AFTER;
+    let deadline = Instant::now() + ceiling(GIVE_UP_AFTER);
     let mut last = tree_fingerprint(root);
     loop {
         std::thread::sleep(STILL_FOR);
@@ -730,21 +848,9 @@ impl Scratch {
 
         let scratch = Scratch { path };
         scratch.git(&["init", "-q", "-b", "main"]);
-        // Every one of these exists to stop a developer's global config from
-        // changing what the test measures. autocrlf in particular is commonly
-        // true on Windows and would rewrite line endings under us.
-        scratch.git(&["config", "core.autocrlf", "false"]);
-        scratch.git(&["config", "core.safecrlf", "false"]);
-        scratch.git(&["config", "user.email", "test@example.invalid"]);
-        scratch.git(&["config", "user.name", "vigia tests"]);
-        scratch.git(&["config", "commit.gpgsign", "false"]);
-        // **These two are here for `crates/vigia/tests/writes.rs`, which asserts
-        // that nothing under the worktree moves while `vigia` runs.** With
-        // `core.fsmonitor` on, a `git add` spawns a `git-fsmonitor--daemon` that
-        // outlives the command and keeps writing inside `.git`, including a
-        // `cookies/` directory it creates and deletes to synchronise with clients.
-        scratch.git(&["config", "core.fsmonitor", "false"]);
-        scratch.git(&["config", "core.untrackedCache", "false"]);
+        for (key, value) in GIT_CONFIG {
+            scratch.git(&["config", key, value]);
+        }
         scratch
     }
 
@@ -1039,6 +1145,17 @@ impl Scratch {
     pub fn commit_all(&self, message: &str) {
         self.git(&["add", "-A"]);
         self.git(&["commit", "-q", "-m", message]);
+    }
+
+    /// Move `rela`'s modification time well behind the settle margin, which a
+    /// write a moment ago has not reached.
+    pub fn backdate(&self, rela: &str) {
+        let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(self.path_of(rela))
+            .and_then(|file| file.set_modified(past))
+            .expect("back-date the file");
     }
 
     /// Wait until nothing under the fixture is still moving.

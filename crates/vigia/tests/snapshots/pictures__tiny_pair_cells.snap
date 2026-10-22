@@ -1,0 +1,7 @@
+---
+source: crates/vigia/tests/pictures.rs
+assertion_line: 721
+expression: "cells.join(\"\\n\")"
+---
+▄445c80/442280 ▄ac5c80/ac2280 ▄445c80/43227e ▄ac5c80/ac2280 ▀f85149/1a1e24 ▄1e2228/191d23
+▄44d680/449c80 ▄acd680/ac9c80 ▄44d680/449c80 ▄acd680/ac9c80 ▄24282e/1f2329 ▄292d33/24282e

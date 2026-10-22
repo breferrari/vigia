@@ -415,22 +415,23 @@ fn with_notice() -> Chrome {
 
 /// A view carrying one of every row kind, so a sweep covers them all at once.
 fn every_row_kind() -> View {
-    View {
-        hidden: 0,
-        whole: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 1,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: vec![
+    {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 1;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = vec![
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "crates/vigia-core/src/frame.rs".to_owned(),
@@ -546,15 +547,15 @@ fn every_row_kind() -> View {
             Row::Box {
                 part: BoxPart::Bottom,
             },
-        ],
-        files: 3,
-        top: Position::default(),
-        read: 3,
-        scale: Scale::flat(0),
-        gutter: None,
+        ];
+        view.files = 3;
+        view.top = Position::default();
+        view.read = 3;
+        view.scale = Scale::flat(0);
+        view.gutter = None;
         // The added line carries the note's mark, so every sweep draws a marked
         // number beside the note rows.
-        notes: Noted {
+        view.notes = Noted {
             marked: vec![Marked {
                 row: 4,
                 id: "n1".to_owned(),
@@ -562,7 +563,8 @@ fn every_row_kind() -> View {
             }],
             boxed: Some(11),
             ..Default::default()
-        },
+        };
+        view
     }
 }
 
@@ -647,22 +649,23 @@ fn the_box_label_keeps_its_tail_and_marks_its_loss_at_every_width() {
 /// A view with content nobody wrote for a display: double-width, and a path
 /// longer than any pane.
 fn awkward() -> View {
-    View {
-        hidden: 0,
-        whole: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 1,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: vec![
+    {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 1;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = vec![
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "crates/vigia-core/src/very/deeply/nested/module/frame.rs".to_owned(),
@@ -677,71 +680,76 @@ fn awkward() -> View {
             }),
             line(LineKind::Added, 1, "見出し a 見出し b 見出し c"),
             line(LineKind::Added, 2, "🙂🙂🙂 tail"),
-        ],
-        files: 1,
-        top: Position::default(),
-        read: 1,
-        scale: Scale::flat(0),
-        gutter: None,
-        notes: Default::default(),
+        ];
+        view.files = 1;
+        view.top = Position::default();
+        view.read = 1;
+        view.scale = Scale::flat(0);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     }
 }
 
 fn empty() -> View {
-    View {
-        hidden: 0,
-        whole: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 0,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: Vec::new(),
-        files: 0,
-        top: Position::default(),
-        read: 0,
-        scale: Scale::flat(0),
-        gutter: None,
-        notes: Default::default(),
+    {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 0;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = Vec::new();
+        view.files = 0;
+        view.top = Position::default();
+        view.read = 0;
+        view.scale = Scale::flat(0);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     }
 }
 
 /// `n` uniquely labelled body rows over a diff of `files` files, so the rows
 /// actually drawn can be counted.
 fn numbered(n: usize, files: usize, listed: usize) -> View {
-    View {
-        hidden: 0,
-        whole: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 0,
-        grouped: false,
-        list: (0..listed)
+    {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 0;
+        view.grouped = false;
+        view.list = (0..listed)
             .map(|i| ListRow::from(entry(&format!("src/f{i}.rs"))))
-            .collect(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: (0..n)
+            .collect();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = (0..n)
             .map(|i| line(LineKind::Added, 1, &format!("R{i:02}")))
-            .collect(),
-        files,
-        top: Position::default(),
-        read: 1,
-        scale: Scale::flat(0),
-        gutter: None,
-        notes: Default::default(),
+            .collect();
+        view.files = files;
+        view.top = Position::default();
+        view.read = 1;
+        view.scale = Scale::flat(0);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     }
 }
 
@@ -781,22 +789,32 @@ fn label_is_honest(row: &str, label: &str, width: u16) -> bool {
 /// Every combination a sweep runs over, named so a failure says which.
 fn cases() -> Vec<(&'static str, View, Chrome)> {
     // The hundred-file case is not a bigger version of the three-file one.
-    let many = View {
-        list_span: 100,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        total_rows: 0,
-        rows_above: 0,
-        files: 100,
-        top: Position { file: 41, row: 0 },
-        ..every_row_kind()
+    let many = {
+        let mut view = every_row_kind();
+        view.list_span = 100;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.files = 100;
+        view.top = Position {
+            file: 41,
+            row: 0,
+            under: 0,
+        };
+        view
     };
     // The two-region screen, which is the one a reader actually gets.
-    let pinned = View {
-        top: Position { file: 1, row: 0 },
-        ..pinned_and_streamed()
+    let pinned = {
+        let mut view = pinned_and_streamed();
+        view.top = Position {
+            file: 1,
+            row: 0,
+            under: 0,
+        };
+        view
     };
     vec![
         ("every row kind, idle", every_row_kind(), chrome()),
@@ -896,14 +914,19 @@ fn cases() -> Vec<(&'static str, View, Chrome)> {
         // side the footer can be asked to lay out anywhere in the suite.
         (
             "readouts at a hundred files",
-            View {
-                list_span: 100,
-                grouped: false,
-                list: Vec::new(),
-                list_top: 0,
-                files: 100,
-                top: Position { file: 41, row: 0 },
-                ..every_row_kind()
+            {
+                let mut view = every_row_kind();
+                view.list_span = 100;
+                view.grouped = false;
+                view.list = Vec::new();
+                view.list_top = 0;
+                view.files = 100;
+                view.top = Position {
+                    file: 41,
+                    row: 0,
+                    under: 0,
+                };
+                view
             },
             diagnostics(),
         ),
@@ -934,22 +957,23 @@ const ENDS_CHANGED: [HeatBucket; HEAT_BUCKETS] = {
 /// A file heading at each rung of the recency ladder, with churn and heat behind
 /// it.
 fn glancing() -> View {
-    View {
-        hidden: 0,
-        whole: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 3,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: vec![
+    {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 3;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = vec![
             Row::file(FileEntry {
                 origin: Origin::Unstaged,
                 path: "crates/vigia-core/src/watch.rs".to_owned(),
@@ -990,13 +1014,14 @@ fn glancing() -> View {
                 notes: FileNotes::default(),
                 heat: [HeatBucket::default(); HEAT_BUCKETS],
             }),
-        ],
-        files: 3,
-        top: Position::default(),
-        read: 3,
-        scale: Scale::spread(12),
-        gutter: None,
-        notes: Default::default(),
+        ];
+        view.files = 3;
+        view.top = Position::default();
+        view.read = 3;
+        view.scale = Scale::spread(12);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     }
 }
 
@@ -1085,9 +1110,10 @@ fn the_header_never_takes_a_second_line() {
         for width in 8..=120u16 {
             for height in [6u16, 24] {
                 for (listed, hidden) in [(0usize, 0usize), (3, 0), (3, 12)] {
-                    let view = View {
-                        hidden,
-                        ..numbered(4, 3, listed)
+                    let view = {
+                        let mut view = numbered(4, 3, listed);
+                        view.hidden = hidden;
+                        view
                     };
                     let marker = if listed > 0 { "src/f0.rs" } else { "R00" };
                     let rows = rows_at(width, height, &view, &chrome);
@@ -1128,9 +1154,10 @@ fn the_header_ladder_keeps_the_mode_word_last() {
     // from nowhere at all.
     for (word, chrome) in [("watching", chrome()), ("not watching", lost())] {
         for files in [3usize, 100, 12_345] {
-            let view = View {
-                files,
-                ..every_row_kind()
+            let view = {
+                let mut view = every_row_kind();
+                view.files = files;
+                view
             };
             // Two whole clauses now, not one. The widest rung carries the
             // position token between the name and the count; the rung under it
@@ -2397,22 +2424,23 @@ fn a_label_cut_at_the_right_edge_says_so() {
     // Both directions, over every single-token label on the screen. The hunk
     // header is the one that matters most: `@@ -258,7 +25` is not a shortened
     // header, it is a header naming a different line.
-    let view = View {
-        hidden: 0,
-        whole: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 1,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: vec![
+    let view = {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 1;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = vec![
             Row::Hunk {
                 old_start: 258,
                 old_lines: 7,
@@ -2420,13 +2448,14 @@ fn a_label_cut_at_the_right_edge_says_so() {
                 new_lines: 9,
             },
             Row::Reason("unresolved conflict".to_owned()),
-        ],
-        files: 1,
-        top: Position::default(),
-        read: 1,
-        scale: Scale::flat(0),
-        gutter: None,
-        notes: Default::default(),
+        ];
+        view.files = 1;
+        view.top = Position::default();
+        view.read = 1;
+        view.scale = Scale::flat(0);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     };
     let long_name = Chrome {
         menu: None,
@@ -2535,28 +2564,30 @@ fn a_clipped_content_line_says_it_continues() {
     // the way a path does, so the mark is all it can honestly offer. `SPEC.md`
     // §11.1 rules this is not what I6 means by a truncated label.
     let text = "        for change in self.changes() { let x = compute(change); }";
-    let view = View {
-        hidden: 0,
-        whole: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 1,
-        grouped: false,
-        list: Vec::new(),
-        list_top: 0,
-        current_span: 0,
-        churn: None,
-        total_rows: 0,
-        rows_above: 0,
-        rows: vec![line(LineKind::Removed, 260, text)],
-        files: 1,
-        top: Position::default(),
-        read: 1,
-        scale: Scale::flat(0),
-        gutter: None,
-        notes: Default::default(),
+    let view = {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 1;
+        view.grouped = false;
+        view.list = Vec::new();
+        view.list_top = 0;
+        view.current_span = 0;
+        view.churn = None;
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = vec![line(LineKind::Removed, 260, text)];
+        view.files = 1;
+        view.top = Position::default();
+        view.read = 1;
+        view.scale = Scale::flat(0);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     };
 
     let mut saw_fit = false;
@@ -3171,26 +3202,36 @@ fn a_scrollbar_costs_its_region_its_own_columns_and_no_more() {
     ];
     // Ten files with three rows shown, so a bar is drawn; and three with three
     // shown, so one is not.
-    let with_bar = View {
+    let with_bar = {
+        let mut view = every_row_kind();
         // Three rows shown, which is what the fixture's own comment says and what
         // decides whether a bar exists: a screenful of three out of ten files
         // scrolls, and three out of three does not.
-        list_span: 3,
-        grouped: false,
-        list: entries.iter().cloned().map(ListRow::from).collect(),
-        list_top: 0,
-        top: Position { file: 1, row: 0 },
-        files: 10,
-        ..every_row_kind()
+        view.list_span = 3;
+        view.grouped = false;
+        view.list = entries.iter().cloned().map(ListRow::from).collect();
+        view.list_top = 0;
+        view.top = Position {
+            file: 1,
+            row: 0,
+            under: 0,
+        };
+        view.files = 10;
+        view
     };
-    let without_bar = View {
-        list_span: 3,
-        grouped: false,
-        list: entries.into_iter().map(ListRow::from).collect(),
-        list_top: 0,
-        top: Position { file: 1, row: 0 },
-        files: 3,
-        ..every_row_kind()
+    let without_bar = {
+        let mut view = every_row_kind();
+        view.list_span = 3;
+        view.grouped = false;
+        view.list = entries.into_iter().map(ListRow::from).collect();
+        view.list_top = 0;
+        view.top = Position {
+            file: 1,
+            row: 0,
+            under: 0,
+        };
+        view.files = 3;
+        view
     };
 
     let mut compared = 0;
@@ -3409,11 +3450,12 @@ fn the_pane_keeps_its_trailing_margin_with_nothing_to_scroll() {
     // `render.rs::the_width_a_row_wraps_at_is_the_width_it_is_drawn_across` and by
     // `a_diff_outgrowing_its_pane_does_not_move_the_content_rows_edge`.
     let long = "        for change in self.changes() { ".repeat(8);
-    let view = View {
+    let view = {
+        let mut view = every_row_kind();
         // No total reported, so `scrollable` is false and no bar is drawn at any width.
-        total_rows: 0,
-        rows_above: 0,
-        rows: vec![
+        view.total_rows = 0;
+        view.rows_above = 0;
+        view.rows = vec![
             Row::Hunk {
                 old_start: 258,
                 old_lines: 7,
@@ -3422,8 +3464,8 @@ fn the_pane_keeps_its_trailing_margin_with_nothing_to_scroll() {
             },
             line(LineKind::Removed, 260, &long),
             line(LineKind::Added, 261, &long),
-        ],
-        ..every_row_kind()
+        ];
+        view
     };
 
     let mut reached = 0usize;
@@ -3567,30 +3609,32 @@ fn the_pane_holds_its_trailing_margin_off_the_chrome() {
 /// Numbered content rows whose text is far too long to fit any pane in the
 /// sweep, over a diff tall enough that the region always draws a scrollbar.
 fn overlong(rows: usize) -> View {
-    View {
-        hidden: 0,
-        whole: Vec::new(),
-        landed: false,
-        ended: false,
-        recorded: 0,
-        built: 0,
-        list_span: 1,
-        grouped: false,
-        list: vec![entry("src/f.rs").into()],
-        list_top: 0,
-        current_span: rows,
-        churn: None,
-        total_rows: rows,
-        rows_above: 0,
-        rows: (0..rows)
+    {
+        let mut view = View::default();
+        view.hidden = 0;
+        view.whole = Vec::new();
+        view.landed = false;
+        view.ended = false;
+        view.recorded = 0;
+        view.built = 0;
+        view.list_span = 1;
+        view.grouped = false;
+        view.list = vec![entry("src/f.rs").into()];
+        view.list_top = 0;
+        view.current_span = rows;
+        view.churn = None;
+        view.total_rows = rows;
+        view.rows_above = 0;
+        view.rows = (0..rows)
             .map(|i| line(LineKind::Added, 1000 + i as u32, &"x".repeat(200)))
-            .collect(),
-        files: 1,
-        top: Position::default(),
-        read: 1,
-        scale: Scale::flat(0),
-        gutter: None,
-        notes: Default::default(),
+            .collect();
+        view.files = 1;
+        view.top = Position::default();
+        view.read = 1;
+        view.scale = Scale::flat(0);
+        view.gutter = None;
+        view.notes = Default::default();
+        view
     }
 }
 
@@ -3659,17 +3703,22 @@ fn a_drawn_gutter_leaves_the_text_its_floor() {
 
 /// A screen with both regions drawing file rows through `Painter::file_row`.
 fn pinned_and_streamed() -> View {
-    View {
-        list_span: 3,
-        grouped: false,
-        list: vec![
+    {
+        let mut view = every_row_kind();
+        view.list_span = 3;
+        view.grouped = false;
+        view.list = vec![
             entry("crates/vigia-core/src/frame.rs").into(),
             entry("src/engine/watch.rs").into(),
             entry("Cargo.toml").into(),
-        ],
-        list_top: 0,
-        top: Position { file: 0, row: 0 },
-        ..every_row_kind()
+        ];
+        view.list_top = 0;
+        view.top = Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        };
+        view
     }
 }
 
@@ -3680,10 +3729,11 @@ fn both_runs_pinned() -> View {
         entry.origin = Origin::Staged;
         entry
     };
-    View {
-        list_span: 6,
-        grouped: true,
-        list: vec![
+    {
+        let mut view = every_row_kind();
+        view.list_span = 6;
+        view.grouped = true;
+        view.list = vec![
             ListRow::Group {
                 origin: Origin::Unstaged,
                 count: 2,
@@ -3696,15 +3746,19 @@ fn both_runs_pinned() -> View {
             },
             staged("Cargo.toml").into(),
             staged("crates/vigia/src/render.rs").into(),
-        ],
-        list_top: 0,
-        files: 4,
-        rows: vec![
+        ];
+        view.list_top = 0;
+        view.files = 4;
+        view.rows = vec![
             Row::file(entry("crates/vigia-core/src/frame.rs")),
             Row::file(staged("crates/vigia/src/render.rs")),
-        ],
-        top: Position { file: 0, row: 0 },
-        ..every_row_kind()
+        ];
+        view.top = Position {
+            file: 0,
+            row: 0,
+            under: 0,
+        };
+        view
     }
 }
 
@@ -3988,15 +4042,16 @@ fn the_body_opens_with_one_blank_row_under_the_header() {
 /// A screen whose diff carries one added, one removed and one context line, so
 /// the band's two edges can be read against a row that has neither.
 fn three_kinds_of_line() -> View {
-    View {
-        rows: vec![
+    {
+        let mut view = pinned_and_streamed();
+        view.rows = vec![
             Row::file(entry("src/engine/watch.rs")),
             line(LineKind::Context, 38, "    fn coalesce(&mut self) {"),
             line(LineKind::Added, 39, "        self.pending.clear();"),
             line(LineKind::Removed, 40, "        self.flush();"),
             line(LineKind::Context, 41, "    }"),
-        ],
-        ..pinned_and_streamed()
+        ];
+        view
     }
 }
 
@@ -4202,8 +4257,9 @@ fn widening_never_takes_the_window_away_at_any_rung() {
 
 /// One file whose sparkline is exactly `spark`, drawn wide enough for the lot.
 fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
-    View {
-        rows: vec![Row::file(FileEntry {
+    {
+        let mut view = glancing();
+        view.rows = vec![Row::file(FileEntry {
             origin: Origin::Unstaged,
             path: "a.rs".to_owned(),
             from: None,
@@ -4214,8 +4270,8 @@ fn sparked(spark: [u32; HISTORY_BUCKETS]) -> View {
             newest: false,
             notes: FileNotes::default(),
             heat: ENDS_CHANGED,
-        })],
-        ..glancing()
+        })];
+        view
     }
 }
 
@@ -4349,9 +4405,10 @@ fn the_sparkline_reprojects_rather_than_dropping_buckets() {
     for at in [0, 1, HISTORY_BUCKETS - 2, HISTORY_BUCKETS - 1] {
         spark[at] = 9;
     }
-    let view = View {
-        scale: Scale::flat(9),
-        ..sparked(spark)
+    let view = {
+        let mut view = sparked(spark);
+        view.scale = Scale::flat(9);
+        view
     };
 
     let mut widths_seen = std::collections::BTreeSet::new();
@@ -4515,11 +4572,12 @@ fn a_bucket_with_no_scale_yet_draws_the_track_and_not_a_hot_bar() {
     let hot = theme.spark_hot.fg.expect("the hot stop has a colour");
 
     for glyphs in [Glyphs::Block, Glyphs::Braille] {
-        let view = View {
-            scale: Scale::flat(0),
-            ..sparked([
+        let view = {
+            let mut view = sparked([
                 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 11, 11, 12, 12,
-            ])
+            ]);
+            view.scale = Scale::flat(0);
+            view
         };
         let backend = drawn_at(120, 8, &view, &chrome(), glyphs);
         let (ramp, empty) = alphabet(glyphs);
@@ -4723,17 +4781,18 @@ fn drawing_both_runs_costs_the_path_no_column_at_any_width() {
     let grouped = both_runs_pinned();
     // The same rows with no second run, so the only difference between the two
     // screens at a given width is the grouping.
-    let plain = View {
-        list_span: 0,
-        grouped: false,
-        list: grouped
+    let plain = {
+        let mut view = grouped.clone();
+        view.list_span = 0;
+        view.grouped = false;
+        view.list = grouped
             .list
             .iter()
             .filter_map(ListRow::entry)
             .cloned()
             .map(ListRow::from)
-            .collect(),
-        ..grouped.clone()
+            .collect();
+        view
     };
     let chrome = Chrome {
         menu: None,
