@@ -452,21 +452,90 @@ pub fn protocol_of(
     forced.unwrap_or_else(|| detected(answer, lookup))
 }
 
-/// The protocol [`PICTURES_VAR`] names, or `None` for `auto` or unset.
-pub fn forced(
-    lookup: &impl Fn(&str) -> Option<String>,
-) -> Result<Option<ProtocolType>, PicturesError> {
+/// How pictures are drawn, as the config file and [`PICTURES_VAR`] spell it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Choice {
+    /// Whatever the terminal answers.
+    #[default]
+    Auto,
+    /// Kitty graphics.
+    Kitty,
+    /// Sixel.
+    Sixel,
+    /// iTerm2 inline images.
+    Iterm2,
+    /// Two pixels a cell, in coloured text.
+    Halfblocks,
+}
+
+impl Choice {
+    /// Every choice, in the order the menu cycles through them.
+    pub const ALL: [Self; 5] = [
+        Self::Auto,
+        Self::Kitty,
+        Self::Sixel,
+        Self::Iterm2,
+        Self::Halfblocks,
+    ];
+
+    /// The choice `word` spells in any case, or `None` for a word that is not one.
+    #[must_use]
+    pub fn named(word: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|choice| choice.word().eq_ignore_ascii_case(word))
+    }
+
+    /// What the file and the variable spell it as.
+    #[must_use]
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Kitty => "kitty",
+            Self::Sixel => "sixel",
+            Self::Iterm2 => "iterm2",
+            Self::Halfblocks => "halfblocks",
+        }
+    }
+
+    /// The one after it, back to `auto` after the last.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Auto => Self::Kitty,
+            Self::Kitty => Self::Sixel,
+            Self::Sixel => Self::Iterm2,
+            Self::Iterm2 => Self::Halfblocks,
+            Self::Halfblocks => Self::Auto,
+        }
+    }
+
+    /// The protocol it forces, or `None` for `auto`.
+    #[must_use]
+    pub const fn protocol(self) -> Option<ProtocolType> {
+        match self {
+            Self::Auto => None,
+            Self::Kitty => Some(ProtocolType::Kitty),
+            Self::Sixel => Some(ProtocolType::Sixel),
+            Self::Iterm2 => Some(ProtocolType::Iterm2),
+            Self::Halfblocks => Some(ProtocolType::Halfblocks),
+        }
+    }
+}
+
+/// The choice [`PICTURES_VAR`] makes, or `None` where it is unset or empty,
+/// which leaves it to the config file's `pictures` key.
+///
+/// # Errors
+///
+/// The variable holds a word that is not a [`Choice`].
+pub fn forced(lookup: &impl Fn(&str) -> Option<String>) -> Result<Option<Choice>, PicturesError> {
     let Some((raw, value)) = crate::colour::override_of(lookup, PICTURES_VAR) else {
         return Ok(None);
     };
-    match value.as_str() {
-        "kitty" => Ok(Some(ProtocolType::Kitty)),
-        "sixel" => Ok(Some(ProtocolType::Sixel)),
-        "iterm2" => Ok(Some(ProtocolType::Iterm2)),
-        "halfblocks" => Ok(Some(ProtocolType::Halfblocks)),
-        "auto" => Ok(None),
-        _ => Err(PicturesError { value: raw }),
-    }
+    Choice::named(&value)
+        .map(Some)
+        .ok_or(PicturesError { value: raw })
 }
 
 /// The protocol the answer and the table give, without the override.
@@ -3045,7 +3114,11 @@ mod tests {
         answer: Answer,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<ProtocolType, PicturesError> {
-        Ok(protocol_of(forced(&lookup)?, answer, &lookup))
+        Ok(protocol_of(
+            forced(&lookup)?.unwrap_or_default().protocol(),
+            answer,
+            &lookup,
+        ))
     }
 
     const KNOWN: Answer = Answer {
@@ -3093,6 +3166,45 @@ mod tests {
                 value: "png".to_owned()
             })
         );
+    }
+
+    #[test]
+    fn file_choice_precedence() {
+        let kitty = Choice::Kitty;
+        assert_eq!(
+            forced(&env(&[])).map(|env| env.unwrap_or(kitty).protocol()),
+            Ok(Some(ProtocolType::Kitty)),
+            "the file's choice was not used with the variable unset"
+        );
+        assert_eq!(
+            forced(&env(&[(PICTURES_VAR, "sixel")])).map(|env| env.unwrap_or(kitty).protocol()),
+            Ok(Some(ProtocolType::Sixel)),
+            "the file's choice won over the variable"
+        );
+        assert_eq!(
+            forced(&env(&[(PICTURES_VAR, "auto")])).map(|env| env.unwrap_or(kitty).protocol()),
+            Ok(None),
+            "a variable set to auto did not win over the file"
+        );
+        assert_eq!(
+            forced(&env(&[(PICTURES_VAR, "")])).map(|env| env.unwrap_or(kitty).protocol()),
+            Ok(Some(ProtocolType::Kitty)),
+            "an empty variable did not fall back to the file"
+        );
+    }
+
+    #[test]
+    fn choice_words_round_trip() {
+        for choice in Choice::ALL {
+            assert_eq!(Choice::named(choice.word()), Some(choice));
+        }
+        let mut seen = vec![Choice::Auto];
+        let mut at = Choice::Auto.next();
+        while at != Choice::Auto {
+            seen.push(at);
+            at = at.next();
+        }
+        assert_eq!(seen, Choice::ALL, "the cycle skips or repeats a choice");
     }
 
     #[test]

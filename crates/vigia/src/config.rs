@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use vigia_core::Hidden;
 
+use crate::pictures::Choice;
+
 /// Where the view defaults are read from, under the reader's home directory.
 pub const CONFIG_FILE: &str = ".config/vigia/config";
 
@@ -33,6 +35,10 @@ pub struct Config {
     pub icons: bool,
     /// Wrap every listed path in an OSC 8 hyperlink to its file. Config only.
     pub links: bool,
+    /// Ask crates.io for a newer release. No key, and read only at launch.
+    pub update: bool,
+    /// How pictures are drawn. No key, and read only at launch.
+    pub pictures: Choice,
     /// Write what the reader flips back into this file. The config menu's own row,
     /// and the only key here that is about the file rather than about the pane.
     pub persist: bool,
@@ -41,7 +47,8 @@ pub struct Config {
     pub hide: Option<Hidden>,
 }
 
-/// Every toggle off but follow, the notes and the links, which is the shipped pane.
+/// Every toggle off but follow, the notes, the links and the update check, which is
+/// the shipped pane.
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -54,6 +61,8 @@ impl Default for Config {
             notes: true,
             icons: false,
             links: true,
+            update: true,
+            pictures: Choice::Auto,
             persist: false,
             hide: None,
         }
@@ -61,16 +70,29 @@ impl Default for Config {
 }
 
 /// Every toggle this file accepts, in the order the gestures sheet lists them.
-pub const KEYS: [&str; 10] = [
-    "follow", "rail", "single", "overview", "staged", "wrap", "notes", "icons", "links", "persist",
+pub const KEYS: [&str; 11] = [
+    "follow", "rail", "single", "overview", "staged", "wrap", "notes", "icons", "links", "update",
+    "persist",
 ];
 
 /// Every setting that takes a value rather than `on` or `off`.
 ///
 /// Apart from [`KEYS`] because a toggle is a pane some key could reach and a
-/// valued setting is reachable by no gesture, so a keymap sweep accounts for the
+/// valued setting is reachable by no key, so a keymap sweep accounts for the
 /// first list and never the second.
-pub const VALUES: [&str; 1] = ["hide"];
+pub const VALUES: [&str; 2] = ["hide", "pictures"];
+
+/// Every key a save writes: the toggles, and `pictures`, which the menu reaches.
+/// `hide` is the one key no save touches.
+const SAVED: [&str; KEYS.len() + 1] = {
+    let mut saved = ["pictures"; KEYS.len() + 1];
+    let mut at = 0;
+    while at < KEYS.len() {
+        saved[at] = KEYS[at];
+        at += 1;
+    }
+    saved
+};
 
 impl Config {
     /// Set `key`, which [`parse`] has already checked is one of [`KEYS`].
@@ -85,6 +107,7 @@ impl Config {
             "notes" => self.notes = on,
             "icons" => self.icons = on,
             "links" => self.links = on,
+            "update" => self.update = on,
             "persist" => self.persist = on,
             _ => return false,
         }
@@ -124,6 +147,13 @@ pub enum ConfigError {
         /// The engine's own words, with no sentence around them: the message
         /// below is the sentence.
         why: String,
+    },
+    /// A `pictures` value that is not one of its words.
+    UnknownPictures {
+        /// 1-based.
+        line: usize,
+        /// What they wrote.
+        value: String,
     },
     /// A value that is neither `on` nor `off`.
     UnknownValue {
@@ -177,6 +207,11 @@ impl fmt::Display for ConfigError {
             Self::BadPattern { line, why } => {
                 write!(f, "line {line}: hide is not a pattern: {why}")
             }
+            Self::UnknownPictures { line, value } => write!(
+                f,
+                "line {line}: pictures is {value:?}, which is not one of {}",
+                Choice::ALL.map(Choice::word).join(", ")
+            ),
             Self::UnknownValue { line, key, value } => write!(
                 f,
                 "line {line}: {key} is {value:?}, which is neither `on` nor `off`"
@@ -291,8 +326,15 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
             return Err(ConfigError::MissingValue { line });
         }
 
-        if VALUES.contains(&key) {
-            // One valued key, so the match is on the key rather than on a table.
+        if key == "pictures" {
+            config.pictures = Choice::named(value).ok_or_else(|| ConfigError::UnknownPictures {
+                line,
+                value: value.to_owned(),
+            })?;
+            seen.push((key.to_owned(), line));
+            continue;
+        }
+        if key == "hide" {
             config.hide = Some(Hidden::new(value).map_err(|why| ConfigError::BadPattern {
                 line,
                 why: why.to_string(),
@@ -332,8 +374,10 @@ pub fn parse(source: &str) -> Result<Config, ConfigError> {
 /// and rebuilding it would reformat the file on every flip while their editor put
 /// it back on every save. Comments, blank lines, key order and `hide` survive, and
 /// a key the file lacks is appended, so a hand-written file only grows at the end.
+/// The lines it owns are every toggle and `pictures`, less the keys in `kept`,
+/// whose lines are left as the file has them and are never appended.
 #[must_use]
-pub fn rewrite(source: &str, config: &Config) -> String {
+pub fn rewrite(source: &str, config: &Config, kept: &[&str]) -> String {
     // Off the front and back on, for the reason `parse` strips it: U+FEFF is `Cf`
     // rather than `White_Space`, so it survives every trim and lands inside the first
     // key, which would then be unrecognised and appended a second time.
@@ -344,11 +388,12 @@ pub fn rewrite(source: &str, config: &Config) -> String {
         source
     };
 
-    let mut out = String::with_capacity(source.len() + KEYS.len() * 16);
+    let mut out = String::with_capacity(source.len() + SAVED.len() * 16);
     if mark {
         out.push('\u{FEFF}');
     }
-    let mut written: Vec<&str> = Vec::with_capacity(KEYS.len());
+    // A kept key counts as written already, so its line is passed through as it is.
+    let mut written: Vec<&str> = kept.to_vec();
     // The first line's ending, so a file written on Windows stays one and an
     // appended key takes what the rest of it has. The first rather than the last
     // because a file carrying both is already inconsistent, and the first is the
@@ -361,9 +406,12 @@ pub fn rewrite(source: &str, config: &Config) -> String {
         if !tail.is_empty() && ending.is_none() {
             ending = Some(tail);
         }
-        match owned_key(raw, &written)
-            .and_then(|(key, at)| KEYS.iter().find(|name| **name == key).map(|key| (*key, at)))
-        {
+        match owned_key(raw, &written).and_then(|(key, at)| {
+            SAVED
+                .iter()
+                .find(|name| **name == key)
+                .map(|key| (*key, at))
+        }) {
             Some((key, at)) => {
                 written.push(key);
                 out.push_str(&raw[..=at]);
@@ -381,7 +429,7 @@ pub fn rewrite(source: &str, config: &Config) -> String {
         out.push_str(tail);
     }
 
-    let missing: Vec<String> = KEYS
+    let missing: Vec<String> = SAVED
         .iter()
         .filter(|key| !written.contains(key))
         .map(|key| format!("{key} = {}", word_for(key, config)))
@@ -410,7 +458,7 @@ fn owned_key<'a>(raw: &'a str, written: &[&str]) -> Option<(&'a str, usize)> {
     }
     let at = raw.find('=')?;
     let key = raw[..at].trim();
-    (KEYS.contains(&key) && !written.contains(&key)).then_some((key, at))
+    (SAVED.contains(&key) && !written.contains(&key)).then_some((key, at))
 }
 
 /// The comment a value carries, from its `#` to the line's end.
@@ -437,9 +485,10 @@ fn word_for(key: &str, config: &Config) -> &'static str {
         "notes" => config.notes,
         "icons" => config.icons,
         "links" => config.links,
+        "update" => config.update,
         "persist" => config.persist,
-        // Unreachable through `owned_key`, which filters on `KEYS`; a valued
-        // setting reaches no gesture and so is never rewritten.
+        "pictures" => return config.pictures.word(),
+        // Unreachable through `owned_key`, which filters on `SAVED`.
         _ => return "off",
     };
     if on { "on" } else { "off" }
@@ -472,11 +521,13 @@ fn landing(path: &Path) -> PathBuf {
 /// What is left is two panes writing in turn, where the last flip wins: closing
 /// that needs a lock, and a lock is a file nobody asked this program to write.
 ///
+/// `kept` names keys to leave as the file has them, which [`rewrite`] describes.
+///
 /// # Errors
 ///
 /// The directory cannot be made, the file cannot be read or no longer parses, or
 /// the write cannot land.
-pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
+pub fn save(path: &Path, config: &Config, kept: &[&str]) -> Result<(), ConfigError> {
     let refuse = |why: std::io::Error| ConfigError::Unwritable {
         path: path.to_owned(),
         why: why.to_string(),
@@ -496,7 +547,7 @@ pub fn save(path: &Path, config: &Config) -> Result<(), ConfigError> {
         let _ = std::fs::remove_file(&temp);
         refuse(why)
     };
-    std::fs::write(&temp, rewrite(&source, config)).map_err(wipe)?;
+    std::fs::write(&temp, rewrite(&source, config, kept)).map_err(wipe)?;
     std::fs::rename(&temp, &target).map_err(wipe)
 }
 

@@ -2236,7 +2236,7 @@ fn no_ledger_carries_a_byte_ceiling() {
 ///
 /// Moves with `config::KEYS`, and the gate below is what says so: the wrong word
 /// here fails against the document, and the wrong word there fails against this.
-const CONFIG_KEYS_SPELLED: &str = "Ten keys";
+const CONFIG_KEYS_SPELLED: &str = "Eleven keys";
 
 /// `SPEC.md` names every key the config file accepts, and counts them right.
 ///

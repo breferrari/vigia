@@ -5,6 +5,7 @@ use ratatui::crossterm::event::{
 };
 
 use crate::input::{Action, Sheet};
+use crate::pictures::Choice;
 
 /// One toggle the menu draws.
 ///
@@ -30,6 +31,11 @@ pub enum Setting {
     Icons,
     /// No key either.
     Links,
+    /// The update check. No key, and read at the next launch.
+    Update,
+    /// How pictures are drawn. No key, read at the next launch, and the one row
+    /// that cycles through words rather than flipping.
+    Pictures,
     /// Write what the reader flips back into the file. No key: the menu's own row
     /// and nothing else, which is what keeps it a thing the reader asked for.
     Persist,
@@ -40,16 +46,18 @@ pub enum Setting {
 /// The order is the reader's drawing: what the body is made of first, then what
 /// a listed path carries. `b` is absent because where the pane stands is a
 /// state rather than a setting, which is `SPEC.md` §11.2 B22's rule.
-pub const SETTINGS: [Setting; 10] = [
+pub const SETTINGS: [Setting; 12] = [
     Setting::Follow,
+    Setting::Staged,
     Setting::Rail,
     Setting::Single,
     Setting::Overview,
-    Setting::Staged,
     Setting::Wrap,
-    Setting::Notes,
     Setting::Icons,
     Setting::Links,
+    Setting::Pictures,
+    Setting::Notes,
+    Setting::Update,
     Setting::Persist,
 ];
 
@@ -66,6 +74,35 @@ pub const OFF: &str = "off";
 /// that does not.
 pub const STATE_WIDTH: usize = 3;
 
+/// Columns the pictures row's state cell takes, which is its widest word. Its own
+/// rather than [`STATE_WIDTH`], so the other rows keep their narrow cell.
+pub const CHOICE_WIDTH: usize = {
+    let mut widest = 0;
+    let mut at = 0;
+    while at < Choice::ALL.len() {
+        let len = Choice::ALL[at].word().len();
+        if len > widest {
+            widest = len;
+        }
+        at += 1;
+    }
+    widest
+};
+
+/// What a row read only at launch says beside its name when the environment
+/// overrides the file.
+pub const ENV: &str = "env";
+
+/// What the description box says for a row read only at launch once it has been
+/// flipped since launch and written.
+pub const RESTART: &str = "restart to apply";
+
+/// And once it has been flipped and not written.
+pub const UNSAVED: &str = "not saved: turn on Save settings";
+
+/// And once it has been flipped while the environment overrides it.
+pub const OVERRIDDEN: &str = "the environment sets this, so a restart keeps its value";
+
 impl Setting {
     /// What the row spells.
     #[must_use]
@@ -80,7 +117,63 @@ impl Setting {
             Self::Notes => "Notes",
             Self::Icons => "File icons",
             Self::Links => "Path links",
+            Self::Update => "Check for updates",
+            Self::Pictures => "Picture protocol",
             Self::Persist => "Save settings",
+        }
+    }
+
+    /// One line on what it does, for the box under the rows.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Follow => "Move the view to each change as it lands.",
+            Self::Staged => "Show what is staged beside what is not.",
+            Self::Rail => "The pinned file list beside the diff, from 139 columns.",
+            Self::Single => "Show one file's diff at a time.",
+            Self::Overview => "Show the file list alone, with no diff under it.",
+            Self::Wrap => "Continue a long line on the row below instead of cutting it.",
+            Self::Icons => "A file-type icon before each path. Needs a Nerd Font.",
+            Self::Links => "Make each path a link that opens the file.",
+            Self::Pictures => "How a changed image is drawn. auto asks the terminal.",
+            Self::Notes => "Draw your notes to the agent under the lines they are on.",
+            Self::Update => "At startup, look for a newer vigia and say so in the footer.",
+            Self::Persist => "Write every change made here into the config file.",
+        }
+    }
+
+    /// The word for where it stands in the shipped pane.
+    #[must_use]
+    pub fn shipped(self) -> &'static str {
+        self.word(Settings::shipped())
+    }
+
+    /// The word the state cell spells: the environment's own where it sets one,
+    /// the file's otherwise.
+    #[must_use]
+    pub fn effective(self, settings: Settings) -> &'static str {
+        self.env(settings).unwrap_or_else(|| self.word(settings))
+    }
+
+    /// Whether what is in effect differs from the shipped pane, which the row marks.
+    /// Not `follow`, which scrolling turns off without the reader changing a setting.
+    #[must_use]
+    pub fn changed(self, settings: Settings) -> bool {
+        let effective = match self.effective(settings) {
+            // `VIGIA_UPDATE=auto` is the check on.
+            "auto" if self == Self::Update => ON,
+            word => word,
+        };
+        self != Self::Follow && effective != self.shipped()
+    }
+
+    /// The variable that overrides it, for a row read only at launch.
+    #[must_use]
+    pub const fn variable(self) -> Option<&'static str> {
+        match self {
+            Self::Update => Some("VIGIA_UPDATE"),
+            Self::Pictures => Some("VIGIA_PICTURES"),
+            _ => None,
         }
     }
 
@@ -97,14 +190,17 @@ impl Setting {
             Self::Notes => Action::ToggleNotes,
             Self::Icons => Action::ToggleIcons,
             Self::Links => Action::ToggleLinks,
+            Self::Update => Action::ToggleUpdate,
+            Self::Pictures => Action::CyclePictures,
             Self::Persist => Action::TogglePersist,
         }
     }
 
-    /// Where it stands right now.
+    /// The word for where it stands right now: [`ON`] or [`OFF`], or the
+    /// pictures choice.
     #[must_use]
-    pub const fn of(self, settings: Settings) -> bool {
-        match self {
+    pub const fn word(self, settings: Settings) -> &'static str {
+        let on = match self {
             Self::Follow => settings.follow,
             Self::Rail => settings.rail,
             Self::Single => settings.single,
@@ -114,9 +210,203 @@ impl Setting {
             Self::Notes => settings.notes,
             Self::Icons => settings.icons,
             Self::Links => settings.links,
+            Self::Update => settings.update,
+            Self::Pictures => return settings.pictures.word(),
             Self::Persist => settings.persist,
+        };
+        if on { ON } else { OFF }
+    }
+
+    /// Columns its state cell takes.
+    #[must_use]
+    pub const fn width(self) -> usize {
+        match self {
+            Self::Pictures => CHOICE_WIDTH,
+            _ => STATE_WIDTH,
         }
     }
+
+    /// Whether the pane reads it only at launch, so a flip changes the file and
+    /// not the pane.
+    #[must_use]
+    pub const fn at_launch(self) -> bool {
+        matches!(self, Self::Update | Self::Pictures)
+    }
+
+    /// The value the environment sets over the file, for a row read only at
+    /// launch, or `None` where it sets nothing.
+    #[must_use]
+    pub const fn env(self, settings: Settings) -> Option<&'static str> {
+        match self {
+            Self::Update => match settings.env.update {
+                Some(true) => Some("auto"),
+                Some(false) => Some(OFF),
+                None => None,
+            },
+            Self::Pictures => match settings.env.pictures {
+                Some(choice) => Some(choice.word()),
+                None => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+impl Settings {
+    /// The shipped pane, which is what [`Setting::changed`] measures against.
+    #[must_use]
+    pub fn shipped() -> Self {
+        let config = crate::Config::default();
+        Self {
+            follow: config.follow,
+            rail: config.rail,
+            single: config.single,
+            overview: config.overview,
+            staged: config.staged,
+            wrap: config.wrap,
+            notes: config.notes,
+            icons: config.icons,
+            links: config.links,
+            update: config.update,
+            pictures: config.pictures,
+            env: Overrides::default(),
+            persist: config.persist,
+        }
+    }
+
+    /// How many settings the row marks as changed.
+    #[must_use]
+    pub fn changed(self) -> usize {
+        SETTINGS
+            .into_iter()
+            .filter(|setting| setting.changed(self))
+            .count()
+    }
+}
+
+/// Which rows read only at launch moved since launch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Flipped {
+    /// `Check for updates`.
+    pub update: bool,
+    /// `Picture protocol`.
+    pub pictures: bool,
+}
+
+/// A titled group of rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    /// What the pane shows changing.
+    Changes,
+    /// How the body is laid out.
+    Layout,
+    /// What a listed path carries.
+    Look,
+    /// How a changed image is drawn.
+    Pictures,
+    /// What the agent's side of the pane draws.
+    Agent,
+    /// The program itself.
+    App,
+}
+
+impl Group {
+    /// What its header spells.
+    #[must_use]
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Changes => "What changes",
+            Self::Layout => "Layout",
+            Self::Look => "Look",
+            Self::Pictures => "Pictures",
+            Self::Agent => "Agent",
+            Self::App => "App",
+        }
+    }
+}
+
+/// What the box under the rows says for the row the caret is on.
+#[must_use]
+pub fn description(row: Row, settings: Settings, flipped: Flipped) -> &'static str {
+    match row {
+        Row::Toggle(setting) => {
+            let moved = match setting {
+                Setting::Update => flipped.update,
+                Setting::Pictures => flipped.pictures,
+                _ => false,
+            };
+            match (moved, setting.env(settings).is_some(), settings.persist) {
+                (true, true, _) => OVERRIDDEN,
+                (true, false, true) => RESTART,
+                (true, false, false) => UNSAVED,
+                (false, _, _) => setting.description(),
+            }
+        }
+        Row::Reset => "Put every setting back to how vigia ships.",
+        Row::Header(_) | Row::Gap => "",
+    }
+}
+
+/// Every text the box can say, which is what its height is measured against.
+pub fn descriptions() -> impl Iterator<Item = &'static str> {
+    SETTINGS.into_iter().map(Setting::description).chain([
+        description(Row::Reset, Settings::default(), Flipped::default()),
+        RESTART,
+        UNSAVED,
+        OVERRIDDEN,
+    ])
+}
+
+/// `text` broken at spaces into lines of at most `width` columns. A word wider
+/// than a line is split, so every line fits.
+#[must_use]
+pub fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    if width == 0 {
+        return lines;
+    }
+    for word in text.split_whitespace() {
+        let mut word = word;
+        loop {
+            let used = line.chars().count();
+            let len = word.chars().count();
+            let gap = usize::from(used > 0);
+            if used + gap + len <= width {
+                if gap == 1 {
+                    line.push(' ');
+                }
+                line.push_str(word);
+                break;
+            }
+            if used > 0 {
+                lines.push(std::mem::take(&mut line));
+                continue;
+            }
+            let cut = word
+                .char_indices()
+                .nth(width)
+                .map_or(word.len(), |(at, _)| at);
+            lines.push(word[..cut].to_owned());
+            word = &word[cut..];
+            if word.is_empty() {
+                break;
+            }
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// What the environment sets over the file, for the rows that say so.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Overrides {
+    /// `VIGIA_UPDATE`, where it is set.
+    pub update: Option<bool>,
+    /// `VIGIA_PICTURES`, where it is set.
+    pub pictures: Option<Choice>,
 }
 
 /// Every toggle the pane has, as it stands.
@@ -143,41 +433,52 @@ pub struct Settings {
     pub icons: bool,
     /// Whether a listed path is an OSC 8 hyperlink.
     pub links: bool,
+    /// Whether the file asks for the update check at the next launch.
+    pub update: bool,
+    /// How the file asks for pictures to be drawn at the next launch.
+    pub pictures: Choice,
+    /// What the environment sets over the file. No flip moves it.
+    pub env: Overrides,
     /// Whether a flip is written back into the reader's own file.
     pub persist: bool,
 }
 
 /// One drawn row of the menu, in the order it draws them.
 ///
-/// Not [`SETTINGS`], because two of the rows are neither: `SPEC.md` §11.2 B22 puts
-/// remembering and the reset under a rule of their own, and the rule and the air
-/// around it are rows a caret may not land on.
+/// Not [`SETTINGS`], because headers, the air between groups and the reset are
+/// not settings, and only the reset of those takes the caret.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Row {
+    /// A group's title. Drawn dim and skipped.
+    Header(Group),
     /// A toggle, with its state beside it.
     Toggle(Setting),
     /// Air. Drawn blank and skipped.
     Gap,
-    /// The rule that separates what the pane is from what is kept.
-    Rule,
     /// The one row that throws something away, drawn as the act it is and with no
     /// state cell.
     Reset,
 }
 
 /// Every drawn row, top to bottom.
-pub const ROWS: [Row; 14] = [
+pub const ROWS: [Row; 20] = [
+    Row::Header(Group::Changes),
     Row::Toggle(Setting::Follow),
+    Row::Toggle(Setting::Staged),
+    Row::Header(Group::Layout),
     Row::Toggle(Setting::Rail),
     Row::Toggle(Setting::Single),
     Row::Toggle(Setting::Overview),
-    Row::Toggle(Setting::Staged),
     Row::Toggle(Setting::Wrap),
-    Row::Toggle(Setting::Notes),
+    Row::Header(Group::Look),
     Row::Toggle(Setting::Icons),
     Row::Toggle(Setting::Links),
-    Row::Gap,
-    Row::Rule,
+    Row::Header(Group::Pictures),
+    Row::Toggle(Setting::Pictures),
+    Row::Header(Group::Agent),
+    Row::Toggle(Setting::Notes),
+    Row::Header(Group::App),
+    Row::Toggle(Setting::Update),
     Row::Gap,
     Row::Toggle(Setting::Persist),
     Row::Reset,
@@ -210,7 +511,18 @@ pub struct Menu {
     pub caret: Caret,
     /// What the rows say.
     pub settings: Settings,
+    /// Which launch-only rows moved since launch.
+    pub flipped: Flipped,
 }
+
+/// The first row the caret may land on, where it opens.
+pub const FIRST: usize = {
+    let mut at = 0;
+    while !ROWS[at].selectable() {
+        at += 1;
+    }
+    at
+};
 
 impl Caret {
     /// The window's first row, clamped so the caret is always drawn.
@@ -225,7 +537,9 @@ impl Caret {
         }
         let top = self.top.min(ROWS.len() - rows);
         if self.at < top {
-            self.at
+            // The group's header comes into view with its first row.
+            let headed = self.at > 0 && matches!(ROWS[self.at - 1], Row::Header(_));
+            self.at - usize::from(headed && rows > 1)
         } else if self.at >= top + rows {
             self.at + 1 - rows
         } else {
