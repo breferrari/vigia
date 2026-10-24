@@ -86,7 +86,9 @@ ignore:
   - crates/
   - docs/
   - xtask/
+  - vendor/
   - Cargo.*
+  - deny.toml
   - "*.md"
   - .om-project
   - .gitattributes
