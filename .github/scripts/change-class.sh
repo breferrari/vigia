@@ -17,7 +17,8 @@
 # and a test reads it. `.claude/scripts` are the guards that run on every
 # commit and publish, and they are code. `.claude/take-next` holds the
 # take-next rules, which only the skill reads. `docs/research` holds notes and
-# their images, and a script kept beside them is code.
+# their images, and a script kept beside them is code. `.techpack/templates`
+# is code: the tech pack job validates the pack that loads them.
 #
 # The caller lists a renamed file under both names, so moving code into a
 # docs path is still code.
@@ -54,8 +55,7 @@ code=$(printf '%s\n' "$paths" | grep -Ev \
     -e '^\.github/FUNDING\.yml$' \
     -e '^\.gitignore$' \
     -e "^assets/[^/]+\\.$img\$" \
-    -e "^assets/proposals/[^/]+\\.$img\$" \
-    -e '^\.techpack/templates/[^/]+\.md$')
+    -e "^assets/proposals/[^/]+\\.$img\$")
 status=$?
 set -e
 if [ "$status" -gt 1 ]; then

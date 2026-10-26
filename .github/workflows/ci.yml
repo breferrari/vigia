@@ -209,7 +209,9 @@ jobs:
           cargo nextest run -p vigia-core --profile ci --test coverage
 
   # mcs ships for macOS only. The registry runs this same validator, and it
-  # exits 0 on warnings, so the output is what fails the job.
+  # exits 0 on warnings, so the output is what fails the job. `ci complete`
+  # does not need this job: it installs the latest mcs, and a new rule there
+  # must not block a merge here.
   pack:
     name: tech pack
     needs: [changes]
@@ -225,8 +227,12 @@ jobs:
       - run: brew install mcs-cli/tap/mcs
       - run: |
           set -euo pipefail
-          out=$(mcs pack validate .)
+          status=0
+          out=$(mcs pack validate . 2>&1) || status=$?
           printf '%s\n' "$out"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
           if printf '%s\n' "$out" | grep -Eq '^\[(WARN|ERROR)\]'; then
             exit 1
           fi
@@ -251,7 +257,7 @@ jobs:
   ci-complete:
     name: ci complete
     if: always()
-    needs: [changes, lint, test, msrv, deny, docs, pack, zizmor]
+    needs: [changes, lint, test, msrv, deny, docs, zizmor]
     runs-on: ubuntu-latest
     permissions: {}
     timeout-minutes: 5
