@@ -40,9 +40,8 @@ pub const PROJECT_VAR: &str = "CLAUDE_PROJECT_DIR";
 const INSTRUCTIONS: &str = "vigia is the live diff monitor in the reader's other pane. A note the \
                             reader pins to a line of the diff is here: call notes, act on the code \
                             it points at, then resolve it by id with one line saying what you did. \
-                            Ask only as a last resort, when something is not clear enough to act \
-                            on, and ask in your own session with options. reply writes a line under \
-                            the note and is not how you ask.";
+                            To decline a note, resolve it with the reason. Ask only if a note is \
+                            unclear, in your own session: the reader cannot answer in the pane.";
 
 const LIST_CHANGED: &str = r#"{"jsonrpc":"2.0","method":"notifications/resources/list_changed"}"#;
 
@@ -638,8 +637,8 @@ fn tools() -> Value {
         },
         {
             "name": "reply",
-            "description": "Write a line under a note by id without resolving it. The line is an \
-                            answer the reader reads under the note. It is not a question to them.",
+            "description": "Write a line under a note by id without resolving it. The reader \
+                            cannot answer in the pane, so this is not for questions.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

@@ -180,16 +180,16 @@ fn the_content_carries_the_note_its_anchor_and_its_context() {
     );
     assert!(text.contains("n1"), "the id it is resolved by: {text}");
     assert!(
-        text.contains("last resort") && text.contains("not clear enough to act on"),
-        "a question is not bounded as a last resort: {text}"
+        text.contains("Ask only if the note is unclear") && text.contains("with options"),
+        "a question is not kept to an unclear note: {text}"
     );
     assert!(
-        text.contains("with options"),
-        "a question is not asked with options: {text}"
+        text.contains("decline it, resolve it with the reason"),
+        "a decline is not sent through resolve: {text}"
     );
     assert!(
-        text.contains("Neither tool asks the reader anything"),
-        "the tools are left as a way to ask: {text}"
+        text.contains("the pane cannot answer"),
+        "the agent is not told why it asks here: {text}"
     );
 }
 

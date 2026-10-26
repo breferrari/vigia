@@ -210,10 +210,10 @@ fn the_client_version_is_echoed_when_the_server_speaks_it_and_the_latest_answers
         "the instructions teach the loop: {instructions}"
     );
     assert!(
-        instructions.contains("last resort")
-            && instructions.contains("not clear enough to act on")
-            && instructions.contains("with options"),
-        "a question is not bounded as a last resort: {instructions}"
+        instructions.contains("Ask only if a note is unclear")
+            && instructions.contains("decline")
+            && instructions.contains("cannot answer"),
+        "a question is not kept to an unclear note: {instructions}"
     );
     assert!(server.initialised());
 }
@@ -1109,7 +1109,7 @@ fn a_scripted_client_over_pipes_drives_the_handshake_and_every_method() {
         .expect("reply");
     let reply_says = reply["description"].as_str().expect("a description");
     assert!(
-        reply_says.contains("not a question"),
+        reply_says.contains("not for questions"),
         "reply is described as a way to ask: {reply_says}"
     );
     assert_eq!(tools[1]["inputSchema"]["required"], json!(["id", "note"]));
