@@ -3689,7 +3689,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vigia"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "base64-simd",
  "image",
@@ -3714,7 +3714,7 @@ dependencies = [
 
 [[package]]
 name = "vigia-core"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "criterion",
  "fancy-regex 0.19.2",

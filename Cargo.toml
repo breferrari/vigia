@@ -13,7 +13,7 @@ exclude = [
 # Both crates move together, because both are published together and a registry
 # will not take `vigia` until `vigia-core` resolves on it (SPEC.md section 9).
 # Independent versions would buy nothing and cost a second tag format.
-version = "1.2.2"
+version = "1.2.3"
 edition = "2024"
 # The latest stable, which is what CI builds with. See SPEC.md §6.
 rust-version = "1.99"
@@ -50,7 +50,7 @@ authors = ["Brenno Ferrari"]
 # so the duplication cannot be removed, only moved and then gated. Moved: the
 # two strings are now fifteen lines apart in one file rather than in two.
 # Gated: `crates/vigia/tests/package.rs::the_internal_dependency_tracks_the_workspace_version`.
-vigia-core = { path = "crates/vigia-core", version = "1.2.2" }
+vigia-core = { path = "crates/vigia-core", version = "1.2.3" }
 # Pure Rust throughout. Adding a dependency with a C build script is a spec
 # change, not an implementation detail; see CLAUDE.md.
 #
