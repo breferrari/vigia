@@ -622,14 +622,14 @@ fn tools() -> Value {
         },
         {
             "name": "resolve",
-            "description": "Resolve a note by id with one line saying what you did. The reader \
-                            watches that line arrive under their note before it leaves the pane, \
+            "description": "Resolve a note by id with one line saying what you did, or why you \
+                            declined. The reader watches that line arrive under their note before it leaves the pane, \
                             so the line is required.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "The note's id, from notes." },
-                    "note": { "type": "string", "description": "One line saying what you did." },
+                    "note": { "type": "string", "description": "One line: what you did, or why you declined." },
                 },
                 "required": ["id", "note"],
                 "additionalProperties": false,
