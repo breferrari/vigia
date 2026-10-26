@@ -577,7 +577,7 @@ fn a_flip_with_remembering_off_writes_nothing_at_all() {
     for action in [Action::ToggleRail, Action::ToggleWrap] {
         app.apply(action, &mut frame, 0).expect("flip");
         if app.settings().persist {
-            config::save(&path, &app.config()).expect("save");
+            config::save(&path, &app.config(), &[]).expect("save");
         }
     }
     assert!(
@@ -595,7 +595,7 @@ fn a_flip_with_remembering_off_writes_nothing_at_all() {
         app.settings().persist,
         "the row did not turn remembering on"
     );
-    config::save(&path, &app.config()).expect("save");
+    config::save(&path, &app.config(), &[]).expect("save");
     assert!(
         path.exists(),
         "the same save with remembering on wrote nothing"
@@ -626,6 +626,7 @@ fn remembering_writes_what_the_reader_flipped_and_nothing_else() {
             hide: config.hide.clone(),
             ..app.config()
         },
+        &[],
     )
     .expect("save");
 
