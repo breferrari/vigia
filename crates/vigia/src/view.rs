@@ -1187,7 +1187,7 @@ pub enum NoteMark {
     Resolved,
     /// Written, and the agent has not answered it.
     Waiting,
-    /// The one state that asks the reader for something rather than the agent.
+    /// The one state that waits on the reader rather than the agent.
     Replied,
 }
 

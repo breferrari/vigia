@@ -209,6 +209,12 @@ fn the_client_version_is_echoed_when_the_server_speaks_it_and_the_latest_answers
         instructions.contains("notes") && instructions.contains("resolve"),
         "the instructions teach the loop: {instructions}"
     );
+    assert!(
+        instructions.contains("Ask only if a note is unclear")
+            && instructions.contains("or why you declined")
+            && instructions.contains("the reader cannot answer in the pane"),
+        "a question is not kept to an unclear note: {instructions}"
+    );
     assert!(server.initialised());
 }
 
@@ -1095,6 +1101,11 @@ fn a_scripted_client_over_pipes_drives_the_handshake_and_every_method() {
         let description = tool["description"].as_str().expect("a description");
         assert!(description.len() > 40, "{description}");
     }
+    let reply_says = tools[2]["description"].as_str().expect("a description");
+    assert!(
+        reply_says.contains("not for questions"),
+        "reply is described as a way to ask: {reply_says}"
+    );
     assert_eq!(tools[1]["inputSchema"]["required"], json!(["id", "note"]));
     assert_eq!(tools[2]["inputSchema"]["required"], json!(["id", "text"]));
 
@@ -1562,9 +1573,9 @@ fn a_note_the_agent_has_already_read_is_not_called_open() {
 
 #[test]
 fn a_note_the_agent_answered_says_it_waits_on_the_reader() {
-    // `reply` answers without resolving, for a question back to the reader, so
-    // this is the one state where the agent owes nothing at all. It is also the
-    // state the report says the old line nagged hardest.
+    // A reply leaves the note unresolved, so this is the one state where the
+    // agent owes nothing further. It is also the state the report says the old
+    // line nagged hardest.
     let line = pending_line(Pending {
         replied: 1,
         ..Pending::default()

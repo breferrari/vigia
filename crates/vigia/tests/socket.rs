@@ -179,6 +179,18 @@ fn the_content_carries_the_note_its_anchor_and_its_context() {
         "the anchored line is marked among the rest: {text}"
     );
     assert!(text.contains("n1"), "the id it is resolved by: {text}");
+    assert!(
+        text.contains("Ask only if the note is unclear") && text.contains("with options"),
+        "a question is not kept to an unclear note: {text}"
+    );
+    assert!(
+        text.contains("or why you declined"),
+        "a decline is not sent through resolve: {text}"
+    );
+    assert!(
+        text.contains("the pane cannot answer"),
+        "the agent is not told why it asks here: {text}"
+    );
 }
 
 #[test]

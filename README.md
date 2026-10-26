@@ -79,10 +79,10 @@ You see a line you want changed. Click its line number, type one sentence, press
      42 |         self.pending.push(ev);
      43 |         None
 
-   Resolve it with the vigia MCP server: resolve(id: "65e47ff14944b-79fa-0", note: "<one line saying what you did>").
+   Act on it, then resolve it with the vigia MCP server: resolve(id: "65e47ff14944b-79fa-0", note: "<one line: what you did, or why you declined>"). Ask only if the note is unclear, and ask here, with options: the pane cannot answer.
    ```
 
-4. **The agent fixes the line and resolves the note** with one line saying what it did. That line appears under your note, and then the note leaves. If the agent needs to ask you something, it can `reply` instead and leave the note open.
+4. **The agent fixes the line and resolves the note** with one line saying what it did. That line appears under your note, and then the note leaves. If it declines the note, it resolves it with the reason. If the note is unclear, it asks you in its own session, because you cannot answer in the pane.
 
 `vigia` calls no model, summarises nothing and judges nothing. It carries your words, and the agent answers.
 

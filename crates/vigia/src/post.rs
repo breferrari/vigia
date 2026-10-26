@@ -132,8 +132,9 @@ pub fn content(note: &Note, context: &[(u32, String)]) -> String {
     }
     let _ = writeln!(
         out,
-        "\nResolve it with the vigia MCP server: resolve(id: {:?}, note: \"<one line saying what \
-         you did>\").",
+        "\nAct on it, then resolve it with the vigia MCP server: resolve(id: {:?}, note: \
+         \"<one line: what you did, or why you declined>\"). Ask only if the note is unclear, \
+         and ask here, with options: the pane cannot answer.",
         note.id
     );
     out
