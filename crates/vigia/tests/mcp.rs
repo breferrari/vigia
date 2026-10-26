@@ -211,8 +211,8 @@ fn the_client_version_is_echoed_when_the_server_speaks_it_and_the_latest_answers
     );
     assert!(
         instructions.contains("Ask only if a note is unclear")
-            && instructions.contains("decline")
-            && instructions.contains("cannot answer"),
+            && instructions.contains("or why you declined")
+            && instructions.contains("the reader cannot answer in the pane"),
         "a question is not kept to an unclear note: {instructions}"
     );
     assert!(server.initialised());
@@ -1101,13 +1101,7 @@ fn a_scripted_client_over_pipes_drives_the_handshake_and_every_method() {
         let description = tool["description"].as_str().expect("a description");
         assert!(description.len() > 40, "{description}");
     }
-    let reply = tools
-        .as_array()
-        .expect("tools")
-        .iter()
-        .find(|tool| tool["name"] == "reply")
-        .expect("reply");
-    let reply_says = reply["description"].as_str().expect("a description");
+    let reply_says = tools[2]["description"].as_str().expect("a description");
     assert!(
         reply_says.contains("not for questions"),
         "reply is described as a way to ask: {reply_says}"

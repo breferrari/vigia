@@ -39,9 +39,9 @@ pub const PROJECT_VAR: &str = "CLAUDE_PROJECT_DIR";
 /// What the client is told the server is for, in the handshake.
 const INSTRUCTIONS: &str = "vigia is the live diff monitor in the reader's other pane. A note the \
                             reader pins to a line of the diff is here: call notes, act on the code \
-                            it points at, then resolve it by id with one line saying what you did. \
-                            To decline a note, resolve it with the reason. Ask only if a note is \
-                            unclear, in your own session: the reader cannot answer in the pane.";
+                            it points at, then resolve it by id with one line saying what you did, \
+                            or why you declined. Ask only if a note is unclear, in your own \
+                            session: the reader cannot answer in the pane.";
 
 const LIST_CHANGED: &str = r#"{"jsonrpc":"2.0","method":"notifications/resources/list_changed"}"#;
 

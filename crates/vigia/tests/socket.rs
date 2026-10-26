@@ -184,7 +184,7 @@ fn the_content_carries_the_note_its_anchor_and_its_context() {
         "a question is not kept to an unclear note: {text}"
     );
     assert!(
-        text.contains("decline it, resolve it with the reason"),
+        text.contains("or why you declined"),
         "a decline is not sent through resolve: {text}"
     );
     assert!(
