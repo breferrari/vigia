@@ -560,6 +560,8 @@ pub fn scroll_mark(action: Action, regions: Regions) -> Option<(Grabbed, isize)>
         | Action::ToggleReading
         | Action::ToggleIcons
         | Action::ToggleLinks
+        | Action::ToggleUpdate
+        | Action::CyclePictures
         | Action::TogglePersist
         | Action::MenuReset
         | Action::ToggleSheet
@@ -751,6 +753,10 @@ pub enum Action {
     ToggleIcons,
     /// Wrap every listed path in an OSC 8 hyperlink, or stop. No key either.
     ToggleLinks,
+    /// Ask for the update check at the next launch, or stop. No key either.
+    ToggleUpdate,
+    /// Move the next launch's pictures choice to the one after it. No key either.
+    CyclePictures,
     /// Write what the reader flips back into their config file, or stop. B22.
     TogglePersist,
     /// Put every toggle back where the shipped pane has it.
@@ -826,6 +832,8 @@ impl Action {
             | Self::ToggleReading
             | Self::ToggleIcons
             | Self::ToggleLinks
+            | Self::ToggleUpdate
+            | Self::CyclePictures
             | Self::TogglePersist
             | Self::MenuReset
             | Self::ToggleSheet
@@ -890,6 +898,8 @@ impl Action {
             // Neither reaches a key, so neither can be a reader moving anything.
             | Self::ToggleIcons
             | Self::ToggleLinks
+            | Self::ToggleUpdate
+            | Self::CyclePictures
             | Self::TogglePersist
             | Self::MenuReset
             // And the sheet moves nothing at all: it composites over rows that
@@ -947,6 +957,8 @@ impl Action {
             | Self::ToggleReading
             | Self::ToggleIcons
             | Self::ToggleLinks
+            | Self::ToggleUpdate
+            | Self::CyclePictures
             | Self::TogglePersist
             | Self::MenuReset
             | Self::ToggleSheet

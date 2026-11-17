@@ -721,7 +721,7 @@ fn a_screen_with_no_room_for_a_body_still_resolves() {
 }
 
 /// How many variants [`Action`] has.
-const VARIANTS: usize = 29;
+const VARIANTS: usize = 31;
 
 /// One number per [`Action`] variant, from an exhaustive `match`.
 fn tag(action: Action) -> usize {
@@ -765,6 +765,8 @@ fn tag(action: Action) -> usize {
         Action::TogglePersist => 26,
         Action::MenuReset => 27,
         Action::Refresh => 28,
+        Action::ToggleUpdate => 29,
+        Action::CyclePictures => 30,
     }
 }
 
@@ -806,10 +808,12 @@ fn only_the_action_that_reads_the_height_is_given_one() {
         Action::ToggleOverview,
         Action::ToggleSheet,
         Action::CloseSheet,
-        // The config menu's seven, none of which reads a height either: the box is
+        // The config menu's nine, none of which reads a height either: the box is
         // drawn over rows the diff keeps, so it does not even resize a region.
         Action::ToggleIcons,
         Action::ToggleLinks,
+        Action::ToggleUpdate,
+        Action::CyclePictures,
         Action::ToggleMenu,
         Action::CloseMenu,
         Action::MenuMove(1),

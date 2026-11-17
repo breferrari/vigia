@@ -7,7 +7,7 @@ use vigia_core::{Counted, Frame, Highlighter, History, Note, Reading, Result, Sa
 
 use crate::input::{Action, Pointing};
 use crate::memory;
-use crate::menu::{Caret, Menu, ROWS, Row, Settings};
+use crate::menu::{Caret, Flipped, Menu, Overrides, ROWS, Row, Settings};
 use crate::notes::NoteBox;
 use crate::positions::{self, Places, Positions};
 use crate::render::{Body, Chrome, Mode, NoteCount};
@@ -120,7 +120,7 @@ fn flips(at: usize) -> Option<Action> {
     match ROWS.get(at)? {
         Row::Toggle(setting) => Some(setting.action()),
         Row::Reset => Some(Action::MenuReset),
-        Row::Gap | Row::Rule => None,
+        Row::Header(_) | Row::Gap => None,
     }
 }
 
@@ -152,6 +152,18 @@ pub struct App {
     icons: bool,
     /// Whether listed paths are OSC 8 hyperlinks. Config only; on by default.
     links: bool,
+    /// The file's `update`, which this process already read and the next one will.
+    update: bool,
+    /// The file's `pictures`, for the next launch the same way.
+    picture_choice: crate::pictures::Choice,
+    /// What the environment sets over those two.
+    env: Overrides,
+    /// The two as the pane launched with them, so a save can leave a key the
+    /// reader never flipped to whatever the file says now.
+    launched: (bool, crate::pictures::Choice),
+    /// Which of the two a save writes: any the reader flipped since launch, even
+    /// one flipped back to its launch value.
+    touched: Flipped,
     /// Whether a flip is written back into the reader's own file. `SPEC.md` §11.2
     /// B22, and the one setting that is about the file rather than about the pane.
     persist: bool,
@@ -280,6 +292,11 @@ impl Default for App {
             icons: false,
             // OSC 8 degrades silently, so it costs nothing where unsupported.
             links: true,
+            update: true,
+            picture_choice: crate::pictures::Choice::Auto,
+            env: Overrides::default(),
+            launched: (true, crate::pictures::Choice::Auto),
+            touched: Flipped::default(),
             persist: false,
             staged_files: 0,
             sheet: None,
@@ -329,6 +346,10 @@ impl App {
             following: config.follow,
             icons: config.icons,
             links: config.links,
+            update: config.update,
+            picture_choice: config.pictures,
+            launched: (config.update, config.pictures),
+            touched: Flipped::default(),
             persist: config.persist,
             ..Self::new()
         }
@@ -655,6 +676,7 @@ impl App {
             menu: self.menu.map(|caret| Menu {
                 caret,
                 settings: self.settings(),
+                flipped: self.flipped(),
             }),
             frame: self.frames.percentile(0.99),
             memory: self.memory,
@@ -674,6 +696,9 @@ impl App {
             notes: self.notes_shown,
             icons: self.icons,
             links: self.links,
+            update: self.update,
+            pictures: self.picture_choice,
+            env: self.env,
             persist: self.persist,
         }
     }
@@ -760,9 +785,40 @@ impl App {
             notes: it.notes,
             icons: it.icons,
             links: it.links,
+            update: it.update,
+            pictures: it.pictures,
             persist: it.persist,
             hide: None,
         }
+    }
+
+    /// The launch-only keys still at their launch value, which a save leaves as the
+    /// file has them: a hand edit made while the pane is open survives.
+    #[must_use]
+    pub fn unflipped(&self) -> Vec<&'static str> {
+        let flipped = self.flipped();
+        let mut kept = Vec::new();
+        if !flipped.update {
+            kept.push("update");
+        }
+        if !flipped.pictures {
+            kept.push("pictures");
+        }
+        kept
+    }
+
+    /// Which launch-only rows no longer hold what the pane launched with.
+    #[must_use]
+    pub fn flipped(&self) -> Flipped {
+        Flipped {
+            update: self.touched.update || self.update != self.launched.0,
+            pictures: self.touched.pictures || self.picture_choice != self.launched.1,
+        }
+    }
+
+    /// Say what the environment sets over the file, for the menu to draw.
+    pub const fn set_overrides(&mut self, env: Overrides) {
+        self.env = env;
     }
 
     /// Put remembering where a refused write leaves it.
@@ -989,6 +1045,15 @@ impl App {
             // is what B22 gives B18's two config-only settings.
             Action::ToggleIcons => self.icons = !self.icons,
             Action::ToggleLinks => self.links = !self.links,
+            // Read at launch, so a flip here changes only what the file says.
+            Action::ToggleUpdate => {
+                self.update = !self.update;
+                self.touched.update = true;
+            }
+            Action::CyclePictures => {
+                self.picture_choice = self.picture_choice.next();
+                self.touched.pictures = true;
+            }
             Action::TogglePersist => self.persist = !self.persist,
             // Every toggle back to the shipped pane, remembering included: a reset
             // that kept remembering on would write the defaults over the reader's
@@ -1008,6 +1073,8 @@ impl App {
                     notes,
                     icons,
                     links,
+                    update,
+                    pictures,
                     persist,
                     // No gesture reaches it, so no reset does either.
                     hide: _,
@@ -1020,6 +1087,10 @@ impl App {
                 self.notes_shown = notes;
                 self.icons = icons;
                 self.links = links;
+                self.touched.update |= self.update != update;
+                self.touched.pictures |= self.picture_choice != pictures;
+                self.update = update;
+                self.picture_choice = pictures;
                 self.persist = persist;
                 // The one that changes what the frame walks, so it goes through the
                 // arm that walks it and can fail.
@@ -1032,7 +1103,10 @@ impl App {
                 self.sheet = None;
                 self.positions = None;
                 self.menu = match self.menu {
-                    None => Some(Caret::default()),
+                    None => Some(Caret {
+                        at: crate::menu::FIRST,
+                        top: 0,
+                    }),
                     Some(_) => None,
                 };
             }

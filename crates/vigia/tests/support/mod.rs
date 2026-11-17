@@ -221,6 +221,14 @@ pub fn place_of(action: &Action) -> Place {
             key: "links",
             gesture: "m",
         },
+        Action::ToggleUpdate => Place::Key {
+            key: "update",
+            gesture: "m",
+        },
+        Action::CyclePictures => Place::Neither(
+            "how pictures are drawn is a valued key of the file rather than a \
+             toggle, and the menu reaches it",
+        ),
         Action::TogglePersist => Place::Key {
             key: "persist",
             gesture: "m",

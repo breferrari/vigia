@@ -27,20 +27,21 @@ impl fmt::Display for UpdateError {
 
 impl std::error::Error for UpdateError {}
 
-/// Whether the environment asks for the check.
+/// What [`UPDATE_VAR`] asks for, or `None` where it is unset or empty, which
+/// leaves it to the config file's `update` key.
 ///
 /// # Errors
 ///
 /// The variable holds something that is neither `auto` nor `off`.
-pub fn wanted(lookup: impl Fn(&str) -> Option<String>) -> Result<bool, UpdateError> {
+pub fn wanted(lookup: impl Fn(&str) -> Option<String>) -> Result<Option<bool>, UpdateError> {
     // Through `override_of` for the set-but-empty rule, which is a PowerShell
     // gotcha the colour ladder already paid for.
     let Some((raw, normalised)) = override_of(&lookup, UPDATE_VAR) else {
-        return Ok(true);
+        return Ok(None);
     };
     match normalised.as_str() {
-        "auto" => Ok(true),
-        "off" => Ok(false),
+        "auto" => Ok(Some(true)),
+        "off" => Ok(Some(false)),
         _ => Err(UpdateError { value: raw }),
     }
 }

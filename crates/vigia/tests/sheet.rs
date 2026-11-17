@@ -986,7 +986,7 @@ fn every_gesture_the_readme_teaches_is_named_on_the_sheet() {
 }
 
 /// One value of every [`Action`] variant, for the two gates that walk them.
-const ALL_ACTIONS: [Action; 39] = [
+const ALL_ACTIONS: [Action; 41] = [
     Action::Quit,
     Action::Escape,
     Action::Scroll(1),
@@ -1014,6 +1014,8 @@ const ALL_ACTIONS: [Action; 39] = [
     Action::CloseSheet,
     Action::ToggleIcons,
     Action::ToggleLinks,
+    Action::ToggleUpdate,
+    Action::CyclePictures,
     Action::TogglePersist,
     Action::MenuReset,
     Action::ToggleMenu,
@@ -1102,9 +1104,12 @@ fn reach_of(action: &Action) -> Reach {
         }
         // B18's two settings reach no key of their own, and the menu is the one
         // gesture that flips them.
-        Action::ToggleIcons | Action::ToggleLinks | Action::TogglePersist | Action::MenuReset => {
-            Reach::Mode("a row of the config menu, and no key at all")
-        }
+        Action::ToggleIcons
+        | Action::ToggleLinks
+        | Action::ToggleUpdate
+        | Action::CyclePictures
+        | Action::TogglePersist
+        | Action::MenuReset => Reach::Mode("a row of the config menu, and no key at all"),
         // Dragging or clicking a bar. No key seeks to a fraction.
         Action::ListTo(_) => Reach::Mouse,
         Action::DiffTo(_) => Reach::Mouse,
@@ -1247,6 +1252,8 @@ fn mouse_phrases() -> Vec<&'static str> {
             | Action::ToggleSheet
             | Action::ToggleIcons
             | Action::ToggleLinks
+            | Action::ToggleUpdate
+            | Action::CyclePictures
             | Action::TogglePersist
             | Action::MenuReset
             | Action::ToggleMenu
