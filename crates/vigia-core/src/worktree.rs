@@ -434,7 +434,7 @@ impl Worktree {
                 options.sorting = (walk == Walk::Sorted).then_some(Sorting::ByPathCaseSensitive);
             })
             // Sorts too, which is what makes `Sorted` the same order.
-            .index_worktree_rewrites((walk == Walk::Renames).then(gix::diff::Rewrites::default))
+            .index_worktree_rewrites((walk == Walk::Renames).then(exact_rewrites))
             .into_index_worktree_iter(Vec::<BString>::new())
             .map_err(|e| Error::Status(Box::new(e)))
     }
@@ -511,7 +511,7 @@ impl Worktree {
             .map_err(|e| Error::Status(Box::new(e)))?;
 
         let renames = if options.track_renames {
-            gix::status::tree_index::TrackRenames::Given(gix::diff::Rewrites::default())
+            gix::status::tree_index::TrackRenames::Given(exact_rewrites())
         } else {
             gix::status::tree_index::TrackRenames::Disabled
         };
@@ -1296,16 +1296,22 @@ impl Worktree {
             })
             .transpose()?;
 
-        let rewrites = options.track_renames.then(gix::diff::Rewrites::default);
-        let changes = repo
+        let rewrites = options.track_renames.then(exact_rewrites);
+        let changes: Vec<FileChange> = repo
             .diff_tree_to_tree(
                 before.as_ref(),
                 Some(&tree),
                 gix::diff::Options::default().with_rewrites(rewrites),
             )
-            .map_err(|e| Error::Comparison(Box::new(e)))?;
-
-        Ok(changes.iter().filter_map(committed_change).collect())
+            .map_err(|e| Error::Comparison(Box::new(e)))?
+            .iter()
+            .filter_map(committed_change)
+            .collect();
+        Ok(if options.track_renames {
+            self.paired(changes)
+        } else {
+            changes
+        })
     }
 
     /// Everything since `base`: that commit's tree against the working tree.
@@ -2920,6 +2926,15 @@ enum LfsScore {
     /// The object, at the path given, is not fetched, so the bytes could not
     /// be compared.
     Unfetched(u64, PathBuf),
+}
+
+/// `gix`'s rename tracking for identical content only, so that git's rule, in
+/// [`rename`], scores every other pair.
+fn exact_rewrites() -> gix::diff::Rewrites {
+    gix::diff::Rewrites {
+        percentage: None,
+        ..gix::diff::Rewrites::default()
+    }
 }
 
 /// An oid no LFS object has, being no hex, for a pointer whose object is not

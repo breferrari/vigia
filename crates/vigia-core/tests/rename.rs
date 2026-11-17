@@ -1638,3 +1638,163 @@ fn refactor_renames() {
         .count();
     assert_eq!(shown, 100, "{shown} of 100 moves showed as renames");
 }
+
+/// Two removals and one addition where git and `gix` choose differently:
+/// `a.txt` is `x.txt`'s lines reversed, which git keeps whole and a line diff
+/// barely, and `b.txt` is them in order with fifteen of forty changed.
+fn rule_split(name: &str) -> Scratch {
+    let lines: Vec<String> = (0..40)
+        .map(|n| format!("entry {n:02} of the list, with some words\n"))
+        .collect();
+    let x = lines.concat();
+    let a: String = lines.iter().rev().cloned().collect();
+    let b: String = lines
+        .iter()
+        .enumerate()
+        .map(|(n, line)| {
+            if n % 8 < 3 {
+                format!("changed {n:02}, other words here\n")
+            } else {
+                line.clone()
+            }
+        })
+        .collect();
+    moved(
+        name,
+        &[("a.txt", a.into_bytes()), ("b.txt", b.into_bytes())],
+        &[("x.txt", x.into_bytes())],
+    )
+}
+
+/// What git says one commit did, renames included.
+fn git_commit(scratch: &Scratch) -> Vec<(String, String)> {
+    let out = scratch.git(&["diff", "-M", "--name-status", "-z", "HEAD~1", "HEAD"]);
+    let mut fields = out.split('\0').filter(|field| !field.is_empty());
+    let mut found = Vec::new();
+    while let Some(status) = fields.next() {
+        if status.starts_with('R') {
+            let from = fields.next().expect("a source");
+            let to = fields.next().expect("a destination");
+            found.push((format!("R {from}"), to.to_owned()));
+        } else {
+            found.push((
+                status[..1].to_owned(),
+                fields.next().expect("a path").to_owned(),
+            ));
+        }
+    }
+    found
+}
+
+/// The changes of the commit at `HEAD`, as the pane reads one commit alone.
+fn committed(scratch: &Scratch) -> Vec<FileChange> {
+    let worktree = scratch.worktree();
+    let head = scratch.git(&["rev-parse", "HEAD"]);
+    let at = gix::ObjectId::from_hex(head.trim().as_bytes()).expect("an id");
+    worktree
+        .changes_at(
+            &vigia_core::Standing::Only {
+                at,
+                named: String::new(),
+            },
+            ChangeOptions::default(),
+        )
+        .expect("a walk")
+        .collect::<Result<_, _>>()
+        .expect("every change")
+}
+
+#[test]
+fn rename_rule_split() {
+    // gix's line score would pair x.txt with b.txt; git's chunk score pairs
+    // it with a.txt, in every run.
+    let scratch = rule_split("rename-rule-split");
+    let want = ("R a.txt".to_owned(), "x.txt".to_owned());
+    let git = git_unstaged(&scratch);
+    assert!(git.contains(&want), "the fixture is wrong: {git:?}");
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    for _ in 0..3 {
+        frame.advance().expect("advance");
+    }
+    assert_eq!(
+        kind_of(frame.files(), "x.txt"),
+        &renamed("a.txt"),
+        "unstaged"
+    );
+    scratch.git(&["add", "-A"]);
+    assert!(
+        git_staged(&scratch).contains(&want),
+        "the fixture is wrong staged"
+    );
+    assert_eq!(
+        kind_of(&staged(&scratch), "x.txt"),
+        &renamed("a.txt"),
+        "staged"
+    );
+    scratch.git(&["commit", "-q", "-m", "move"]);
+    assert!(
+        git_commit(&scratch).contains(&want),
+        "the fixture is wrong committed"
+    );
+    assert_eq!(
+        kind_of(&committed(&scratch), "x.txt"),
+        &renamed("a.txt"),
+        "committed"
+    );
+}
+
+#[test]
+fn exact_rename_by_gix() {
+    // An unchanged move is gix's, found by identity with nothing scored, in
+    // every run.
+    let text: String = (0..40)
+        .map(|n| format!("line {n} of a moved file\n"))
+        .collect();
+    let scratch = moved(
+        "rename-exact",
+        &[("a.txt", text.clone().into_bytes())],
+        &[("moved/a.txt", text.into_bytes())],
+    );
+    let want = ("R a.txt".to_owned(), "moved/a.txt".to_owned());
+    assert!(
+        git_unstaged(&scratch).contains(&want),
+        "the fixture is wrong"
+    );
+    let unscored = |frame: &Frame, run: &str| {
+        assert_eq!(
+            kind_of(frame.files(), "moved/a.txt"),
+            &renamed("a.txt"),
+            "{run}"
+        );
+        assert_eq!(
+            frame.stats().pairs_scored,
+            0,
+            "{run}: an unchanged move was scored"
+        );
+        assert!(
+            frame.unscored_pairs().is_empty(),
+            "{run}: an unchanged move was listed"
+        );
+    };
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.advance().expect("advance");
+    unscored(&frame, "unstaged");
+    scratch.git(&["add", "-A"]);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.show_staged(true);
+    frame.advance().expect("advance");
+    unscored(&frame, "staged");
+    scratch.git(&["commit", "-q", "-m", "move"]);
+    let head = scratch.git(&["rev-parse", "HEAD"]);
+    let worktree = scratch.worktree();
+    let mut frame = worktree.frame();
+    frame.stand(vigia_core::Standing::Only {
+        at: gix::ObjectId::from_hex(head.trim().as_bytes()).expect("an id"),
+        named: String::new(),
+    });
+    frame.advance().expect("advance");
+    unscored(&frame, "committed");
+}
