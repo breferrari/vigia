@@ -48,6 +48,9 @@ pdf = ["dep:hayro-syntax"]
 # binary still carries no YAML loader.
 [dev-dependencies]
 criterion.workspace = true
+# The git oracle, `tests/oracle.rs`. No `fork` or `timeout`: the oracle bounds
+# its own cases, and forking re-runs the test binary.
+proptest = { version = "1.12", default-features = false, features = ["std"] }
 syntect = { workspace = true, features = ["yaml-load"] }
 # Upstream syntect at the fork's base, for `tests/fork.rs` to compare their
 # parses. Pinned to that base by `package.rs`.
